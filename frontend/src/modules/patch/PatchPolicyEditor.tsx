@@ -175,10 +175,26 @@ export function PatchPolicyEditor() {
   // A policy is open once the list has named it; a stale id opens nothing.
   const editing = canManage && (creating || editedPolicy !== null);
 
+  // THE LAST SAVE'S ANSWER GOES WHEN ANOTHER POLICY OPENS, NOT WHEN ONE IS
+  // ASKED FOR (review fix round 1): with a change unsaved the guard may still
+  // refuse the switch, and the form it leaves in place keeps its refusal. So
+  // Edit and New name the policy they ask for, and the reset waits for `open`
+  // to become it. A new policy that stores itself moves `open` too, and keeps
+  // its "Saved." because nobody asked for that switch.
+  const asked = useRef<string | null>(null);
   function openPolicy(policy: PatchPolicy | null) {
-    upsert.reset();
-    url.set("policy", policy?.id ?? NEW_POLICY);
+    const target = policy?.id ?? NEW_POLICY;
+    if (target === open) return;
+    asked.current = target;
+    url.set("policy", target);
   }
+  const resetSave = upsert.reset;
+  useEffect(() => {
+    if (asked.current !== null && asked.current === open) {
+      asked.current = null;
+      resetSave();
+    }
+  }, [open, resetSave]);
 
   return (
     <FormPage

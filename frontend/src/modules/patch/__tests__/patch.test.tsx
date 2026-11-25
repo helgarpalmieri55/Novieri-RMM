@@ -1543,6 +1543,40 @@ describe("PatchPolicyEditor on the form pattern", () => {
     expect(router.state.location.pathname).toBe("/patch/policies");
   });
 
+  it("keeps the last save error while leaving is asked about, and clears it once another policy opens", async () => {
+    // Review fix round 1: Edit on another row cleared the refusal before the
+    // guard had answered, so staying showed a form with its error gone.
+    const user = userEvent.setup();
+    // A window the form's own rule accepts, so Save reaches the server.
+    const broad = { ...POLICY, maintenance_window: "0 2 * * 6" };
+    const pilot = { ...broad, id: "pol2", ring_name: "pilot", device_group_id: "g1" };
+    mockUseApi.mockReturnValue(
+      policyApi([broad, pilot], vi.fn().mockRejectedValue(new ApiError(503, ""))) as ApiClient,
+    );
+    const { router } = renderPage("/patch/policies?policy=pol1", <PatchPolicyEditor />, "/patch/policies");
+    const form = await screen.findByRole("region", { name: "Edit patch policy" });
+    await user.type(within(form).getByLabelText("Ring name"), "x");
+    await user.click(within(form).getByRole("button", { name: "Save" }));
+    expect(await within(form).findByText(/unavailable right now/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit the pilot policy" }));
+    const ask = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await user.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(router.state.location.search).toBe("?policy=pol1");
+    expect(within(form).getByText(/unavailable right now/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit the pilot policy" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Leave without saving?" })).getByRole("button", {
+        name: "Leave without saving",
+      }),
+    );
+    await waitFor(() => expect(router.state.location.search).toBe("?policy=pol2"));
+    const next = await screen.findByRole("region", { name: "Edit patch policy" });
+    expect(within(next).getByLabelText("Ring name")).toHaveValue("pilot");
+    expect(within(next).queryByText(/unavailable right now/)).toBeNull();
+  });
+
   it("opens the policy the URL names, and New policy puts itself in the URL", async () => {
     const user = userEvent.setup();
     mockUseApi.mockReturnValue(policyApi([POLICY]) as ApiClient);
