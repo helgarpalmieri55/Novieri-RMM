@@ -20,6 +20,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient, type Me } from "../../../lib/api";
+import { renderPage } from "../../../test/renderPage";
 import { AiActionPage } from "../ActionsPage";
 import { AutonomyDialPage } from "../AutonomyDialPage";
 import { ConfirmDialog, explainFailure } from "../ConfirmDialog";
@@ -357,7 +358,7 @@ describe("AutonomyDialPage", () => {
     renderWithProviders(<AutonomyDialPage />);
 
     await choose("dial-technician-high", "require_approval");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Technician / high risk: Off → Needs approval");
@@ -375,13 +376,13 @@ describe("AutonomyDialPage", () => {
     renderWithProviders(<AutonomyDialPage />);
 
     await choose("dial-technician-high", "require_approval");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
     expect(api.setAiCeiling).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     // The edit is not thrown away by cancelling the CONFIRMATION — that is what
-    // "Discard changes" is for.
+    // the bar's "Discard" is for.
     expect(await shown("dial-technician-high")).toBe("require_approval");
   });
 
@@ -392,7 +393,7 @@ describe("AutonomyDialPage", () => {
 
     await choose("dial-technician-high", "require_approval");
     await choose("dial-admin-low", "suggest");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await userEvent.click(await screen.findByRole("button", { name: "Raise the ceiling" }));
 
     await waitFor(() => expect(setAiCeiling).toHaveBeenCalledTimes(2));
@@ -416,7 +417,7 @@ describe("AutonomyDialPage", () => {
     renderWithProviders(<AutonomyDialPage />);
 
     await choose("dial-technician-high", "require_approval");
-    await userEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Discard" }));
 
     expect(await shown("dial-technician-high")).toBe("off");
     expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
@@ -430,7 +431,7 @@ describe("AutonomyDialPage", () => {
     renderWithProviders(<AutonomyDialPage />);
 
     await choose("dial-technician-high", "require_approval");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await userEvent.click(await screen.findByRole("button", { name: "Raise the ceiling" }));
     await waitFor(() => expect(api.setAiCeiling).toHaveBeenCalled());
 
@@ -455,7 +456,7 @@ describe("AutonomyDialPage", () => {
     renderWithProviders(<AutonomyDialPage />);
 
     await choose("dial-technician-high", "off");
-    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent(/Change the assistant's autonomy ceiling/i);
@@ -522,7 +523,7 @@ describe("AutonomyDialPage", () => {
     renderWithProviders(<AutonomyDialPage />);
     await screen.findByTestId("dial-admin-low");
     expect(screen.queryByText(/Read-only: every client shares the autonomy dial/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 
     answer({ ...ME, permissions_everywhere: [] });
     expect(await screen.findByText(/Read-only: every client shares the autonomy dial/)).toBeInTheDocument();
@@ -599,5 +600,58 @@ describe("AutonomyDialPage", () => {
     // With no name, the sub-line carries the job type rather than repeating
     // the key that is already the title.
     expect(screen.getByText(WAITING.job_type)).toBeInTheDocument();
+  });
+});
+
+// The form pattern (redesign plan, Task 12, 7.5; Receta FO; decision D22): the
+// dial saves through the kit's one bar, drawn only with an edit, whose Save
+// opens today's confirmation; leaving with an edit asks first.
+describe("AutonomyDialPage on the form pattern", () => {
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    stubApi();
+    renderWithProviders(<AutonomyDialPage />);
+    await screen.findByTestId("dial-technician-high");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await choose("dial-technician-high", "suggest");
+    expect(screen.getAllByRole("region", { name: "Unsaved changes" })).toHaveLength(1);
+    // Setting the cell back to what is stored is no change at all.
+    await choose("dial-technician-high", "off");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await choose("dial-technician-high", "suggest");
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(await shown("dial-technician-high")).toBe("off");
+  });
+
+  it("asks before leaving with unsaved changes", async () => {
+    stubApi();
+    const { router } = renderPage("/assistant/autonomy", <AutonomyDialPage />, "/assistant/autonomy");
+    await choose("dial-technician-high", "suggest");
+    void router.navigate("/assistant");
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/assistant/autonomy");
+  });
+});
+
+// The record pattern (redesign plan, Task 12, 7.6; Receta F): the action's head
+// is the kit's, with its way back and its state, and the browser tab names it.
+describe("AiActionPage on the record pattern", () => {
+  it("names the record in the browser tab", async () => {
+    stubApi();
+    renderPage("/assistant/actions/a1", <AiActionPage />, "/assistant/actions/:actionId", {
+      page: "shell.nav.item.assistant",
+    });
+    await screen.findByRole("heading", { level: 1, name: "Collect inventory" });
+    await waitFor(() => expect(document.title).toBe("Collect inventory · Assistant · Novieri RMM"));
+  });
+
+  it("heads the action with its state and a way back to the list", async () => {
+    stubApi();
+    renderPage("/assistant/actions/a1", <AiActionPage />, "/assistant/actions/:actionId");
+    await screen.findByRole("heading", { level: 1, name: "Collect inventory" });
+    expect(screen.getByRole("link", { name: "Assistant actions" })).toHaveAttribute("href", "/assistant/actions");
+    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
+    // The decision is still the head's, and still asks nothing of a list row.
+    expect(screen.getByRole("button", { name: /Confirm and run/ })).toBeInTheDocument();
   });
 });

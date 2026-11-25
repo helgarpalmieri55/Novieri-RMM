@@ -5,12 +5,14 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient, Me } from "../../../lib/api";
 import { AiActionsPage } from "../ActionsPage";
 import type { AiActionOut } from "../types";
+import { renderPage as renderUnderRouter } from "../../../test/renderPage";
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -105,5 +107,47 @@ describe("AiActionsPage", () => {
     await screen.findByRole("link", { name: "disk.cleanup.workstation" });
     expect(screen.getByText("Destructive")).toBeInTheDocument();
     expect(screen.getByText("Prompted by untrusted content")).toBeInTheDocument();
+  });
+});
+
+// The list pattern (redesign plan, Task 12, 7.6; Receta L): the state chips
+// live in the URL, the list says how many it shows, and an empty list says why.
+describe("AiActionsPage on the list pattern", () => {
+  const LIST = [
+    action(),
+    action({ id: "2", approved_action_key: "backup.retry", state: "dispatched" }),
+    action({ id: "3", approved_action_key: "agent.restart", state: "rejected" }),
+  ];
+
+  function underRouter(path: string, list: AiActionOut[] = LIST) {
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue(ME),
+      listAiActions: vi.fn().mockResolvedValue(list),
+    } as unknown as ApiClient);
+    return renderUnderRouter(path, <AiActionsPage />);
+  }
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    const { router } = underRouter("/assistant/actions?state=rejected");
+    const chips = await screen.findByRole("group", { name: "State" });
+    expect(within(chips).getByRole("button", { name: /Declined/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("link", { name: "agent.restart" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "disk.cleanup.workstation" })).toBeNull();
+    await userEvent.click(within(chips).getByRole("button", { name: /Awaiting approval/ }));
+    expect(router.state.location.search).toContain("state=previewed");
+    expect(await screen.findByRole("link", { name: "disk.cleanup.workstation" })).toBeInTheDocument();
+  });
+
+  it("counts a dispatched and a confirmed action as Ran", async () => {
+    underRouter("/assistant/actions?state=ran", [...LIST, action({ id: "4", approved_action_key: "kb.apply", state: "confirmed" })]);
+    expect(await screen.findByRole("link", { name: "backup.retry" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "kb.apply" })).toBeInTheDocument();
+    expect(screen.getByText("Showing 2 of 4")).toBeInTheDocument();
+  });
+
+  it("says why the list is empty", async () => {
+    underRouter("/assistant/actions?state=expired");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });
 });
