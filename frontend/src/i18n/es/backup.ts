@@ -182,7 +182,7 @@ export const backup: Shape<typeof en> = {
     noEntries: "Este punto de copia no tiene entradas.",
     target: "Destino de la restauración",
     original: "Ubicación original",
-    originalWarning: "— sobrescribe los archivos que hay ahora en este dispositivo",
+    originalWarning: "(sobrescribe los archivos que hay ahora en este dispositivo)",
     alternate: "Ubicación alternativa",
     alternatePath: "Ruta de destino alternativa",
     selectOne: "Selecciona al menos un archivo o carpeta que restaurar",

@@ -71,8 +71,8 @@ export const backup = {
   },
   // What a run dispatched, in a sentence.
   runMessage: {
-    none: "Nothing was dispatched — no backup job was created for that device.",
-    queued: { one: "Backup queued — {count} job dispatched.", other: "Backup queued — {count} jobs dispatched." },
+    none: "Nothing was dispatched: no backup job was created for that device.",
+    queued: { one: "Backup queued: {count} job dispatched.", other: "Backup queued: {count} jobs dispatched." },
   },
   picker: {
     deviceEmptyHint:
@@ -179,7 +179,7 @@ export const backup = {
     noEntries: "No entries in this backup point.",
     target: "Restore target",
     original: "Original location",
-    originalWarning: "— overwrites the files currently on this device",
+    originalWarning: "(overwrites the files currently on this device)",
     alternate: "Alternate location",
     alternatePath: "Alternate target path",
     selectOne: "Select at least one file or folder to restore",
