@@ -307,7 +307,7 @@ describe("EnrollmentPage", () => {
     // were never withdrawn by anybody, and the operator's complaint was about
     // revocations.
     expect(screen.queryByText("Revoked")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     expect(await screen.findByText("Revoked")).toBeInTheDocument();
   });
 
@@ -1034,7 +1034,7 @@ describe("EnrollmentPage", () => {
       offset: 0,
     });
 
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     expect(await screen.findByText("withdrawn")).toBeInTheDocument();
     expect(listEnrollmentTokens).toHaveBeenCalledWith(expect.anything(), {
       include_revoked: true,
@@ -1117,7 +1117,7 @@ describe("EnrollmentPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Next tokens" }));
     await screen.findByText(`token-${ENROLLMENT_TOKENS_PAGE_SIZE}`);
 
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     expect(await screen.findByText("token-0")).toBeInTheDocument();
     expect(listEnrollmentTokens).toHaveBeenCalledWith(expect.anything(), {
       include_revoked: true,
@@ -1185,7 +1185,7 @@ describe("EnrollmentPage", () => {
     expect(screen.getByText("Show revoked certificates (1 hidden)")).toBeInTheDocument();
 
     // And it stops saying "hidden" once it is not.
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked certificates/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked certificates/ }));
     expect(await screen.findByText("ws-retired")).toBeInTheDocument();
     expect(screen.getByText("Show revoked certificates (1 shown)")).toBeInTheDocument();
   });
@@ -1199,7 +1199,7 @@ describe("EnrollmentPage", () => {
         }),
     });
     await userEvent.click(await screen.findByRole("tab", { name: /Certificates/ }));
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked certificates/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked certificates/ }));
 
     const row = (await screen.findByText("ws-retired")).closest("tr") as HTMLElement;
     // `ok` is what this row said before, and it was wrong rather than merely
@@ -1223,7 +1223,8 @@ describe("EnrollmentPage", () => {
     await userEvent.click(await screen.findByRole("tab", { name: /Certificates/ }));
     await userEvent.type(screen.getByLabelText("Search certificates"), "ws-retired");
     expect(screen.queryByText("ws-retired")).not.toBeInTheDocument();
-    expect(await screen.findByText("No certificate matches that filter.")).toBeInTheDocument();
+    // The list kit's sentence for a search that found nothing (Receta L, 3).
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
   });
 
   it("does not claim 'none have been revoked' before it has been told", async () => {
@@ -1235,11 +1236,11 @@ describe("EnrollmentPage", () => {
       devices: () => Promise.reject(new Error("boom")),
     });
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: /Show revoked tokens/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show revoked tokens/ })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: /Certificates/ }));
     expect(
-      screen.queryByRole("checkbox", { name: /Show revoked certificates/ }),
+      screen.queryByRole("button", { name: /Show revoked certificates/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -1273,15 +1274,17 @@ describe("EnrollmentPage", () => {
           total: 1,
         }),
     });
-    await screen.findByRole("checkbox", { name: /Show revoked tokens/ });
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked tokens/ }));
+    await screen.findByRole("button", { name: /Show revoked tokens/ });
+    await userEvent.click(screen.getByRole("button", { name: /Show revoked tokens/ }));
     await screen.findByText("Bogota HQ workstations");
     for (const label of [/delete/i, /remove/i, /purge/i, /forget/i]) {
       expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
     }
 
     await userEvent.click(screen.getByRole("tab", { name: /Certificates/ }));
-    await userEvent.click(screen.getByRole("checkbox", { name: /Show revoked certificates/ }));
+    // ONE `?revoked=1` FOR BOTH TABS (redesign plan, Task 9, 4.11): turned on
+    // over the tokens, it is already on over the certificates.
+    expect(screen.getByRole("button", { name: /Show revoked certificates/ })).toHaveAttribute("aria-pressed", "true");
     await screen.findByText("ws-alpha");
     for (const label of [/delete/i, /remove/i, /purge/i, /forget/i]) {
       expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
@@ -1344,8 +1347,9 @@ describe("EnrollmentPage", () => {
     renderPage();
     await screen.findByText("Bogota HQ workstations");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // The filter is a chip (a button) now, not a checkbox (Receta L).
     expect(
-      screen.queryByRole("checkbox", { name: /no use limit/ }),
+      screen.queryByRole("button", { name: /no use limit/ }),
     ).not.toBeInTheDocument();
   });
 });

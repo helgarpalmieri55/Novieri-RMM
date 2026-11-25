@@ -14,6 +14,7 @@ export const enrollment: Shape<typeof en> = {
     missing: "Un token permite que un equipo se una una vez instalado el agente en él, y todavía no hay ningún paquete del agente publicado, así que no hay nada que instalar.",
   },
   tabs: {
+    label: "Secciones de la inscripción",
     tokens: "Tokens de inscripción",
     certificates: "Certificados",
     flow: "Flujo de inscripción",
@@ -56,6 +57,8 @@ export const enrollment: Shape<typeof en> = {
     notIssued: "No se emitió ningún token.",
   },
   tokens: {
+    filterLabel: "Filtrar los tokens por revocación",
+    limitLabel: "Filtrar los tokens por límite de usos",
     notRevoked: "El token NO se revocó y todavía puede inscribir un dispositivo.",
     unlimited: {
       one: "{count} token de inscripción no tiene límite de usos.",
@@ -70,8 +73,7 @@ export const enrollment: Shape<typeof en> = {
       one: "Solo los tokens sin límite de usos ({count})",
       other: "Solo los tokens sin límite de usos ({count})",
     },
-    emptyUnlimited: "Ningún token de esta organización carece de límite de usos.",
-    emptyAllRevoked: "Todos los tokens de inscripción que ha emitido esta organización están revocados. Marca «Mostrar los tokens revocados» para verlos.",
+    emptyAllRevoked: "Todos los tokens de inscripción que ha emitido esta organización están revocados. Activa «Mostrar los tokens revocados» para verlos.",
     emptyNone: "No se ha emitido ningún token de inscripción.",
     token: "Token",
     client: "Cliente",
@@ -94,6 +96,7 @@ export const enrollment: Shape<typeof en> = {
     },
   },
   certs: {
+    filterLabel: "Filtrar los certificados por revocación",
     notRevoked: "El certificado del agente NO se revocó y el dispositivo todavía puede conectarse.",
     searchPlaceholder: "Buscar dispositivo, FQDN o estado del certificado",
     searchAria: "Buscar certificados",
@@ -101,8 +104,7 @@ export const enrollment: Shape<typeof en> = {
     showRevokedShown: { one: "Mostrar los certificados revocados ({count} visible)", other: "Mostrar los certificados revocados ({count} visibles)" },
     showRevokedHidden: { one: "Mostrar los certificados revocados ({count} oculto)", other: "Mostrar los certificados revocados ({count} ocultos)" },
     emptyNone: "No hay dispositivos inscritos, así que no se ha emitido ningún certificado.",
-    emptyAllRevoked: "Todos los certificados emitidos están revocados. Marca «Mostrar los certificados revocados» para verlos.",
-    emptyFiltered: "Ningún certificado coincide con ese filtro.",
+    emptyAllRevoked: "Todos los certificados emitidos están revocados. Activa «Mostrar los certificados revocados» para verlos.",
     device: "Dispositivo",
     certificate: "Certificado",
     expires: "Caduca",
