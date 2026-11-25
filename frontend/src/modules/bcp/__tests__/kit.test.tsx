@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureClient, fixtureRegistry, type FixtureMap } from "../../../fixtures/client";
 import type { ApiClient, Me } from "../../../lib/api";
 import { recordingNarrowing } from "../../../test/narrowing";
+import type { PlanOut } from "../types";
 import { renderPage } from "../../../test/renderPage";
 import { BcpReport } from "../BcpReport";
 import { PlanDetail } from "../PlanDetail";
@@ -34,6 +35,54 @@ function api(over: FixtureMap = {}): ApiClient {
 
 beforeEach(() => mockUseApi.mockReturnValue(api()));
 afterEach(() => vi.unstubAllGlobals());
+
+// GENERAL RULING 13: no write without a change. A PATCH with nothing in it
+// would still write an audit entry saying the plan was edited.
+describe("Edit plan (general ruling 13)", () => {
+  /**
+   * The fixture plan with a scope the form can save: its own `dev-6` / `dev-5`
+   * are not ids, so the form's own check would stop any Save before the API
+   * and neither test could see what Save sends.
+   */
+  function saveablePlan(updatePlan: (...args: unknown[]) => unknown) {
+    const getPlan = fixtureRegistry().getPlan as (id: string) => PlanOut;
+    return api({ getPlan: (id: string) => ({ ...getPlan(id), scope: [] }), updatePlan } as unknown as FixtureMap);
+  }
+
+  it("sends nothing when Save is pressed on an untouched plan, and closes", async () => {
+    const updatePlan = vi.fn(fixtureRegistry().updatePlan as (...args: unknown[]) => unknown);
+    mockUseApi.mockReturnValue(saveablePlan(updatePlan));
+    renderPage("/bcp/plans/plan-1", <PlanDetail />, "/bcp/plans/:planId");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit plan" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit plan" });
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit plan" })).not.toBeInTheDocument());
+    expect(updatePlan).not.toHaveBeenCalled();
+  });
+
+  it("still sends the changed plan, whole, when something was changed", async () => {
+    const updatePlan = vi.fn(fixtureRegistry().updatePlan as (...args: unknown[]) => unknown);
+    mockUseApi.mockReturnValue(saveablePlan(updatePlan));
+    renderPage("/bcp/plans/plan-1", <PlanDetail />, "/bcp/plans/:planId");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit plan" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit plan" });
+    const name = within(dialog).getByLabelText("Name *");
+    const before = (name as HTMLInputElement).value;
+    await userEvent.type(name, " (2026)");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updatePlan).toHaveBeenCalledTimes(1));
+    const [id, body] = updatePlan.mock.calls[0] as [string, Record<string, unknown>];
+    expect(id).toBe("plan-1");
+    expect(body.name).toBe(`${before} (2026)`);
+    expect(Object.keys(body).sort()).toEqual(
+      ["description", "name", "procedure_refs", "review_interval_days", "rpo_minutes", "rto_minutes", "scope"],
+    );
+  });
+});
 
 describe("the plans list on the list kit (4.5)", () => {
   /**

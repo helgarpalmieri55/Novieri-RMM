@@ -268,6 +268,13 @@ export function PlanEditor({
 
   function submit() {
     if (refused) return;
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): Save on a plan nobody
+    // changed closes and sends nothing. A PATCH with nothing in it would
+    // still write an audit entry saying the plan was edited.
+    if (existing && current === opened) {
+      close();
+      return;
+    }
     const rto = rtoMinutes;
     const rpo = rpoMinutes;
     const scopeSnapshot = scope;

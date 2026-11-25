@@ -100,6 +100,15 @@ export function ProfileEditor({
   function submit() {
     // The previous outcome must not be readable as this one.
     mutation.reset();
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): Save on a profile nobody
+    // changed (no field, no password typed) closes and sends nothing. A PUT
+    // with nothing in it would still write an audit entry saying the profile
+    // was edited.
+    if (existing && !dirty) {
+      setAttempt(null);
+      onClose();
+      return;
+    }
     const next: Attempt = { rules: profileRules, values: { name, imageId } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;

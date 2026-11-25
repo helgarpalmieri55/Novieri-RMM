@@ -1469,11 +1469,34 @@ describe("PolicyDialog failure, validation and the edit it used to blank", () =>
     await screen.findByText("primary-vault");
     await user.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByLabelText("Cron expression");
+    // One change, so Save has something to send (general ruling 13); the
+    // window it did not touch goes with it, as stored.
+    const enabled = screen.getByLabelText("Enabled");
+    const was = (enabled as HTMLInputElement).checked;
+    await user.click(enabled);
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.upsertBackupPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ repository_id: "repo1", window_cron: "0 2 * * *" }),
+      expect.objectContaining({ repository_id: "repo1", window_cron: "0 2 * * *", enabled: !was }),
     );
+  });
+
+  // GENERAL RULING 13: no write without a change. A PUT with nothing in it
+  // would still write an audit entry saying the policy was edited.
+  it("sends nothing when Save is pressed on an untouched policy, and closes (general ruling 13)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<BackupPolicyEditor />);
+
+    await screen.findByText("primary-vault");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit policy" });
+    await within(dialog).findByLabelText("Cron expression");
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit policy" })).not.toBeInTheDocument());
+    expect(api.upsertBackupPolicy).not.toHaveBeenCalled();
   });
 });
 

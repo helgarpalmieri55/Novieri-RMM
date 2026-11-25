@@ -569,6 +569,11 @@ describe("the plan editor, in Spanish", () => {
     const user = userEvent.setup();
     renderEditor(plan({ scope: [{ kind: "group", id: "core" }, { kind: "device", id: "" }] }));
     const dialog = await screen.findByRole("dialog", { name: "Editar plan" });
+    // One change, so Save checks the plan instead of closing on an untouched
+    // one (general ruling 13).
+    const interval = within(dialog).getByLabelText("Intervalo de revisión (días) *");
+    await user.clear(interval);
+    await user.type(interval, "180");
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
     const alert = await within(dialog).findByRole("alert");
     expect(alert).toHaveTextContent("El ámbito 1 debe ser el id de un dispositivo o de un grupo: «core» no lo es");

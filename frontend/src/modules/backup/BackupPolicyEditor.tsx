@@ -412,6 +412,14 @@ function PolicyDialog({
   function submit() {
     // The previous outcome must not be readable as this one.
     upsert.reset();
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): Save on a policy nobody
+    // changed closes and sends nothing. A PUT with nothing in it would still
+    // write an audit entry saying the policy was edited.
+    if (existing && !dirty) {
+      setAttempt(null);
+      onClose();
+      return;
+    }
     // The Client first, as the form shows it: without it there is no list of
     // repositories to pick from, so "Repository is required" alone named the
     // wrong field.

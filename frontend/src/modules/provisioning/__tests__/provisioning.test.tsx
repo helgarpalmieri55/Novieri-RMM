@@ -801,20 +801,46 @@ describe("the profile editor opens on the profile being edited", () => {
   });
 
   it("saves the profile's own domain and enabled flag, not the defaults of a blank form", async () => {
-    // The consequence, asserted on the wire: an operator who opens Edit and
-    // presses Save must not silently strip `domain_join` or flip `enabled`.
+    // The consequence, asserted on the wire: an operator who opens Edit,
+    // changes one field and presses Save must not silently strip
+    // `domain_join` or flip `enabled`. (A Save with nothing changed sends
+    // nothing at all: general ruling 13, the next test.)
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
     await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "standard-workstation-v2");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(api.updateProvisionProfile).toHaveBeenCalled());
-    const [, sent] = (api.updateProvisionProfile as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [id, sent] = (api.updateProvisionProfile as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(id).toBe("profile1");
+    expect(sent.name).toBe("standard-workstation-v2");
+    expect(sent.image_id).toBe("image1");
     expect(sent.enabled).toBe(false);
     expect(sent.post_config).toEqual({
       domain_join: { domain: "corp.local", username: "svc-join" },
     });
+    expect(sent.target_scope).toEqual({});
+    expect(Object.keys(sent).sort()).toEqual(["enabled", "image_id", "name", "post_config", "target_scope"]);
+  });
+
+  // GENERAL RULING 13: no write without a change. A PUT with nothing in it
+  // would still write an audit entry saying the profile was edited.
+  it("sends nothing when Save is pressed on an untouched profile, and closes (general ruling 13)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ProfilesPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit profile" });
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit profile" })).not.toBeInTheDocument());
+    expect(api.updateProvisionProfile).not.toHaveBeenCalled();
   });
 
   it("opens New profile empty even after an existing profile was edited", async () => {
