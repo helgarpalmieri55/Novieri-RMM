@@ -39,7 +39,7 @@ import {
   useWakeJob,
   useWakeViaSiteServerMutation,
 } from "./api";
-import { SiteServerDetail } from "./SiteServerDetail";
+import { SiteServerDetail, WAKE_FORM_ID } from "./SiteServerDetail";
 import type { SiteWakeRequest } from "./types";
 import type { ApiError, Device } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
@@ -47,8 +47,6 @@ import { useOrgZone } from "../../lib/zone";
 import { Btn, ClientContext, DetailHead } from "../../shell/components";
 import { useRecordTitle } from "../../shell/title";
 
-/** Where the wake form is, for the head's Wake a computer. */
-export const WAKE_FORM_ID = "site-server-wake";
 
 export function SiteServerDetailPage() {
   const t = useT();

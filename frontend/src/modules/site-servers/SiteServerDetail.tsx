@@ -27,6 +27,9 @@ import {
   type SiteWakeRequest,
 } from "./types";
 
+/** Where the wake form is: the head's Wake a machine brings it into view. One source for the page and its tests. */
+export const WAKE_FORM_ID = "site-server-wake";
+
 export function SiteServerDetail({
   server,
   device,
@@ -140,8 +143,8 @@ export function SiteServerDetail({
       </Panel>
 
       {canWake ? (
-        // The head's Wake a computer brings this form into view (`WAKE_FORM_ID`).
-        <div id="site-server-wake">
+        // The head's Wake a machine brings this form into view (`WAKE_FORM_ID`).
+        <div id={WAKE_FORM_ID}>
         <Panel
           title={t("siteServers.detail.wakeTitle")}
           subtitle={t("siteServers.detail.wakeSubtitle")}

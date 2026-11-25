@@ -44,6 +44,15 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
+/**
+ * A tile's link, carrying the Client chip when the page has one (general
+ * ruling 2): the tile counts the chip's client's rows, so it opens them.
+ */
+function withChip(path: string, client: string): string {
+  if (client === "") return path;
+  return `${path}${path.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+}
+
 export function CoveragePage() {
   const t = useT();
   const api = useApi();
@@ -82,7 +91,7 @@ export function CoveragePage() {
           label={t("backup.coverage.tileProtected")}
           value={String(totals.covered ?? 0)}
           icon="circle-check"
-          to="/backup/coverage?coverage=covered"
+          to={withChip("/backup/coverage?coverage=covered", filters.values.client)}
           tone="green"
           zeroLabel={t("backup.coverage.noneRecent")}
         />
@@ -90,7 +99,7 @@ export function CoveragePage() {
           label={t("backup.coverage.tileStale")}
           value={String(totals.stale ?? 0)}
           icon="clock"
-          to="/backup/coverage?coverage=stale"
+          to={withChip("/backup/coverage?coverage=stale", filters.values.client)}
           tone="gold"
           zeroLabel={t("backup.coverage.noneBehind")}
         />
@@ -98,7 +107,7 @@ export function CoveragePage() {
           label={t("backup.coverage.tileFailing")}
           value={String(totals.failing ?? 0)}
           icon="alert-triangle"
-          to="/backup/coverage?coverage=failing"
+          to={withChip("/backup/coverage?coverage=failing", filters.values.client)}
           tone="red"
           urgent={(totals.failing ?? 0) > 0}
           zeroLabel={t("backup.coverage.noneFailing")}
@@ -107,7 +116,7 @@ export function CoveragePage() {
           label={t("backup.coverage.tileUnprotected")}
           value={String(totals.unprotected ?? 0)}
           icon="minus"
-          to="/backup/coverage?coverage=unprotected"
+          to={withChip("/backup/coverage?coverage=unprotected", filters.values.client)}
           tone="red"
           zeroLabel={t("backup.coverage.everyPolicy")}
         />
@@ -136,7 +145,10 @@ export function CoveragePage() {
           // No count before the report has answered: "Showing 0 of 0" would be an invented zero.
           end={coverage.data ? <ShowingCount shown={rows.length} total={everyDevice} /> : null}
         />
-        <QueryState loading={coverage.isLoading} error={coverage.error} empty={false} emptyLabel="">
+{/* `isPending`, not `isLoading` (general ruling 10): while the Client
+            chip's client is not decided the read is disabled, and a disabled
+            query is not "loading" -- the empty state would show before any read. */}
+        <QueryState loading={coverage.isPending} error={coverage.error} empty={false} emptyLabel="">
           {rows.length === 0 ? (
             <ListEmpty
               filtered={filters.active}

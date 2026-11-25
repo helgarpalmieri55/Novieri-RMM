@@ -252,7 +252,9 @@ export function ProvisioningRunsPage() {
               icon="image"
               action={
                 canRun ? (
-                  <Btn label={t("provisioning.runs.provision")} icon="plus" small onClick={provision.start} />
+                  // The brief's words for the empty list (redesign plan, Task 9,
+                  // 4.6; fix round 1): "nothing built yet", and the way to build one.
+                  <Btn label={t("provisioning.runs.buildComputer")} icon="plus" small onClick={provision.start} />
                 ) : undefined
               }
             />

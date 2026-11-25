@@ -91,6 +91,15 @@ function LastTest({ status }: { status: PlanStatusOut | undefined }) {
   );
 }
 
+/**
+ * A tile's link, carrying the Client chip when the page has one (general
+ * ruling 2): the tile counts the chip's client's rows, so it opens them.
+ */
+function withChip(path: string, client: string): string {
+  if (client === "") return path;
+  return `${path}${path.includes("?") ? "&" : "?"}client=${encodeURIComponent(client)}`;
+}
+
 export function PlansPage() {
   const t = useT();
   const api = useApi();
@@ -200,7 +209,7 @@ export function PlansPage() {
           label={t("bcp.plans.tileActive")}
           value={measured ? String(activeCount) : "—"}
           icon="shield-check"
-          to={`/bcp?${STATE_PARAM}=active`}
+          to={withChip(`/bcp?${STATE_PARAM}=active`, filters.values.client)}
           tone="blue"
           zeroLabel={t("bcp.plans.noneActive")}
           foot={measured && activeCount > 0 ? t("bcp.plans.ofOnRecord", { count: items.length }) : undefined}
@@ -209,7 +218,7 @@ export function PlansPage() {
           label={t("bcp.plans.tileOverdue")}
           value={measured ? String(overdueCount) : "—"}
           icon="clock"
-          to={`/bcp?${REVIEW_PARAM}=${OVERDUE_VIEW}`}
+          to={withChip(`/bcp?${REVIEW_PARAM}=${OVERDUE_VIEW}`, filters.values.client)}
           tone="gold"
           urgent
           /* WHICH zero this is, and the two are not the same claim: with the
@@ -290,7 +299,10 @@ export function PlansPage() {
           // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
           end={measured ? <ShowingCount shown={visible.length} total={items.length} /> : null}
         />
-        <QueryState loading={plans.isLoading} error={plans.error} empty={false} emptyLabel="">
+{/* `isPending`, not `isLoading` (general ruling 10): while the Client
+            chip's client is not decided the read is disabled, and a disabled
+            query is not "loading" -- the empty state would show before any read. */}
+        <QueryState loading={plans.isPending} error={plans.error} empty={false} emptyLabel="">
           {visible.length === 0 ? (
             <ListEmpty
               filtered={filters.active}

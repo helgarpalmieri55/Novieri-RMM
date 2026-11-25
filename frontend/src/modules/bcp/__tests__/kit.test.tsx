@@ -91,6 +91,24 @@ describe("the plans list on the list kit (4.5)", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
   });
+
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is (general ruling 10)", async () => {
+    // `/me` never answers: the narrowed read is held back, and the page must
+    // not say "nothing matches" or "nothing yet" about a read it never made.
+    mockUseApi.mockReturnValue(api({ me: () => new Promise(() => {}) }));
+    renderPage(`/bcp?client=${ANDES}`, <PlansPage />);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No BCP/DR plans yet.")).toBeNull();
+  });
+
+  it("links the plan tiles with the chip's client, so a tile opens the rows it counted (general ruling 2)", async () => {
+    renderPage(`/bcp?client=${ANDES}`, <PlansPage />);
+    await screen.findByRole("table", { name: "BCP / DR tests" });
+    const hrefs = [...document.querySelectorAll(".stat-card")].map((tile) => tile.getAttribute("href"));
+    expect(hrefs).toContain(`/bcp?state=active&client=${ANDES}`);
+    expect(hrefs).toContain(`/bcp?review=overdue&client=${ANDES}`);
+  });
 });
 
 describe("a plan on the record kit (4.5)", () => {
@@ -136,6 +154,28 @@ describe("the test recorder on the form kit (4.5)", () => {
     expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/bcp/tests/test-1");
   });
+
+  it("asks before leaving with a finding typed and not added (fix round 1, M5)", async () => {
+    const { router } = recorder();
+    await userEvent.type(await screen.findByLabelText("Finding description"), "DNS");
+    await userEvent.click(screen.getByRole("link", { name: "Back to the plan" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/bcp/tests/test-1");
+  });
+
+  it("still asks before leaving after a recording failed (fix round 1, M5)", async () => {
+    const recordTest = vi.fn(() => Promise.reject(new Error("The server is unavailable.")));
+    mockUseApi.mockReturnValue(api({ recordTest } as unknown as FixtureMap));
+    const { router } = recorder();
+    await userEvent.type(await screen.findByLabelText("Notes"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Record test" }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "Re-record this DR test" })).getByRole("button", { name: "Replace the evidence" }));
+    await waitFor(() => expect(recordTest).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Back to the plan" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/bcp/tests/test-1");
+  }, 15_000);
 
   it("leaves without asking once the outcome is recorded, and keeps what was recorded on screen", async () => {
     const recordTest = vi.fn((id: string, body: object) => ({ ...(fixtureRegistry().getTest as (id: string) => object)(id), ...body }));

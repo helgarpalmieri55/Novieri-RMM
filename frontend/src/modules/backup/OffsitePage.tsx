@@ -36,6 +36,7 @@ import { useApi } from "../../lib/ApiContext";
 import {
   Btn,
   FormSection,
+  ListEmpty,
   PageHead,
   Panel,
   QueryState,
@@ -60,7 +61,6 @@ import {
 } from "./api";
 import { OFFSITE_TARGET_STATE_LABEL, offsiteTargetStateKind } from "./backupState";
 import { BackupPageNav } from "./backupNav";
-import { Icon } from "../../shell/icons";
 import type { OffsiteTarget, RecoveryKey, RetentionGfs } from "./types";
 
 /** What each server-side test step checked, in the operator's words. */
@@ -396,13 +396,15 @@ function StoragePanel({
     <Panel bare title={t("backup.offsite.storageTitle")} subtitle={t("backup.offsite.storageSubtitle")}>
       <QueryState loading={targets.isLoading} error={targets.error} empty={false} emptyLabel="">
         {items.length === 0 ? (
-          <div className="empty">
-            <span className="empty-icon">
-              <Icon name="database" size={26} />
-            </span>
-            <b>{t("backup.offsite.storageEmpty")}</b>
-            {add}
-          </div>
+          // The kit's empty state (fix round 1, M4): nothing exists yet, with
+          // the way to add one. Nothing filters this list.
+          <ListEmpty
+            filtered={false}
+            onClear={() => {}}
+            nothingYet={t("backup.offsite.storageEmpty")}
+            icon="database"
+            action={add}
+          />
         ) : (
         <Table label={t("backup.offsite.storageTitle")}>
           <thead>

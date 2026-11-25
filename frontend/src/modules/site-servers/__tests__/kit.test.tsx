@@ -12,6 +12,7 @@ import { fixtureClient, fixtureRegistry, type FixtureMap } from "../../../fixtur
 import type { ApiClient, Me } from "../../../lib/api";
 import { recordingNarrowing } from "../../../test/narrowing";
 import { renderPage } from "../../../test/renderPage";
+import { WAKE_FORM_ID } from "../SiteServerDetail";
 import { SiteServerDetailPage } from "../SiteServerDetailPage";
 import { SiteServersPage } from "../SiteServersPage";
 import type { SiteServerOut } from "../types";
@@ -82,6 +83,23 @@ describe("site servers on the list kit (4.9)", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
   });
+
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is (general ruling 10)", async () => {
+    // `/me` never answers: the narrowed read is held back, and the page must
+    // not say "nothing matches" or "nothing yet" about a read it never made.
+    mockUseApi.mockReturnValue(api({ me: () => new Promise(() => {}) }));
+    renderPage(`/site-servers?client=${ANDES}`, <SiteServersPage />);
+    expect(await screen.findByText("Loading site servers…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No site servers yet: promote a computer on the client's network.")).toBeNull();
+  });
+
+  it("links the tiles with the chip's client, so a tile opens the rows it counted (general ruling 2)", async () => {
+    renderPage(`/site-servers?client=${ANDES}`, <SiteServersPage />);
+    await screen.findByRole("table", { name: "Site servers" });
+    const hrefs = [...document.querySelectorAll(".stat-card")].map((tile) => tile.getAttribute("href"));
+    expect(hrefs).toEqual([`/site-servers?client=${ANDES}`, `/site-servers?state=enabled&client=${ANDES}`, `/site-servers?client=${ANDES}`]);
+  });
 });
 
 describe("a site server on the record kit (4.10)", () => {
@@ -99,7 +117,7 @@ describe("a site server on the record kit (4.10)", () => {
     expect(within(head).getByRole("link", { name: "All site servers" })).toHaveAttribute("href", "/site-servers");
     expect(within(head).getByText("Enabled")).toBeInTheDocument();
     await userEvent.click(within(head).getByRole("button", { name: "Wake a machine" }));
-    const form = document.getElementById("site-server-wake") as HTMLElement;
+    const form = document.getElementById(WAKE_FORM_ID) as HTMLElement;
     expect(form).toContainElement(document.activeElement as HTMLElement);
   });
 

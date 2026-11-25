@@ -67,7 +67,9 @@ describe("provisioning runs on the list kit (4.6)", () => {
     expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(router.state.location.search).toBe("");
-    expect(await screen.findByText("No provisioning runs yet.")).toBeInTheDocument();
+    // The brief's sentence for a run history with nothing in it (redesign plan, Task 9, 4.6; fix round 1).
+    expect(await screen.findByText("No computer has been built yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Build a computer" })).toBeInTheDocument();
   });
 
   it("opens Provision a device from ?new=run", async () => {

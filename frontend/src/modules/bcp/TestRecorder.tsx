@@ -465,7 +465,12 @@ function StepForm({ testId, onDirty }: { testId: string; onDirty: (dirty: boolea
   // page's one guard hears of it. The number and the result have defaults; the
   // words are what a person would lose.
   const dirty = description.trim() !== "" || evidenceRef.trim() !== "";
-  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // Reported up, and taken back when this form goes (fix round 1, M5): a form
+  // unmounted while dirty must not leave the page's guard asking about it.
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
   // Held as data (rules and values), so a language switch re-words the refusal.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
@@ -583,7 +588,11 @@ function FindingsSection({
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   // A finding typed and not added is part of the exercise half recorded.
   const dirty = description.trim() !== "";
-  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+  // Reported up, and taken back on unmount (fix round 1, M5).
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
 
   function submit() {
     const next: Attempt = { rules: findingRules, values: { description } };

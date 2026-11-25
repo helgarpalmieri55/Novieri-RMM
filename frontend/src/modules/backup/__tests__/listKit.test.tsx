@@ -101,6 +101,16 @@ describe("backup points on the list kit (4.1)", () => {
     expect(await screen.findByRole("table", { name: "Restore points" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Run backup" })).toBeNull();
   });
+
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is (general ruling 10)", async () => {
+    // `/me` never answers: the narrowed read is held back, and the page must
+    // not say "nothing matches" or "nothing yet" about a read it never made.
+    mockUseApi.mockReturnValue(withFixtures({ me: () => new Promise(() => {}) }));
+    renderPage(`/backup?client=${ANDES}`, <BackupPointsPage />);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No backup points recorded yet.")).toBeNull();
+  });
 });
 
 describe("backup repositories on the list kit (4.2)", () => {
@@ -178,6 +188,25 @@ describe("backup coverage on the list kit (4.3)", () => {
     expect(await screen.findByRole("table", { name: "Coverage" })).toBeInTheDocument();
     expect(narrowing.client(ANDES).runReport).toHaveBeenCalledWith("backup-coverage", { limit: "500" });
     expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is (general ruling 10)", async () => {
+    // `/me` never answers: the narrowed read is held back, and the page must
+    // not say "nothing matches" or "nothing yet" about a read it never made.
+    mockUseApi.mockReturnValue(withFixtures({ me: () => new Promise(() => {}) }));
+    renderPage(`/backup/coverage?client=${ANDES}`, <CoveragePage />);
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No devices yet.")).toBeNull();
+  });
+
+  it("links each tile with the chip's client, so a tile opens the rows it counted (general ruling 2)", async () => {
+    renderPage(`/backup/coverage?client=${ANDES}`, <CoveragePage />);
+    await screen.findByRole("table", { name: "Coverage" });
+    const hrefs = [...document.querySelectorAll(".stat-card")].map((tile) => tile.getAttribute("href"));
+    expect(hrefs).toEqual(
+      ["covered", "stale", "failing", "unprotected"].map((verdict) => `/backup/coverage?coverage=${verdict}&client=${ANDES}`),
+    );
   });
 });
 

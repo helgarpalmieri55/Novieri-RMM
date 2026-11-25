@@ -215,7 +215,9 @@ describe("the provisioning runs page, in Spanish", () => {
   it("says a fleet that never built anything has never run, and what each zero means", async () => {
     baseApi({ getProvisioningReport: vi.fn().mockResolvedValue(EMPTY_REPORT), listProvisionRuns: vi.fn().mockResolvedValue([]) });
     const { container } = renderPage(<ProvisioningRunsPage />);
-    expect(await screen.findByText("Todavía no hay ejecuciones de aprovisionamiento.")).toBeInTheDocument();
+    // The brief's sentence for a run history with nothing in it (redesign plan, Task 9, 4.6; fix round 1).
+    expect(await screen.findByText("Aún no se ha construido ningún equipo.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Construir un equipo" })).toBeInTheDocument();
     expect(screen.getByText("Nunca ejecutado")).toBeInTheDocument();
     expect(screen.getByText("Todavía no se ha aprovisionado ningún equipo")).toBeInTheDocument();
     expect(screen.getByText("Nunca se ha ejecutado ninguna construcción")).toBeInTheDocument();

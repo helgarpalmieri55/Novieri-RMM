@@ -247,7 +247,8 @@ describe("ProvisioningRunsPage", () => {
   it("says there are no runs when there genuinely are none", async () => {
     api.listProvisionRuns = vi.fn().mockResolvedValue([]);
     renderWithProviders(<ProvisioningRunsPage />);
-    expect(await screen.findByText("No provisioning runs yet.")).toBeInTheDocument();
+    // The brief's sentence for a run history with nothing in it (redesign plan, Task 9, 4.6; fix round 1).
+    expect(await screen.findByText("No computer has been built yet.")).toBeInTheDocument();
   });
 });
 
@@ -1127,7 +1128,7 @@ describe("every provisioning tile opens the rows it counted", () => {
 
     // The list kit's filtered-empty sentence (redesign plan, Receta L, 3).
     expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
-    expect(screen.queryByText("No provisioning runs yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No computer has been built yet.")).not.toBeInTheDocument();
   });
 
   it("links every images tile at a route the application has", async () => {
