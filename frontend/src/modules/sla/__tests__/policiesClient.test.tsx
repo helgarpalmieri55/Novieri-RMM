@@ -116,6 +116,11 @@ describe("an existing policy says whether it is every client's", () => {
 
     await user.click(within(await rowOf(priority)).getByRole("button", { name: "Edit" }));
     const dialog = await screen.findByRole("dialog", { name: "Edit policy" });
+    // A real change, so Save writes: an untouched Save sends nothing (general
+    // ruling 13, wave O2 fix round 3).
+    const response = within(dialog).getByLabelText(/^Response target in minutes/);
+    await user.clear(response);
+    await user.type(response, "45");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.updateSlaPolicy).toHaveBeenCalledTimes(1));
     expect(api.updateSlaPolicy.mock.calls[0]?.[0]).toBe(id);

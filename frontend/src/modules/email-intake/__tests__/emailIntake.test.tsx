@@ -569,7 +569,13 @@ describe("email-intake mailbox form", () => {
     renderAdmin();
 
     await user.click(await screen.findByRole("button", { name: "Edit helpdesk@acme.test" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    // A real change, so Save writes: an untouched Save sends nothing (general
+    // ruling 13, wave O2 fix round 3). The password stays blank, which is the point.
+    const dialog = screen.getByRole("dialog");
+    const reopen = within(dialog).getByLabelText("Reopen window (days)");
+    await user.clear(reopen);
+    await user.type(reopen, "21");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(screen.queryByRole("alert")).toBeNull();

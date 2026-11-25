@@ -167,4 +167,29 @@ describe("the SLA page on the form kit", () => {
     expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
     heldBack.mockRestore();
   });
+
+  /** The fixture session with a spy on one write (the fixture's own answer behind it). */
+  function spyOnWrite(method: string) {
+    const registry = fixtureRegistry() as Record<string, unknown>;
+    const original = registry[method] as (...args: unknown[]) => unknown;
+    const spy = vi.fn((...args: unknown[]) => original(...args));
+    mockUseApi.mockReturnValue(fixtureClient({ ...registry, [method]: spy } as never));
+    return spy;
+  }
+
+  // FIX ROUND 3 (general ruling 13): no write without a change.
+  it.each([
+    ["policy", "SLA policies", "Edit policy", "updateSlaPolicy"],
+    ["calendar", "Business calendars", "Edit calendar", "updateSlaCalendar"],
+  ] as const)("closes an untouched Edit %s on Save and sends nothing", async (_kind, heading, title, method) => {
+    const write = spyOnWrite(method);
+    renderPage("/sla", <SlaAdminPage />);
+    const section = (await screen.findByRole("heading", { name: heading })).closest("section") as HTMLElement;
+    const table = await within(section).findByRole("table");
+    await userEvent.click((await within(table).findAllByRole("button", { name: "Edit" }))[0] as HTMLElement);
+    const dialog = screen.getByRole("dialog", { name: title });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).toBeNull());
+    expect(write).not.toHaveBeenCalled();
+  });
 });

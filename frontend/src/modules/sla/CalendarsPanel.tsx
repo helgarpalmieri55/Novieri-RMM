@@ -205,6 +205,11 @@ export function CalendarsPanel({ canAdmin }: { canAdmin: boolean }) {
 
   function submitEdit() {
     if (!editing) return;
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): a PATCH that changes nothing writes a false audit entry, so an untouched Save closes the dialog and sends nothing.
+    if (name === editing.name && timezone === editing.timezone && active === editing.active) {
+      setEditing(null);
+      return;
+    }
     const next: Attempt = { rules: calendarRules, values: { name, timezone } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;

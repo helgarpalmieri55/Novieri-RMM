@@ -215,16 +215,7 @@ export function PoliciesPanel({
   function openEdit(policy: PolicyOut) {
     setAttempt(null);
     update.reset();
-    setDraft({
-      queueId: policy.queue_id ?? "",
-      priority: policy.priority ?? "",
-      calendarId: policy.calendar_id,
-      responseMinutes: String(policy.response_target_minutes),
-      resolutionMinutes: String(policy.resolution_target_minutes),
-      escalatePriority: policy.escalate_priority,
-      escalateToQueueId: policy.escalate_to_queue_id ?? "",
-      active: policy.active,
-    });
+    setDraft(draftOf(policy));
     setEditing(policy);
   }
 
@@ -280,6 +271,11 @@ export function PoliciesPanel({
 
   function submitEdit() {
     if (!editing) return;
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): a PATCH that changes nothing writes a false audit entry, so an untouched Save closes the dialog and sends nothing.
+    if (JSON.stringify(draft) === JSON.stringify(draftOf(editing))) {
+      setEditing(null);
+      return;
+    }
     if (check().length > 0) return;
     update.mutate(
       { id: editing.id, body: body(), global: editing.client_id === null },
@@ -554,6 +550,20 @@ interface PolicyDraft {
   escalatePriority: boolean;
   escalateToQueueId: string;
   active: boolean;
+}
+
+/** The edit form as it opens on `policy`: what "untouched" is measured against. */
+function draftOf(policy: PolicyOut): PolicyDraft {
+  return {
+    queueId: policy.queue_id ?? "",
+    priority: policy.priority ?? "",
+    calendarId: policy.calendar_id,
+    responseMinutes: String(policy.response_target_minutes),
+    resolutionMinutes: String(policy.resolution_target_minutes),
+    escalatePriority: policy.escalate_priority,
+    escalateToQueueId: policy.escalate_to_queue_id ?? "",
+    active: policy.active,
+  };
 }
 
 function emptyDraft(): PolicyDraft {

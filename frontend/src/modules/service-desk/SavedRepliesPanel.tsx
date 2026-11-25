@@ -135,6 +135,11 @@ function SavedReplyDialog({
   const mutation = reply ? update : create;
 
   function submit() {
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): a PATCH that changes nothing writes a false audit entry, so an untouched Save closes the dialog and sends nothing.
+    if (reply && title === reply.title && body === reply.body) {
+      onClose();
+      return;
+    }
     const next: Attempt = { rules: replyRules, values: { title, body } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;

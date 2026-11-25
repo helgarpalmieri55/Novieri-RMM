@@ -122,4 +122,18 @@ describe("a mailbox's settings", () => {
     expect(within(support).getByLabelText("Reopen window (days)")).toHaveValue("21");
     expect(within(legacy).getByLabelText("Reopen window (days)")).toHaveValue("9");
   });
+
+  // FIX ROUND 3 (general ruling 13): no write without a change.
+  it("closes an untouched Edit mailbox on Save and sends nothing", async () => {
+    const update = spyingUpdate();
+    renderPage("/email-intake", <EmailIntakeAdminPage />);
+    const row = (await screen.findAllByText("support@toeshee.example"))
+      .map((element) => element.closest("tr"))
+      .find((found): found is HTMLTableRowElement => found !== null) as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: /^Edit/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit mailbox" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit mailbox" })).toBeNull());
+    expect(update).not.toHaveBeenCalled();
+  });
 });

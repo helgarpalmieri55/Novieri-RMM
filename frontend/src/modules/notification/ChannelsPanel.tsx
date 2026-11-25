@@ -248,7 +248,31 @@ export function ChannelsPanel({ canAdmin }: { canAdmin: boolean }) {
     editingChannel.has_credential &&
     emailAuthOf(editingChannel.config) === signIn.auth;
 
+  // The edit form as it opens on a channel (`openEdit`), and as it stands:
+  // what "untouched" is measured against.
+  function editFormOf(channel: ChannelOut) {
+    const email = channel.kind !== "webhook";
+    return {
+      kind: channel.kind,
+      name: channel.name,
+      url: email ? "" : String(channel.config.url ?? ""),
+      host: email ? String(channel.config.host ?? "") : "",
+      port: email ? String(channel.config.port ?? 587) : "587",
+      fromAddress: email ? String(channel.config.from_address ?? "") : "",
+      useTls: email ? channel.config.use_tls !== false : true,
+      secret: "",
+      signIn: email ? { ...EMPTY_SIGN_IN, auth: emailAuthOf(channel.config) } : EMPTY_SIGN_IN,
+    };
+  }
+
   function submit() {
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): a PATCH that changes nothing writes a false audit entry, so an untouched Save closes the dialog and sends nothing.
+    const now = { kind, name, url, host, port, fromAddress, useTls, secret, signIn };
+    if (editingChannel && JSON.stringify(now) === JSON.stringify(editFormOf(editingChannel))) {
+      resetForm();
+      setDialog(null);
+      return;
+    }
     const base = kind === "webhook" ? webhookRules : microsoft ? microsoftRules : emailRules;
     const withSignIn = kind === "email";
     const next: Attempt = {
