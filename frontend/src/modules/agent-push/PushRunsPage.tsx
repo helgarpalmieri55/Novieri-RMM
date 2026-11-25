@@ -7,6 +7,7 @@
 // CLIENT CHIP: a run is already one client's, and its row says which. Pause,
 // Resume and Cancel stay on the run's own page (a person's acts, 2a(e)).
 
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { useT } from "../../i18n/context";
@@ -27,8 +28,9 @@ import {
 import { Icon } from "../../shell/icons";
 import { usePushPermissions, usePushRuns } from "./api";
 import { RUN_STATE_KIND, RUN_STATE_LABELS, countsSentence, runProgress } from "./runState";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
-import { useOrgZone } from "../../lib/zone";
 import type { PushRunState } from "./types";
 
 /** The run states, in the order a run lives them. */
@@ -39,8 +41,11 @@ export function PushRunsPage() {
   const runs = usePushRuns();
   const permissions = usePushPermissions();
   const filters = useUrlFilters(["state"] as const);
-  // Dates as the console writes them, in the organisation's zone (the wave's critique).
-  const zone = useOrgZone();
+  // Dates as the console writes them, in the profile's zone (the wave's critique):
+  // the `["me"]` read the page already makes for its permissions, no other route.
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  const zone = me.data?.timezone;
   const all = runs.data ?? [];
   const items = filters.values.state === "" ? all : all.filter((run) => run.state === filters.values.state);
   // A push names machines a person ticked or a subnet's list they confirm:
