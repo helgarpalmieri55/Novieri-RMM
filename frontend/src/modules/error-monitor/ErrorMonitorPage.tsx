@@ -21,6 +21,7 @@ import { Icon } from "../../shell/icons";
 import { KIND_ICON } from "../../shell/viz";
 import {
   Btn,
+  ChipSelect,
   FilterChips,
   ListEmpty,
   ListToolbar,
@@ -388,20 +389,20 @@ export function ErrorMonitorPage() {
                 value={filters.since}
                 onChange={(value) => setFilter("since", value)}
               />
-              {/* THE ORDER IS NOT A FILTER: a chip that opens a choice
-                  (`.chip-select`, the kit's Client chip shape). */}
-              <span className="chip chip-select">
-                <span aria-hidden="true">{t("errorMonitor.groups.sortLabel")}</span>
-                <select
-                  value={filters.sort}
-                  onChange={(event) => setSort(event.target.value)}
-                  aria-label={t("errorMonitor.groups.sortAria")}
-                >
-                  <option value="last_seen">{t("errorMonitor.groups.sortLastSeen")}</option>
-                  <option value="first_seen">{t("errorMonitor.groups.sortFirstSeen")}</option>
-                  <option value="events">{t("errorMonitor.groups.sortEvents")}</option>
-                </select>
-              </span>
+              {/* THE ORDER IS NOT A FILTER: a chip that opens a choice, never
+                  drawn selected (`selected={false}`). */}
+              <ChipSelect
+                label={t("errorMonitor.groups.sortLabel")}
+                ariaLabel={t("errorMonitor.groups.sortAria")}
+                options={[
+                  { value: "last_seen", label: t("errorMonitor.groups.sortLastSeen") },
+                  { value: "first_seen", label: t("errorMonitor.groups.sortFirstSeen") },
+                  { value: "events", label: t("errorMonitor.groups.sortEvents") },
+                ]}
+                value={filters.sort}
+                onChange={setSort}
+                selected={false}
+              />
             </>
           }
           end={data ? <ShowingCount shown={shown.length} total={allGroups.length} /> : null}

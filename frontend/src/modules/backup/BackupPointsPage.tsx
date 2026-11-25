@@ -70,6 +70,7 @@ import { BackupPageNav } from "./backupNav";
 import { BackupReadiness } from "./BackupReadiness";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterChips,
   ListEmpty,
@@ -649,11 +650,11 @@ function RunBackupDialog({
 }
 
 /**
- * THE DEVICE CHIP: the points of one computer. A select drawn as the kit's
- * Client chip is (`chip chip-select`, shell/listKit.tsx), because a fleet has
- * too many computers for a row of toggles. It offers only the computers the
- * list has points for, and draws nothing while there is fewer than two to
- * choose between, unless one is already chosen (so it can be cleared).
+ * THE DEVICE CHIP: the points of one computer. The kit's `ChipSelect` (the
+ * Client chip's shape), because a fleet has too many computers for a row of
+ * toggles. It offers only the computers the list has points for, and draws
+ * nothing while there is fewer than two to choose between, unless one is
+ * already chosen (so it can be cleared).
  */
 function DeviceFilter({
   filters,
@@ -666,20 +667,14 @@ function DeviceFilter({
   const value = filters.values.device;
   if (devices.length < 2 && value === "") return null;
   return (
-    <span className={value === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{t("backup.points.deviceChip")}</span>
-      <select
-        aria-label={t("backup.points.deviceChip")}
-        value={value}
-        onChange={(event) => filters.set("device", event.target.value)}
-      >
-        <option value="">{t("backup.points.allDevices")}</option>
-        {devices.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.name}
-          </option>
-        ))}
-      </select>
-    </span>
+    <ChipSelect
+      label={t("backup.points.deviceChip")}
+      options={[
+        { value: "", label: t("backup.points.allDevices") },
+        ...devices.map((item) => ({ value: item.id, label: item.name })),
+      ]}
+      value={value}
+      onChange={(next) => filters.set("device", next)}
+    />
   );
 }

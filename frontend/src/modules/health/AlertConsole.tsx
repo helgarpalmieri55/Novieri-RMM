@@ -11,6 +11,7 @@ import { formatDateTime, intlLocale } from "../../lib/datetime";
 import { ADD_COMPUTER_CTA, useFleetQuery } from "../../lib/detectors";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterChips,
   ListEmpty,
@@ -256,21 +257,16 @@ export function AlertConsole({
               value={severityParam}
               onChange={(value) => filters.set("severity", value)}
             />
-            <span className={resolution === "" ? "chip chip-select" : "chip chip-select on"}>
-              <span aria-hidden="true">{t("health.console.resolutionLabel")}</span>
-              <select
-                aria-label={t("health.console.filterResolution")}
-                value={resolution}
-                onChange={(e) => filters.set("resolution", e.target.value)}
-              >
-                <option value="">{t("health.console.anyResolution")}</option>
-                {RESOLUTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {RESOLUTION_LABEL[value]}
-                  </option>
-                ))}
-              </select>
-            </span>
+            <ChipSelect
+              label={t("health.console.resolutionLabel")}
+              ariaLabel={t("health.console.filterResolution")}
+              options={[
+                { value: "", label: t("health.console.anyResolution") },
+                ...RESOLUTIONS.map((value) => ({ value, label: RESOLUTION_LABEL[value] })),
+              ]}
+              value={resolution}
+              onChange={(value) => filters.set("resolution", value)}
+            />
             <ClientFilter filters={filters} />
             {deviceParam ? (
               <span className="flex flex-wrap items-center gap-2">
