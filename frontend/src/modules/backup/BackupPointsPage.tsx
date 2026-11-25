@@ -82,6 +82,7 @@ import {
   StatsGrid,
   StatusPill,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
   type UrlFilters,
 } from "../../shell/components";
@@ -549,6 +550,10 @@ function RunBackupDialog({
   const devices = useDevices();
   const run = useRunBackupMutation();
   const [deviceId, setDeviceId] = useState(initialDevice);
+  // ONE GUARD FOR THE FORM IN `?new=run` (general ruling 3): a computer picked
+  // and not run is asked about before Cancel, Back or a link drops it.
+  const dirty = open && deviceId !== "" && deviceId !== initialDevice;
+  const { guard } = useUnsavedGuard(dirty, { search: ["new"] });
   // Held as the rules and the values they were checked against, so a language
   // switch re-words the refusal.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -574,6 +579,8 @@ function RunBackupDialog({
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={dismiss} title={t("backup.runDialog.title")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -623,6 +630,7 @@ function RunBackupDialog({
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }
 

@@ -54,6 +54,7 @@ import {
   StatsGrid,
   StatusPill,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 
@@ -280,6 +281,8 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
   const t = useT();
   const create = useCreateBackupRepositoryMutation();
   const [name, setName] = useState("");
+  // ONE GUARD FOR THE FORM IN `?new=repository` (general ruling 3).
+  const { guard, release } = useUnsavedGuard(open && name.trim() !== "", { search: ["new"] });
   // A repository is ONE client's: its key travels to every device that backs
   // up into it (MSP clients phase 2, Task 13). Nothing on this page is a row
   // to take it from, so it is the client chosen at the top, or with every
@@ -307,6 +310,8 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
       {
         onSuccess: () => {
           setName("");
+          // Saved: the close that follows is not a change being dropped.
+          release();
           onClose();
         },
       },
@@ -314,6 +319,8 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={onClose} title={t("backup.repositories.dialogTitle")}>
       {/* A real <form>, so Enter in Name creates the repository. */}
       <Form onSubmit={submit}>
@@ -351,5 +358,6 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

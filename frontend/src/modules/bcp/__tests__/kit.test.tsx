@@ -109,6 +109,20 @@ describe("the plans list on the list kit (4.5)", () => {
     expect(hrefs).toContain(`/bcp?state=active&client=${ANDES}`);
     expect(hrefs).toContain(`/bcp?review=overdue&client=${ANDES}`);
   });
+
+  it("asks before Cancel drops a change in New plan, and opens it empty again (general rulings 3 and 4)", async () => {
+    const { router } = renderPage("/bcp?new=plan", <PlansPage />, "/bcp");
+    let dialog = await screen.findByRole("dialog", { name: "New plan" });
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "DR");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=plan");
+    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await act(() => router.navigate("/bcp?new=plan"));
+    dialog = await screen.findByRole("dialog", { name: "New plan" });
+    expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("");
+  }, 15_000);
 });
 
 describe("a plan on the record kit (4.5)", () => {
@@ -131,6 +145,15 @@ describe("a plan on the record kit (4.5)", () => {
     const dialog = await screen.findByRole("dialog", { name: "New DR test" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
+  });
+
+  it("asks before Cancel drops a change in New test (general ruling 3)", async () => {
+    const { router } = renderPage("/bcp/plans/plan-1?new=test", <PlanDetail />, "/bcp/plans/:planId");
+    const dialog = await screen.findByRole("dialog", { name: "New DR test" });
+    await userEvent.type(within(dialog).getByLabelText("Notes"), "x");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=test");
   });
 });
 

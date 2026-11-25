@@ -407,7 +407,13 @@ export function PlansPage() {
 
       {/* Open only for someone who may manage plans, whatever the URL asks:
           a courtesy, the server checks `bcp.manage` (invariant 6). */}
-      <PlanEditor plan={creating.open && canManage ? "new" : null} onClose={creating.close} />
+      {/* KEYED, so every opening starts empty however it was opened (general
+          ruling 4): the editor's fields are its own state. */}
+      <PlanEditor
+        key={creating.open && canManage ? "new" : "closed"}
+        plan={creating.open && canManage ? "new" : null}
+        onClose={creating.close}
+      />
     </div>
   );
 }

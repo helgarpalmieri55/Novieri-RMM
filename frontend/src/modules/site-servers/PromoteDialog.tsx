@@ -18,7 +18,7 @@
 // The dialog gates nothing. Invariant #6: the server re-checks `site.manage` on
 // every request.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { lazyLabels } from "../../i18n/lazy";
@@ -50,6 +50,7 @@ export function PromoteDialog({
   onSubmit,
   onCancel,
   error,
+  onDirty,
 }: {
   devices: Device[];
   /** Devices already promoted -- a device is a site server at most once. */
@@ -63,10 +64,17 @@ export function PromoteDialog({
    */
   onCancel: () => void;
   error?: { message?: string } | null;
+  /** Tells the page's one guard whether the form holds a change (general ruling 3). Optional. */
+  onDirty?: (dirty: boolean) => void;
 }) {
   const t = useT();
   const [deviceId, setDeviceId] = useState("");
   const [segments, setSegments] = useState("");
+  const dirty = deviceId !== "" || segments.trim() !== "";
+  useEffect(() => {
+    onDirty?.(dirty);
+    return () => onDirty?.(false);
+  }, [dirty, onDirty]);
   const alreadyPromoted = new Set(promotedDeviceIds ?? []);
 
   return (

@@ -151,6 +151,7 @@ import {
   TableWrap,
   UrlTabs,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
   useUrlTab,
   writeQuery,
@@ -449,6 +450,18 @@ export function EnrollmentPage() {
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const [confirmingDismiss, setConfirmingDismiss] = useState(false);
   const [form, setForm] = useState(BLANK_FORM);
+  // ONE GUARD FOR THE ISSUE FORM IN `?new=token` (general ruling 3): Cancel,
+  // Back, another tab or a link with a change in it asks first.
+  const formDirty = form.name !== BLANK_FORM.name || form.hours !== BLANK_FORM.hours || form.maxUses !== BLANK_FORM.maxUses;
+  const { guard: formGuard, release: releaseForm } = useUnsavedGuard(formOpen && formDirty, { search: ["new"] });
+  // AND IT OPENS EMPTY EVERY TIME (general ruling 4), however it was opened:
+  // what was typed into a form that closed without issuing is gone.
+  useEffect(() => {
+    if (!formOpen) {
+      setForm(BLANK_FORM);
+      setAttempt(null);
+    }
+  }, [formOpen]);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   /** The validated request, waiting on the confirmation. Nothing is sent while
    *  this is set — it is the state of "asked, not yet answered". */
@@ -489,6 +502,7 @@ export function EnrollmentPage() {
       // so a token issued from Certificates was shown on a tab nobody was
       // looking at. One write, in place: `new` goes and the tab is Tokens. The
       // token itself stays in component state, never in the URL.
+      releaseForm();
       showIssuedOnTokens();
       void queryClient.invalidateQueries({ queryKey: [ENROLLMENT_TOKENS_KEY] });
     },
@@ -654,6 +668,7 @@ export function EnrollmentPage() {
 
   return (
     <>
+      {formGuard}
       <PageHead
         title={t("enrollment.page.title")}
         description={t("enrollment.page.description")}

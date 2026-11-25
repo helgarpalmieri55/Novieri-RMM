@@ -96,4 +96,16 @@ describe("enrollment on the kit (4.11)", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Certificates" }));
     expect(await screen.findByText(/^Showing \d+ of \d+$/)).toBeInTheDocument();
   });
+
+  it("asks before another tab drops a typed token form, and opens it empty again (general rulings 3 and 4)", async () => {
+    const { router } = renderPage("/enrollment?new=token", <EnrollmentPage />, "/enrollment");
+    await userEvent.type(await screen.findByLabelText("Token name"), "Bogota");
+    await userEvent.click(screen.getByRole("tab", { name: "Certificates" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=token");
+    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?tab=certificates"));
+    await act(() => router.navigate("/enrollment?new=token"));
+    expect(await screen.findByLabelText("Token name")).toHaveValue("");
+  }, 15_000);
 });

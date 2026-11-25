@@ -34,6 +34,8 @@
 // (decision D8). Promoting stays a person's act, RBAC-checked and audited on
 // the server: a site server is the only originator of a push (invariant 2a(a)).
 
+import { useEffect, useState } from "react";
+
 import { useT } from "../../i18n/context";
 
 import {
@@ -58,6 +60,7 @@ import {
   StatCard,
   StatsGrid,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 
@@ -84,9 +87,19 @@ export function SiteServersPage() {
   // draw "No site servers" before anything was read.
   const { data, isPending, error } = useSiteServers({}, { chip: filters.values.client });
   const promoteDialog = useNewParam("promote");
+  // ONE GUARD FOR THE FORM IN `?new=promote` (general ruling 3), fed by the
+  // form; and a failure of the last attempt is not this opening's (general
+  // rulings 4 and 7): the mutation lives on the page, so it is reset each time
+  // the dialog opens, however it was opened.
+  const [promoteDirty, setPromoteDirty] = useState(false);
+  const { guard: promoteGuard, release: releasePromote } = useUnsavedGuard(promoteDirty, { search: ["new"] });
 
   const devices = usePromotableDevices();
   const promote = usePromoteSiteServerMutation();
+  const { reset: resetPromote } = promote;
+  useEffect(() => {
+    if (promoteDialog.open) resetPromote();
+  }, [promoteDialog.open, resetPromote]);
 
   const servers = data ?? [];
   const enabledCount = servers.filter((server) => server.enabled).length;
@@ -232,6 +245,7 @@ export function SiteServersPage() {
         )}
       </Panel>
 
+      {promoteGuard}
       {manage ? (
         <Dialog
           open={promoteDialog.open}
@@ -243,7 +257,16 @@ export function SiteServersPage() {
             promotedDeviceIds={servers.map((server) => server.device_id)}
             error={promote.error}
             onCancel={promoteDialog.close}
-            onSubmit={(body) => promote.mutate(body, { onSuccess: promoteDialog.close })}
+            onDirty={setPromoteDirty}
+            onSubmit={(body) =>
+              promote.mutate(body, {
+                onSuccess: () => {
+                  // Saved: the close that follows is not a change being dropped.
+                  releasePromote();
+                  promoteDialog.close();
+                },
+              })
+            }
           />
         </Dialog>
       ) : null}

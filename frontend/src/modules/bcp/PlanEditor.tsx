@@ -29,6 +29,7 @@ import type { PlanOut, PlanScopeEntry } from "./types";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { Icon } from "../../shell/icons";
 import { ADD_COMPUTER_TO } from "../../shell/nav";
+import { useUnsavedGuard } from "../../shell/components";
 import { KIND_ICON } from "../../shell/viz";
 
 // Creates or edits a BCP/DR plan (name/description, scope, RTO/RPO,
@@ -180,6 +181,13 @@ export function PlanEditor({
   // Held as data (the rules and the values they judged), so a language switch
   // re-words the sentences; the rules read only that snapshot.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // ONE GUARD FOR THE FORM (general ruling 3): New plan lives in `?new=plan`,
+  // so Cancel, Back or a link with a change asks first. The form is mounted
+  // afresh for each opening (PlansPage keys it; PlanDetail mounts it per
+  // edit), so what it opened with is its first render's values.
+  const current = JSON.stringify([name, description, scope, rtoMinutes, rpoMinutes, procedureRefs, reviewIntervalDays]);
+  const [opened] = useState(current);
+  const { guard, release } = useUnsavedGuard(plan != null && current !== opened, { search: ["new"] });
 
   const mutation = existing ? update : create;
 
@@ -298,6 +306,8 @@ export function PlanEditor({
 
     const onSuccess = () => {
       reset();
+      // Saved: the close that follows is not a change being dropped.
+      release();
       onClose();
     };
 
@@ -325,6 +335,8 @@ export function PlanEditor({
   }
 
   return (
+    <>
+    {guard}
     <Dialog
       open={plan != null}
       onClose={close}
@@ -554,5 +566,6 @@ export function PlanEditor({
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

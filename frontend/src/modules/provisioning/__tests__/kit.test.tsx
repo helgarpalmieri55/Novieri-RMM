@@ -112,6 +112,15 @@ describe("OS images on the list kit (4.7)", () => {
     expect(await screen.findByRole("table", { name: "Images" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "New OS image" })).toBeNull();
   });
+
+  it("asks before Cancel drops a typed name in New image (general ruling 3)", async () => {
+    const { router } = renderPage("/provisioning/images?new=image", <ImagesPage />, "/provisioning/images");
+    const dialog = await screen.findByRole("dialog", { name: "New OS image" });
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "Win");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=image");
+  });
 });
 
 describe("provisioning profiles on the list kit (4.8)", () => {
@@ -145,5 +154,14 @@ describe("provisioning profiles on the list kit (4.8)", () => {
     expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Workstation standard");
     expect(within(dialog).getByDisplayValue("corp.toeshee.example")).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue("svc-join")).toBeInTheDocument();
+  });
+
+  it("asks before Cancel drops a change in a profile's editor (general ruling 3)", async () => {
+    const { router } = renderPage("/provisioning/profiles?edit=prof-workstation-std", <ProfilesPage />, "/provisioning/profiles");
+    const dialog = await screen.findByRole("dialog", { name: "Edit profile" });
+    await userEvent.type(within(dialog).getByLabelText(/^Name/), "x");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?edit=prof-workstation-std");
   });
 });

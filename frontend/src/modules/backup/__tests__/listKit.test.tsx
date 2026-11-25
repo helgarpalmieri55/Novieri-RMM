@@ -146,6 +146,15 @@ describe("backup repositories on the list kit (4.2)", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
   });
+
+  it("asks before Cancel drops a typed name in New repository (general ruling 3)", async () => {
+    const { router } = renderPage("/backup/repositories?new=repository", <RepositoriesPage />, "/backup/repositories");
+    const dialog = await screen.findByRole("dialog", { name: "New repository" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Vault");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=repository");
+  });
 });
 
 describe("backup coverage on the list kit (4.3)", () => {

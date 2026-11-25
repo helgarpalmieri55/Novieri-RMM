@@ -38,6 +38,7 @@ import {
   StatsGrid,
   StatusPill,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
@@ -271,6 +272,9 @@ function CreateImageDialog({ open, onClose }: { open: boolean; onClose: () => vo
   // Populated ON SUBMIT, never while typing. Held as data (rules and values) so
   // a language switch re-words the sentences.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // ONE GUARD FOR THE FORM IN `?new=image` (general ruling 3).
+  const dirty = open && (name !== "" || osFamily !== "windows" || kind !== "install");
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
 
   function reset() {
     setName("");
@@ -290,6 +294,8 @@ function CreateImageDialog({ open, onClose }: { open: boolean; onClose: () => vo
       {
         onSuccess: () => {
           reset();
+          // Saved: the close that follows is not a change being dropped.
+          release();
           onClose();
         },
       },
@@ -297,6 +303,8 @@ function CreateImageDialog({ open, onClose }: { open: boolean; onClose: () => vo
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={onClose} title={t("provisioning.imageDialog.title")}>
       {/* A real <form>, so Enter in Name registers the image. It did nothing
           before: there was no <form> on this dialog at all. */}
@@ -344,5 +352,6 @@ function CreateImageDialog({ open, onClose }: { open: boolean; onClose: () => vo
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

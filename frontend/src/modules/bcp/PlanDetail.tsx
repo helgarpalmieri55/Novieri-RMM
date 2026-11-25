@@ -31,7 +31,7 @@ import { outcomeKind, outcomeLabel, planStateLabel, testTypeLabel } from "./bcpS
 import { reviewStanding, reviewStandingKind, reviewStandingLabel } from "./reviewState";
 import { PlanEditor } from "./PlanEditor";
 import type { PlanOut, TestType } from "./types";
-import { Btn, ClientContext, DetailHead, Panel, StatusPill, useNewParam } from "../../shell/components";
+import { Btn, ClientContext, DetailHead, Panel, StatusPill, useNewParam, useUnsavedGuard } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useRecordTitle } from "../../shell/title";
 import { Facts, KV } from "../../shell/viz";
@@ -384,6 +384,9 @@ function NewTestDialog({ planId, onClose }: { planId: string; onClose: () => voi
   const [type, setType] = useState<TestType>("restore_drill");
   const [scheduledFor, setScheduledFor] = useState("");
   const [notes, setNotes] = useState("");
+  // ONE GUARD FOR THE FORM IN `?new=test` (general ruling 3).
+  const dirty = type !== "restore_drill" || scheduledFor !== "" || notes !== "";
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
 
   function submit() {
     createTest.mutate(
@@ -401,12 +404,18 @@ function NewTestDialog({ planId, onClose }: { planId: string; onClose: () => voi
         // REPLACING: the new test's recorder takes the place of the plan with
         // its `?new=test` dialog open, so Back returns to the plan, not to the
         // dialog (and no Back from closing races the navigation).
-        onSuccess: (test) => navigate(`/bcp/tests/${test.id}`, { replace: true }),
+        onSuccess: (test) => {
+          // Saved: the navigation that follows is not a change being dropped.
+          release();
+          navigate(`/bcp/tests/${test.id}`, { replace: true });
+        },
       },
     );
   }
 
   return (
+    <>
+    {guard}
     <Dialog open onClose={onClose} title={t("bcp.detail.newTestTitle")}>
       <div className="form-grid">
         <Field label={t("bcp.detail.type")}>
@@ -463,5 +472,6 @@ function NewTestDialog({ planId, onClose }: { planId: string; onClose: () => voi
         </Button>
       </div>
     </Dialog>
+    </>
   );
 }

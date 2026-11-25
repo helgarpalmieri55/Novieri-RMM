@@ -100,6 +100,15 @@ describe("site servers on the list kit (4.9)", () => {
     const hrefs = [...document.querySelectorAll(".stat-card")].map((tile) => tile.getAttribute("href"));
     expect(hrefs).toEqual([`/site-servers?client=${ANDES}`, `/site-servers?state=enabled&client=${ANDES}`, `/site-servers?client=${ANDES}`]);
   });
+
+  it("asks before Cancel drops a change in Promote device (general ruling 3)", async () => {
+    const { router } = renderPage("/site-servers?new=promote", <SiteServersPage />, "/site-servers");
+    const dialog = await screen.findByRole("dialog", { name: "Promote a device to site server" });
+    await userEvent.type(within(dialog).getByLabelText("Segments (comma separated CIDRs)"), "10.0.0.0/24");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=promote");
+  });
 });
 
 describe("a site server on the record kit (4.10)", () => {

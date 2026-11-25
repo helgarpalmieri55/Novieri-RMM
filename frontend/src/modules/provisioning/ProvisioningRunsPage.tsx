@@ -62,6 +62,7 @@ import {
   StatsGrid,
   StatusPill,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import { ProvisioningPrerequisites } from "./ProvisioningPrerequisites";
@@ -329,7 +330,8 @@ export function ProvisioningRunsPage() {
 
       {/* Open only for someone who may start a run, whatever the URL asks: a
           courtesy, the server checks `provisioning.run` (invariant 6). */}
-      <ProvisionDialog open={provision.open && canRun} onClose={provision.close} />
+      {/* KEYED, so every opening starts empty however it was opened (general ruling 4). */}
+      <ProvisionDialog key={provision.open && canRun ? "open" : "closed"} open={provision.open && canRun} onClose={provision.close} />
     </div>
   );
 }
@@ -356,6 +358,8 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   // The submit does not start the build. It asks — see `confirmBody`.
   const [confirming, setConfirming] = useState(false);
+  // ONE GUARD FOR THE FORM IN `?new=run` (general ruling 3).
+  const { guard, release } = useUnsavedGuard(open && (profileId !== "" || targetRef !== ""), { search: ["new"] });
 
   // This dialog is never unmounted — the page keeps it rendered and toggles
   // `open` — so without this a failure from the previous attempt is still on
@@ -394,6 +398,8 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
           // table behind this dialog. The confirmation is the row, not a
           // message on a component that is about to disappear.
           reset();
+          // Saved: the close that follows is not a change being dropped.
+          release();
           onClose();
         },
       },
@@ -428,6 +434,8 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
   ].join(" ");
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={onClose} title={t("provisioning.provisionDialog.title")}>
       <Form onSubmit={requestStart}>
         <div className="form-grid">
@@ -501,5 +509,6 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
         }}
       />
     </Dialog>
+    </>
   );
 }

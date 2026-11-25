@@ -4,7 +4,7 @@
  * time on the page (`?edit=<id>`) with the console's one save bar, the
  * question before leaving, and the body the edit dialog sent.
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -153,4 +153,29 @@ describe("the off-site copy page on the form kit (4.4)", () => {
     expect(screen.queryByRole("dialog", { name: "Add off-site storage" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit Wasabi (Amsterdam)" })).toBeNull();
   });
+
+  it("asks before Cancel drops a change in Add off-site storage, and closes after a save without asking (general ruling 3)", async () => {
+    const createOffsiteTarget = vi.fn((body: Partial<OffsiteTarget>) => ({ ...(fixtureRegistry().listOffsiteTargets as () => OffsiteTarget[])()[0], ...body, id: "new-target" }));
+    mockUseApi.mockReturnValue(api({ createOffsiteTarget } as unknown as FixtureMap));
+    const { router } = page("?new=target");
+    let dialog = await screen.findByRole("dialog", { name: "Add off-site storage" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "NAS");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=target");
+    await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // Opened again, it starts empty (general ruling 4), and a save closes it without asking.
+    await act(() => router.navigate("/backup/offsite?new=target"));
+    dialog = await screen.findByRole("dialog", { name: "Add off-site storage" });
+    expect(within(dialog).getByLabelText("Name")).toHaveValue("");
+    await userEvent.type(within(dialog).getByLabelText("Name"), "NAS");
+    await userEvent.type(within(dialog).getByLabelText("Bucket"), "acme");
+    await userEvent.type(within(dialog).getByLabelText("Access key"), "AK");
+    await userEvent.type(within(dialog).getByLabelText("Secret key"), "SK");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(createOffsiteTarget).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  }, 15_000);
 });

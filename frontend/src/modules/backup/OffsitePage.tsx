@@ -22,7 +22,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -42,9 +42,9 @@ import {
   QueryState,
   SaveBar,
   StatusPill,
-  UnsavedGuard,
   useDraft,
   useNewParam,
+  useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
 import {
@@ -88,6 +88,15 @@ export function OffsitePage() {
   const editing = useUrlFilters(["edit"] as const);
   const targets = useOffsiteTargets();
   const edited = canManageStorage ? (targets.data ?? []).find((target) => target.id === editing.values.edit) : undefined;
+  // ONE GUARD FOR THE PAGE (general ruling 3; formKit: one dirty guard per
+  // page), fed by the storage edited in `?edit=` and the one being added in
+  // `?new=target`. Each form's key is guarded only while that form holds a
+  // change, so opening Add over an edit with changes is not "leaving" it.
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [addDirty, setAddDirty] = useState(false);
+  const { guard, release } = useUnsavedGuard(editorDirty || addDirty, {
+    search: [...(editorDirty ? ["edit"] : []), ...(addDirty ? ["new"] : [])],
+  });
 
   return (
     <div>
@@ -112,7 +121,15 @@ export function OffsitePage() {
       />
       {/* KEYED by the storage, so another storage's form starts from its own
           values rather than the last one's draft. */}
-      {edited ? <TargetEditor key={edited.id} target={edited} onClose={() => editing.set("edit", "")} /> : null}
+      {guard}
+      {edited ? (
+        <TargetEditor
+          key={edited.id}
+          target={edited}
+          onClose={() => editing.set("edit", "")}
+          onDirty={setEditorDirty}
+        />
+      ) : null}
       <RepositoriesPanel canManage={canManageStorage} />
       {/* KEYED so a refusal cannot outlive the dialog that produced it. Open
           only for someone who may manage storage, whatever the URL asks. */}
@@ -120,6 +137,12 @@ export function OffsitePage() {
         key={adding.open && canManageStorage ? "open" : "closed"}
         open={adding.open && canManageStorage}
         onClose={adding.close}
+        onDirty={setAddDirty}
+        onSaved={() => {
+          // Saved: the close that follows is not a change being dropped.
+          release();
+          adding.close();
+        }}
       />
     </div>
   );
@@ -683,13 +706,31 @@ function TargetFields({
 }
 
 /** Add off-site storage (`?new=target`). Editing one is `TargetEditor`, on the page. */
-export function TargetDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function TargetDialog({
+  open,
+  onClose,
+  onDirty,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Tells the page's one guard whether the form holds a change (general ruling 3). */
+  onDirty?: (dirty: boolean) => void;
+  /** After the 2xx: the page releases its guard, then closes. Without it, the dialog just closes. */
+  onSaved?: () => void;
+}) {
   const t = useT();
   const create = useCreateOffsiteTargetMutation();
   const [values, setValues] = useState<TargetValues>({ ...targetValues(), ...NO_KEYS });
   // The snapshot is checked and kept in memory only; the secret key is never
   // written to a message (`targetAttempt`).
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+
+  const dirty = open && JSON.stringify(values) !== JSON.stringify({ ...targetValues(), ...NO_KEYS });
+  useEffect(() => {
+    onDirty?.(dirty);
+    return () => onDirty?.(false);
+  }, [dirty, onDirty]);
 
   function set(name: keyof TargetValues, value: string) {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -706,7 +747,7 @@ export function TargetDialog({ open, onClose }: { open: boolean; onClose: () => 
         access_key_id: values.access_key_id,
         secret_access_key: values.secret_access_key,
       },
-      { onSuccess: onClose },
+      { onSuccess: onSaved ?? onClose },
     );
   }
 
@@ -739,10 +780,20 @@ export function TargetDialog({ open, onClose }: { open: boolean; onClose: () => 
  * the rules is said in the bar (`problems`), before anything is sent.
  *
  * Closing the editor, or leaving the page, with a change asks first: the form
- * lives in `?edit=`, so that key is the guard's `search`. Opening Add off-site
+ * lives in `?edit=`, and it reports its changes to the page's one guard
+ * (`onDirty`), which guards `edit` while they last. Opening Add off-site
  * storage over it (`?new=target`) is not leaving it.
  */
-function TargetEditor({ target, onClose }: { target: OffsiteTarget; onClose: () => void }) {
+function TargetEditor({
+  target,
+  onClose,
+  onDirty,
+}: {
+  target: OffsiteTarget;
+  onClose: () => void;
+  /** Tells the page's one guard whether this storage's form holds a change. */
+  onDirty: (dirty: boolean) => void;
+}) {
   const t = useT();
   const update = useUpdateOffsiteTargetMutation();
   const { draft, setDraft, dirty: settingsDirty, discard, markSent } = useDraft(targetValues(target));
@@ -751,6 +802,11 @@ function TargetEditor({ target, onClose }: { target: OffsiteTarget; onClose: () 
   const keysTyped = keys.access_key_id !== "" || keys.secret_access_key !== "";
   const dirty = settingsDirty || keysTyped;
   const values: TargetValues = { ...(draft ?? targetValues(target)), ...keys };
+
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
 
   function set(name: keyof TargetValues, value: string) {
     if (name === "access_key_id" || name === "secret_access_key") {
@@ -787,7 +843,6 @@ function TargetEditor({ target, onClose }: { target: OffsiteTarget; onClose: () 
 
   return (
     <>
-      <UnsavedGuard dirty={dirty} search={["edit"]} />
       <FormSection title={t("backup.offsite.editStorageNamed", { name: target.name })} icon="edit">
         <TargetFields values={values} set={set} editing />
         <div className="flex flex-wrap items-center justify-end gap-2">
