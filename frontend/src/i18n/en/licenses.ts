@@ -155,7 +155,6 @@ export const licenses = {
     deleteBody:
       "Deletes the record and its stored key. Installed copies it covered become over-deployed. This cannot be undone.",
     details: "Details",
-    entitlements: "Entitlements",
     cost: "Cost",
     noCost: "No cost recorded",
     poRef: "PO ref",

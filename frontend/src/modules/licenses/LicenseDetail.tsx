@@ -217,12 +217,14 @@ export function LicenseDetail() {
 
         {license.data && (
           <Panel title={t("licenses.detail.details")}>
-            {/* v3's `kv`: caption on the left, value on the right. Money is a
+            {/* v3's `kv`: caption on the left, value on the right. The
+                entitlement is the first tile above, so it is not repeated
+                here (the coordinator's answer on the client 360, point 5:
+                Details keeps what is nowhere else on the page). Money is a
                 Decimal on the wire; rendered verbatim in the license's own
                 recorded currency, never assumed to be USD. */}
             <KV
               items={[
-                [t("licenses.detail.entitlements"), <span className="mono">{license.data.entitlements}</span>],
                 [
                   t("licenses.detail.cost"),
                   license.data.cost ? (

@@ -41,6 +41,7 @@ import { IPAM_MANAGE, SUBNET_KINDS } from "./types";
 import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterChips,
   ListEmpty,
@@ -229,7 +230,7 @@ export function SubnetTreePage() {
     <Btn label={t("ipam.tree.newSubnet")} icon="plus" variant="primary" onClick={newSubnet.start} />
   ) : undefined;
 
-  /** A filter with many values, as the kit's chip-shaped select (`.chip-select`). */
+  /** A filter with many values: the kit's chip that opens a choice (`ChipSelect`). */
   const chipSelect = (
     key: "vrf" | "site" | "vlan",
     caption: string,
@@ -237,17 +238,13 @@ export function SubnetTreePage() {
     all: string,
     options: readonly { id: string; label: string }[],
   ) => (
-    <span className={filters.values[key] === "" ? "chip chip-select" : "chip chip-select on"}>
-      <span aria-hidden="true">{caption}</span>
-      <select aria-label={aria} value={filters.values[key]} onChange={(e) => filters.set(key, e.target.value)}>
-        <option value="">{all}</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </span>
+    <ChipSelect
+      label={caption}
+      ariaLabel={aria}
+      options={[{ value: "", label: all }, ...options.map((option) => ({ value: option.id, label: option.label }))]}
+      value={filters.values[key]}
+      onChange={(value) => filters.set(key, value)}
+    />
   );
 
   return (

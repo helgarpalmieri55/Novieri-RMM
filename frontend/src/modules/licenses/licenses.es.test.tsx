@@ -288,7 +288,8 @@ describe("one license in Spanish", () => {
     mockUseApi.mockReturnValue(api({ listAllocations: vi.fn().mockResolvedValue(ALLOCATIONS) }));
     const { container } = mountDetail();
     expect(await screen.findByRole("heading", { name: "Acme Office Suite" })).toBeInTheDocument();
-    for (const label of ["Derechos de uso", "Costo", "Ref. de compra", "Fecha de compra", "Vence el mantenimiento", "Renueva", "Ref. de contrato"]) {
+    // The entitlement is the record's first tile now (Receta F), "Con derecho", not a Details row.
+    for (const label of ["Con derecho", "Costo", "Ref. de compra", "Fecha de compra", "Vence el mantenimiento", "Renueva", "Ref. de contrato"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByText("Sin referencia de contrato")).toBeInTheDocument();

@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useMemo, useState } from "react";
 import { attemptProblems, Form, FormActions } from "../../components/form";
 import { NoValue } from "../../components/emptystate";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -22,10 +21,10 @@ import {
   QueryState,
   SearchField,
   ShowingCount,
+  useEditParam,
   useNewParam,
   useUnsavedGuard,
   useUrlFilters,
-  writeQuery,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
@@ -49,39 +48,6 @@ const MATCH_RULE_LABEL: Readonly<Record<MatchRule["type"], string>> = lazyLabels
 
 const productRules = (): readonly FieldRule[] => [{ name: "name", label: translate("licenses.common.name") }];
 
-/**
- * `?edit=<id>` opens that product's editor, so an edit is a link like
- * `?new=product` is (decision D8). Opening adds a history entry, so Back
- * closes it; closing goes Back from the entry this page's `open` added, and
- * otherwise (the editor arrived in a link) drops the key in place, as
- * `useNewParam` does for `?new=`.
- */
-function useEditParam(): { id: string; open: (id: string) => void; close: () => void } {
-  const [params, setParams] = useSearchParams();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const id = params.get("edit") ?? "";
-  const open = useCallback(
-    (next: string) => {
-      const query = new URLSearchParams(params);
-      query.set("edit", next);
-      writeQuery(params, query, setParams, { state: { productEditOpened: next } });
-    },
-    [params, setParams],
-  );
-  const close = useCallback(() => {
-    if (!params.has("edit")) return;
-    if ((location.state as { productEditOpened?: string } | null)?.productEditOpened === params.get("edit")) {
-      void navigate(-1);
-      return;
-    }
-    const query = new URLSearchParams(params);
-    query.delete("edit");
-    writeQuery(params, query, setParams, { replace: true });
-  }, [params, setParams, location.state, navigate]);
-  return { id, open, close };
-}
-
 function matchesProduct(product: ProductOut, needle: string): boolean {
   if (needle === "") return true;
   return `${product.name} ${product.publisher}`.toLowerCase().includes(needle);
@@ -96,7 +62,7 @@ export function ProductsPage() {
   // every client: no Client chip.
   const filters = useUrlFilters(["q"] as const);
   const newProduct = useNewParam("product");
-  const edit = useEditParam();
+  const edit = useEditParam("product");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -197,9 +163,15 @@ export function ProductsPage() {
                         ))
                       )}
                     </Td>
+                    {/* NO RULE, NO COUNT (The Absent Zero Rule): a product
+                        with no match rule cannot be detected, so the report's
+                        0 is "nothing looked", said as such, as on the
+                        compliance page. */}
                     <Td>
                       {installed === undefined ? (
                         t("licenses.common.na")
+                      ) : rules === 0 ? (
+                        <span className="note">{t("licenses.compliance.noUsage")}</span>
                       ) : (
                         <span className="mono">{t("licenses.products.installs", { count: installed })}</span>
                       )}

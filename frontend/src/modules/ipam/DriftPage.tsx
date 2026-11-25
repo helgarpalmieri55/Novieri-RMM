@@ -35,6 +35,7 @@ import { formatDate, toInstant } from "../../lib/datetime";
 import { Icon } from "../../shell/icons";
 import {
   Btn,
+  ChipSelect,
   ClientFilter,
   FilterChips,
   ListEmpty,
@@ -164,7 +165,12 @@ export function DriftPage() {
       ),
     [drift.data, dormant.data, orphans.data],
   );
-  const counted = drift.data !== undefined && dormant.data !== undefined && orphans.data !== undefined;
+  // EACH COUNT ONCE ITS OWN LIST ANSWERED, never a zero for a list not read
+  // yet (The Absent Zero Rule): the drift classes from the drift list, dormant
+  // from its own read, orphans from theirs.
+  const driftCounted = drift.data !== undefined;
+  const dormantCounted = dormant.data !== undefined;
+  const orphansCounted = orphans.data !== undefined;
 
   const visible: DriftOut[] =
     tab === "all"
@@ -176,14 +182,14 @@ export function DriftPage() {
   // The class chips: every drift class, then the two lists that are not
   // drift, each with the count its tile above shows.
   const classOptions = [
-    { value: "", label: t("ipam.drift.allDrift"), count: counted ? counts.drift : undefined },
+    { value: "", label: t("ipam.drift.allDrift"), count: driftCounted ? counts.drift : undefined },
     ...DRIFT_CLASSES.map((driftClass) => ({
       value: driftClass,
       label: driftClassPresentation(driftClass).label,
-      count: counted ? (counts.byClass[driftClass] ?? 0) : undefined,
+      count: driftCounted ? (counts.byClass[driftClass] ?? 0) : undefined,
     })),
-    { value: DORMANT_CLASS, label: t("ipam.fields.dormant"), count: counted ? counts.dormant : undefined },
-    { value: "orphans", label: t("ipam.fields.orphans"), count: counted ? counts.orphans : undefined },
+    { value: DORMANT_CLASS, label: t("ipam.fields.dormant"), count: dormantCounted ? counts.dormant : undefined },
+    { value: "orphans", label: t("ipam.fields.orphans"), count: orphansCounted ? counts.orphans : undefined },
   ];
   const listLoading = tab === DORMANT_CLASS ? dormant.isPending : drift.isPending;
 
@@ -209,7 +215,7 @@ export function DriftPage() {
           to={withClient("/ipam/drift")}
           tone="gold"
           urgent
-          pending={!counted && !(drift.error ?? dormant.error ?? orphans.error)}
+          pending={!driftCounted && !drift.error}
           foot={<span>{t("ipam.drift.tileDriftFoot")}</span>}
           /* A MEASURED zero, and it says so: the drift list answered. This
              page never renders the other zero: "nothing has been looked at"
@@ -222,7 +228,7 @@ export function DriftPage() {
           icon="clock"
           to={withClient("/ipam/drift?class=dormant")}
           tone="neutral"
-          pending={!counted && !(drift.error ?? dormant.error ?? orphans.error)}
+          pending={!dormantCounted && !dormant.error}
           foot={<span>{t("ipam.drift.tileDormantFoot")}</span>}
           zeroLabel={t("ipam.drift.tileDormantZero")}
         />
@@ -232,7 +238,7 @@ export function DriftPage() {
           icon="eye"
           to={withClient("/ipam/drift?class=orphans")}
           tone="blue"
-          pending={!counted && !(drift.error ?? dormant.error ?? orphans.error)}
+          pending={!orphansCounted && !orphans.error}
           foot={<span>{t("ipam.drift.tileOrphansFoot")}</span>}
           zeroLabel={t("ipam.drift.tileOrphansZero")}
         />
@@ -248,27 +254,22 @@ export function DriftPage() {
                 value={filters.values.class}
                 onChange={(value) => filters.set("class", value)}
               />
-              {/* Many values: the kit's chip-shaped select (`.chip-select`). */}
-              <span className={filters.values.subnet === "" ? "chip chip-select" : "chip chip-select on"}>
-                <span aria-hidden="true">{t("ipam.drift.subnetCaption")}</span>
-                <select
-                  aria-label={t("ipam.drift.subnetAria")}
-                  value={filters.values.subnet}
-                  onChange={(e) => filters.set("subnet", e.target.value)}
-                >
-                  <option value="">{t("ipam.subnet.allSubnets")}</option>
-                  {(subnets.data ?? []).map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {subnetLabels.get(row.id) ?? row.prefix}
-                    </option>
-                  ))}
-                  {/* A subnet the list does not hold (another client's, or one
-                      deleted since the link was made) still reads as itself. */}
-                  {filters.values.subnet !== "" && !subnetLabels.has(filters.values.subnet) ? (
-                    <option value={filters.values.subnet}>{filters.values.subnet}</option>
-                  ) : null}
-                </select>
-              </span>
+              {/* Many values: the kit's chip that opens a choice. A subnet the
+                  list does not hold (another client's, or one deleted since the
+                  link was made) still reads as itself. */}
+              <ChipSelect
+                label={t("ipam.drift.subnetCaption")}
+                ariaLabel={t("ipam.drift.subnetAria")}
+                options={[
+                  { value: "", label: t("ipam.subnet.allSubnets") },
+                  ...(subnets.data ?? []).map((row) => ({ value: row.id, label: subnetLabels.get(row.id) ?? row.prefix })),
+                  ...(filters.values.subnet !== "" && !subnetLabels.has(filters.values.subnet)
+                    ? [{ value: filters.values.subnet, label: filters.values.subnet }]
+                    : []),
+                ]}
+                value={filters.values.subnet}
+                onChange={(value) => filters.set("subnet", value)}
+              />
               <ClientFilter filters={filters} />
             </>
           }

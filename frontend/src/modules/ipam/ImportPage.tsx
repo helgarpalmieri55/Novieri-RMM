@@ -201,13 +201,14 @@ function CsvImportWizard() {
         <Steps items={steps} />
       </div>
 
-      <FormSection title={t("ipam.importExport.csvTitle")} icon="upload">
-      <p className="note">
-        {t("ipam.importExport.csvSubtitle", {
+      <FormSection
+        title={t("ipam.importExport.csvTitle")}
+        icon="upload"
+        description={t("ipam.importExport.csvSubtitle", {
           megabytes: (MAX_IMPORT_BYTES / (1024 * 1024)).toFixed(0),
           rows: formatCount(MAX_IMPORT_ROWS),
         })}
-      </p>
+      >
       <p className="note" style={{ marginBottom: 14 }}>
         {t("ipam.importExport.csvNote")}
       </p>
@@ -506,10 +507,11 @@ function DocRecordSection() {
   const t = useT();
   const convert = useConvertIpamDocRecordsMutation();
   return (
-    <FormSection title={t("ipam.importExport.convertTitle")} icon="file-text">
-      <p className="note" style={{ marginBottom: 12 }}>
-        {t("ipam.importExport.convertSubtitle")}
-      </p>
+    <FormSection
+      title={t("ipam.importExport.convertTitle")}
+      icon="file-text"
+      description={t("ipam.importExport.convertSubtitle")}
+    >
       <div className="form-actions" style={{ marginTop: 0 }}>
         <Btn
           label={t("ipam.importExport.dryRun")}

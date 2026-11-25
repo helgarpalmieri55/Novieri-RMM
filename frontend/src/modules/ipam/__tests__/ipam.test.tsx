@@ -791,7 +791,7 @@ describe("the drift page", () => {
     const driftCard = (await screen.findByText(/Unresolved findings\./)).closest(
       "a",
     ) as HTMLElement;
-    // Counted once the three lists answered (n/a until then, never a zero nobody measured).
+    // Counted once the drift list answered (n/a until then, never a zero nobody measured).
     expect(await within(driftCard).findByText("0")).toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: /^Dormant\s*1$/ }));

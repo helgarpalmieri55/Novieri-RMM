@@ -150,7 +150,6 @@ export const licenses: Shape<typeof en> = {
     deleteBody:
       "Elimina el registro y su clave guardada. Las copias instaladas que cubría pasan a estar excedidas. No se puede deshacer.",
     details: "Detalles",
-    entitlements: "Derechos de uso",
     cost: "Costo",
     noCost: "Sin costo registrado",
     poRef: "Ref. de compra",

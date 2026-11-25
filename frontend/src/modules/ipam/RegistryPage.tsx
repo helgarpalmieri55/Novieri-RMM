@@ -91,16 +91,9 @@ export function RegistryPage() {
   );
 }
 
-/** A section's sentence, and its New button for whoever may add a row. */
-function SectionLead({ sentence, action }: { sentence: string; action?: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-      <p className="note" style={{ flex: "1 1 240px", margin: 0 }}>
-        {sentence}
-      </p>
-      {action ?? null}
-    </div>
-  );
+/** A section's New button (or why there is none), above its table. */
+function SectionAction({ children }: { children: React.ReactNode }) {
+  return <div style={{ marginBottom: 12 }}>{children}</div>;
 }
 
 /**
@@ -122,11 +115,10 @@ function VrfSection({ canManage, onNew }: { canManage: boolean; onNew: () => voi
   const clientName = useClientName();
 
   return (
-    <FormSection title={t("ipam.registry.vrfsTitle")} icon="topology-star-3">
-      <SectionLead
-        sentence={t("ipam.registry.vrfsSubtitle")}
-        action={<NewRowAction canManage={canManage} label={t("ipam.registry.newVrf")} onNew={onNew} />}
-      />
+    <FormSection title={t("ipam.registry.vrfsTitle")} icon="topology-star-3" description={t("ipam.registry.vrfsSubtitle")}>
+      <SectionAction>
+        <NewRowAction canManage={canManage} label={t("ipam.registry.newVrf")} onNew={onNew} />
+      </SectionAction>
       <QueryState
         loading={vrfs.isLoading}
         error={vrfs.error}
@@ -236,18 +228,15 @@ function SiteSection() {
   const canReadClients = useMePermissions().has("clients.read");
 
   return (
-    <FormSection title={t("ipam.registry.sitesTitle")} icon="building">
-      <SectionLead
-        sentence={t("ipam.registry.sitesSubtitle")}
-        action={
-          canReadClients ? (
-            <Link className="btn" to="/clients">
-              <Icon name="external-link" size={14} />
-              <span>{t("ipam.registry.manageSites")}</span>
-            </Link>
-          ) : undefined
-        }
-      />
+    <FormSection title={t("ipam.registry.sitesTitle")} icon="building" description={t("ipam.registry.sitesSubtitle")}>
+      {canReadClients ? (
+        <SectionAction>
+          <Link className="btn" to="/clients">
+            <Icon name="external-link" size={14} />
+            <span>{t("ipam.registry.manageSites")}</span>
+          </Link>
+        </SectionAction>
+      ) : null}
       <QueryState
         loading={directory.isLoading}
         error={directory.error}
@@ -294,11 +283,10 @@ function VlanSection({ canManage, onNew }: { canManage: boolean; onNew: () => vo
   const showClient = selected === null;
 
   return (
-    <FormSection title={t("ipam.registry.vlansTitle")} icon="router">
-      <SectionLead
-        sentence={t("ipam.registry.vlansSubtitle")}
-        action={<NewRowAction canManage={canManage} label={t("ipam.registry.newVlan")} onNew={onNew} />}
-      />
+    <FormSection title={t("ipam.registry.vlansTitle")} icon="router" description={t("ipam.registry.vlansSubtitle")}>
+      <SectionAction>
+        <NewRowAction canManage={canManage} label={t("ipam.registry.newVlan")} onNew={onNew} />
+      </SectionAction>
       <QueryState
         loading={vlans.isLoading}
         error={vlans.error}

@@ -273,6 +273,14 @@ describe("the product catalog", () => {
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });
 
+  it("says a product no rule can detect has no usage data, never 0 installs", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage("/licenses/products", <ProductsPage />, "/licenses/products");
+    const row = (await screen.findByText("Windows Server 2022 user CAL", { selector: ".cell-title" })).closest("tr") as HTMLElement;
+    expect(await within(row).findByText("no usage data")).toBeInTheDocument();
+    expect(within(row).queryByText("0 installs")).toBeNull();
+  });
+
   it("opens a product's editor from ?edit=<id>", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/licenses/products?edit=prod-visio", <ProductsPage />, "/licenses/products");
