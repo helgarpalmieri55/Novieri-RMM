@@ -223,6 +223,7 @@ export function ErrorMonitorPage() {
   const openCount = allGroups.filter((group) => group.resolved_at == null).length;
   const totalEvents = allGroups.reduce((sum, group) => sum + group.event_count, 0);
   const shown = useMemo(() => selectErrorGroups(allGroups, filters), [allGroups, filters]);
+  const selectedGroup = allGroups.find((group) => group.id === selectedId);
   // Whichever write last failed. `reset()` is called on the other one when a
   // control is pressed, so this cannot show a stale complaint about the
   // opposite direction.
@@ -455,7 +456,13 @@ export function ErrorMonitorPage() {
 
       {selectedId && (
         <Panel
-          title={t("errorMonitor.events.title")}
+          // THE GROUP IT IS THE EVENTS OF, named: the panel sits below a list
+          // of five and said only "Recent events".
+          title={
+            selectedGroup
+              ? t("errorMonitor.events.titleOf", { type: selectedGroup.exc_type })
+              : t("errorMonitor.events.title")
+          }
           subtitle={t("errorMonitor.events.subtitle")}
           bare
         >

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Attributes } from "../../components/attributes";
 import { EmptyState, NoValue } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
@@ -127,6 +127,12 @@ export function SecurityPage() {
   const selected = opened.values.event === "" ? null : opened.values.event;
   const setSelected = (id: string) => opened.set("event", id);
   const closeEvent = () => opened.set("event", "", { replace: true });
+  /** This view with one event open: what a row's link points at. */
+  const eventHref = (id: string) => {
+    const next = new URLSearchParams(params);
+    next.set("event", id);
+    return `/security?${next.toString()}`;
+  };
   const [copied, setCopied] = useState(false);
 
   // `replace` on every write: typing eight characters into the username box is
@@ -431,13 +437,13 @@ export function SecurityPage() {
               {/* COLOUR WAS THE ONLY SIGNAL (cycle 12, auditor A, HIGH). Three
                   bare <button>s, the selected one distinguished by a purple
                   fill and nothing else. The WAI-ARIA radio-group pattern says
-                  it in structure; the ✓ says it without colour; the arrow keys
+                  it in structure; the check glyph says it without colour; the arrow keys
                   make the one tab stop navigable. */}
               <div
                 role="radiogroup"
                 aria-label={t("security.page.filters.timeRange")}
                 onKeyDown={moveRange}
-                style={{ display: "flex", gap: 4 }}
+                className="chips"
               >
                 {PRESETS.map((option) => {
                   const active = presetHours === option.hours;
@@ -449,10 +455,13 @@ export function SecurityPage() {
                       aria-checked={active}
                       data-range={option.label}
                       tabIndex={active ? 0 : -1}
-                      className={`btn small ${active ? "primary" : ""}`}
+                      // DRAWN AS THE KIT'S CHIPS (DESIGN.md, "Chips"): the
+                      // selected one in the cobalt wash with the check glyph,
+                      // not a filled primary button beside the page's others.
+                      className={active ? "chip on" : "chip"}
                       onClick={() => setFilters({ [HOURS_PARAM]: String(option.hours) })}
                     >
-                      {active ? <span aria-hidden="true">✓ </span> : null}
+                      {active ? <Icon name="circle-check" size={13} /> : null}
                       {option.label}
                     </button>
                   );
@@ -549,7 +558,21 @@ export function SecurityPage() {
                           the source it came from. */}
                       <Td lead={<Icon name={eventGlyph(event.event_type)} size={18} />} gutter={kind}>
                         <div className="cell-title">
-                          <StatusPill value={event.event_type} kind={kind} label={securityEventLabel(event.event_type)} />
+                          {/* THE KEYBOARD'S WAY IN. The row opens on a click,
+                              and a row is not a control; this link is,
+                              named by what it opens. It stops the click so
+                              the row does not write the same URL twice. */}
+                          <Link
+                            to={eventHref(event.id)}
+                            aria-label={t("security.page.openEventAria", {
+                              event: securityEventLabel(event.event_type),
+                              host: event.hostname,
+                              when: formatDateTime(event.ts, zone),
+                            })}
+                            onClick={(click) => click.stopPropagation()}
+                          >
+                            <StatusPill value={event.event_type} kind={kind} label={securityEventLabel(event.event_type)} />
+                          </Link>
                         </div>
                         <div className="cell-sub mono">{event.source}</div>
                       </Td>
@@ -603,15 +626,30 @@ export function SecurityPage() {
         ) : detail.isLoading ? (
           <p className="cell-sub">{t("security.page.raw.loading")}</p>
         ) : detail.data ? (
-          // A JSON DUMP WAS THE DEFAULT (cycle 12, auditor A, LOW — flagged
-          // there as unverified, and it was exactly the /devices/:id defect).
-          // `Attributes` labels the stored fields and keeps the underlying
-          // object behind a closed disclosure, which is what an engineer
-          // reading a Windows event id actually needs.
+          <>
+          {/* WHICH EVENT THIS IS, first: the drawer covers the row it came
+              from (all of it, on a phone), so it says the event, the
+              machine, the account and the time again before the fields. */}
+          <div className="detail-meta" style={{ marginBottom: 12 }}>
+            <StatusPill
+              value={detail.data.event_type}
+              kind={variantKind(eventBadgeVariant(detail.data.event_type))}
+              label={securityEventLabel(detail.data.event_type)}
+            />
+            <span className="detail-context">
+              {[detail.data.hostname, detail.data.username || t("security.page.noAccount"), formatDateTime(detail.data.ts, zone)].join(" · ")}
+            </span>
+          </div>
+          {/* A JSON DUMP WAS THE DEFAULT (cycle 12, auditor A, LOW -- flagged
+              there as unverified, and it was exactly the /devices/:id defect).
+              `Attributes` labels the stored fields and keeps the underlying
+              object behind a closed disclosure, which is what an engineer
+              reading a Windows event id actually needs. */}
           <Attributes
             value={detail.data.raw}
             empty={t("security.page.raw.noFields")}
           />
+          </>
         ) : null}
       </Drawer>
     </>

@@ -95,7 +95,7 @@ export function PackagesPage() {
       (wanted === "" || fold(`${pkg.name} ${pkg.version}`).includes(wanted)),
   );
   const newPackage = canManage ? (
-    <Btn label={t("deploy.packages.newPackage")} icon="plus" variant="primary" small onClick={created.start} />
+    <Btn label={t("deploy.packages.newPackage")} icon="plus" small onClick={created.start} />
   ) : undefined;
   const upload = useUploadPackageArtifactMutation();
   const remove = useDeletePackageMutation();

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { Form, attemptProblems } from "../../components/form";
@@ -195,7 +195,8 @@ export function PatchPolicyEditor() {
           bare
           actions={
             canManage ? (
-              <Btn label={t("patch.policy.newPolicy")} icon="plus" variant="primary" onClick={() => openPolicy(null)} />
+              // Secondary: on a form page the save bar's Save is the one primary (DESIGN.md, "Buttons").
+              <Btn label={t("patch.policy.newPolicy")} icon="plus" onClick={() => openPolicy(null)} />
             ) : undefined
           }
         >
@@ -420,8 +421,19 @@ function PolicyForm({
 
   const title = creating ? t("patch.policy.dialogNew") : t("patch.policy.dialogEdit");
 
+  // THE FORM COMES INTO VIEW WHEN IT OPENS. It opens below the list, and at
+  // a phone's width (or under a long list) Edit would otherwise change
+  // nothing on screen -- the very complaint that made it a dialog once
+  // (Auditor A: "a click that did open it looked exactly like a click that
+  // did nothing"). Guarded: jsdom has no `scrollIntoView`.
+  const section = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const node = section.current;
+    if (node && typeof node.scrollIntoView === "function") node.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   return (
-    <section aria-label={title}>
+    <section aria-label={title} ref={section}>
       {guard}
       <Form onSubmit={submit}>
         <FormSection title={title} icon="adjustments">

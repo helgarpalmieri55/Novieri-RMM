@@ -111,7 +111,7 @@ export function ScriptsPage() {
       (wanted === "" || fold(script.name).includes(wanted)),
   );
   const newScript = canManage ? (
-    <Btn label={t("deploy.scripts.newScript")} icon="plus" variant="primary" small onClick={authoring.start} />
+    <Btn label={t("deploy.scripts.newScript")} icon="plus" small onClick={authoring.start} />
   ) : undefined;
 
   return (

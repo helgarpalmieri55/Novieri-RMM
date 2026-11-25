@@ -91,6 +91,9 @@ export function AppsPanel({
         severityNote={t("patch.apps.severityNote", { manager })}
         scopeName={t("patch.apps.scopeName")}
         clearLabel={t("patch.apps.clearLabel", { manager })}
+        // The package managers publish no severity ("every app update is
+        // unknown"), so a severity chip here could only empty the list.
+        severityFilter={false}
       />
       {sentences.length > 0 ? (
         <ul className="note mt-2" aria-label={t("patch.apps.statusAria", { manager })}>

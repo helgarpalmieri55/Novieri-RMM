@@ -57,6 +57,7 @@ export const security = {
       user: "User",
       when: "When",
     },
+    openEventAria: "{event} on {host}, {when}",
     noAccount: "No account recorded",
     raw: {
       title: "Raw event",

@@ -170,9 +170,10 @@ describe("the time-range control exposes its selection (A59)", () => {
     renderPage({}, "/security?hours=24");
     // A check glyph on the selected option, so a purple fill is not the only
     // difference between "24h" and "7d" for a reader who cannot see the fill.
+    // The kit's chip check (DESIGN.md, "Chips"; O3 polish) in place of a typed ✓.
     const selected = await screen.findByRole("radio", { name: /24h/ });
-    expect(selected.textContent).toContain("✓");
-    expect(screen.getByRole("radio", { name: /7d/ }).textContent).not.toContain("✓");
+    expect(selected.querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("radio", { name: /7d/ }).querySelector("svg")).toBeNull();
   });
 
   it("is one tab stop, and the arrow keys move within it", async () => {

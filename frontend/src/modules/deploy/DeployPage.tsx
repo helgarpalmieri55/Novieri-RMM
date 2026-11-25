@@ -414,7 +414,7 @@ export function DeployPage() {
               nothingYet={t("deploy.deployments.emptyNone")}
               action={
                 canCreate ? (
-                  <Btn label={t("deploy.deployments.newDeployment")} icon="plus" variant="primary" small onClick={created.start} />
+                  <Btn label={t("deploy.deployments.newDeployment")} icon="plus" small onClick={created.start} />
                 ) : undefined
               }
             />

@@ -267,7 +267,7 @@ export function SessionsPage() {
               nothingYet={t("remote.sessions.emptyNone")}
               action={
                 canControl ? (
-                  <Btn variant="primary" small icon="user-screen" label={t("remote.sessions.start")} onClick={started.start} />
+                  <Btn small icon="user-screen" label={t("remote.sessions.start")} onClick={started.start} />
                 ) : undefined
               }
             />

@@ -42,7 +42,7 @@ describe("the error monitor on the list kit", () => {
   it("opens a group from ?group=", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     const { router } = renderPage("/error-monitor?group=eg-1", <ErrorMonitorPage />, "/error-monitor");
-    expect(await screen.findByRole("heading", { name: "Recent events" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Recent events of PatchValidationError" })).toBeInTheDocument();
     expect(await screen.findByText("job-2")).toBeInTheDocument();
     // Opening another group is a link too.
     const row = screen.getByText("ConnectionResetError").closest("tr") as HTMLElement;

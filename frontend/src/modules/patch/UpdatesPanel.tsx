@@ -92,6 +92,7 @@ export function UpdatesPanel({
   scopeName,
   clearLabel,
   clientFilter,
+  severityFilter = true,
 }: {
   query: UseQueryResult<PatchUpdateListResponse>;
   filters: UpdateFilters;
@@ -121,6 +122,9 @@ export function UpdatesPanel({
   clearLabel?: string;
   /** The Client chip, for the one list on the page that carries it (the fleet's OS updates). */
   clientFilter?: ReactNode;
+  /** False where no update carries a severity (the app updates: the package
+   *  managers publish none), so a chip could only empty the list. */
+  severityFilter?: boolean;
 }) {
   const t = useT();
   const items = query.data?.items ?? [];
@@ -178,6 +182,7 @@ export function UpdatesPanel({
                 force, and each chip carries the server's count of it. The
                 severities are the same on every tab; only which are on by
                 default differs (`defaultSeveritiesFor`). */}
+            {severityFilter ? (
             <SeverityChips
               label={t("patch.updates.filterAria", { scope })}
               selected={filters.severities}
@@ -185,6 +190,7 @@ export function UpdatesPanel({
               allCount={query.data?.total_unfiltered}
               onChange={(severities) => onFilterChange({ severities, offset: 0 })}
             />
+            ) : null}
             {clientFilter}
           </>
         }

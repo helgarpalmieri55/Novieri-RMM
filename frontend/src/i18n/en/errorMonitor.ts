@@ -56,6 +56,7 @@ export const errorMonitor = {
   },
   events: {
     title: "Recent events",
+    titleOf: "Recent events of {type}",
     subtitle: "Correlation ids captured with each occurrence, for grepping the logs.",
     empty: "No events recorded for this group.",
     occurred: "Occurred",

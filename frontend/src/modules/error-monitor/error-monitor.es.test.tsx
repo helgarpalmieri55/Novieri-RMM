@@ -144,7 +144,8 @@ describe("the error monitor in Spanish", () => {
     setList({ groups: [OPEN_GROUP, RESOLVED_GROUP], dropped: 0 });
     const { container } = renderPage();
     await user.click(await screen.findByRole("button", { name: "Eventos de ValueError" }));
-    expect(await screen.findByRole("heading", { name: "Eventos recientes" })).toBeInTheDocument();
+    // The panel names the group it is the events of (O3 polish: it said only "Recent events").
+    expect(await screen.findByRole("heading", { name: "Eventos recientes de ValueError" })).toBeInTheDocument();
     expect(screen.getByText("req-abc-999")).toBeInTheDocument();
     expect(
       screen.getByText("No había ninguna organización en curso cuando se capturó esta ocurrencia"),

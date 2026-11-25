@@ -52,6 +52,7 @@ export const security: Shape<typeof en> = {
       user: "Usuario",
       when: "Cuándo",
     },
+    openEventAria: "{event} en {host}, {when}",
     noAccount: "Sin cuenta registrada",
     raw: {
       title: "Evento sin procesar",

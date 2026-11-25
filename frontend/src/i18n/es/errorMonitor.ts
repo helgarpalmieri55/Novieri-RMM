@@ -59,6 +59,7 @@ export const errorMonitor: Shape<typeof en> = {
   },
   events: {
     title: "Eventos recientes",
+    titleOf: "Eventos recientes de {type}",
     subtitle: "Identificadores de correlación capturados con cada ocurrencia, para buscar en los registros.",
     empty: "No hay eventos registrados para este grupo.",
     occurred: "Ocurrió",
