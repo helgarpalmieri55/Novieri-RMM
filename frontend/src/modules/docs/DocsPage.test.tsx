@@ -1202,7 +1202,8 @@ describe("DocsPage on the kit", () => {
       expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
       // Articles and "linked to an object" read the articles; records and documents have reads of their own.
       const cards = [...document.querySelectorAll(".stat-card")];
-      for (const card of [cards[0], cards[2]]) {
+      expect(cards).toHaveLength(4);
+      for (const card of cards.filter((_, index) => index === 0 || index === 2)) {
         expect(card.querySelector(".stat-value")?.textContent).toBe("n/a");
         expect(card.querySelectorAll(".stat-zero, .stat-foot")).toHaveLength(0);
       }
