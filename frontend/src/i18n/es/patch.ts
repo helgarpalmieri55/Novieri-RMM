@@ -530,7 +530,6 @@ export const patch: Shape<typeof en> = {
     warnHelp:
       "Un portátil con alguien con la sesión iniciada se reinicia este tiempo después de instalar las actualizaciones. Los servidores y los equipos vacíos se reinician dentro de la ventana de mantenimiento a los cinco minutos.",
     autoApproveToggle: "Aprobar automáticamente los parches de seguridad",
-    save: "Guardar",
     replaceOrgTitle: "Reemplazar la política de parches de toda la organización",
     replaceGroupTitle: "Reemplazar la política de parches de {group}",
     replaceOrgBody:

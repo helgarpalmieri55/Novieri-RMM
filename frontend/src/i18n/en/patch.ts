@@ -540,7 +540,6 @@ export const patch = {
     warnHelp:
       "A laptop with someone signed in restarts this long after updates install. Servers and empty machines restart inside the maintenance window after five minutes.",
     autoApproveToggle: "Auto-approve security patches",
-    save: "Save",
     replaceOrgTitle: "Replace the organisation-wide patch policy",
     replaceGroupTitle: "Replace the patch policy for {group}",
     replaceOrgBody:
