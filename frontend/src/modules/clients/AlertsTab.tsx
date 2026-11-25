@@ -13,7 +13,7 @@ import { RelTime } from "../../components/reltime";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { ClientOut } from "../../lib/api";
-import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi } from "../../shell/components";
+import { ListEmpty, Panel, QueryState, StatusPill, useNarrowedApi, withClient } from "../../shell/components";
 import { checkLabel } from "../health/healthState";
 
 export function AlertsTab({ client, enabled }: { client: ClientOut; enabled: boolean }) {
@@ -37,7 +37,7 @@ export function AlertsTab({ client, enabled }: { client: ClientOut; enabled: boo
       subtitle={summary.data ? t("clients.alerts.openInAll", { count: summary.data.open }) : undefined}
       bare
       actions={
-        <Link className="btn small" to={`/health?client=${client.id}`}>
+        <Link className="btn small" to={withClient("/health", client.id)}>
           {t("clients.alerts.seeAll")}
         </Link>
       }
