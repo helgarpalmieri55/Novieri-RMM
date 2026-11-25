@@ -150,3 +150,20 @@ describe("the tiles under the Client chip (fix round 1)", () => {
     }
   });
 });
+
+describe("before /me answers (coordinator ruling 10)", () => {
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is", async () => {
+    // With the chip set and `/me` pending, the narrowed read is disabled, and
+    // a disabled query is not "loading" to TanStack v5: the page must not say
+    // "no devices yet" or "nothing matches" about a list nobody has read.
+    const registry = fixtureRegistry();
+    const listDevices = vi.fn(registry.listDevices);
+    mockUseApi.mockReturnValue(fixtureClient({ ...registry, listDevices, me: () => new Promise<never>(() => {}) }));
+    renderPage(`/devices?client=${ANDES}`, <DevicesPage />);
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText("No devices yet. Install the agent on the first one.")).toBeNull();
+    expect(listDevices).not.toHaveBeenCalled();
+  });
+});

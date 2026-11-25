@@ -725,7 +725,10 @@ export function DevicesPage() {
               : approveAllMessage(reviewNotice.result, { capped: reviewNotice.capped })}
           </p>
         ) : null}
-        <QueryState loading={devices.isLoading || !ready} error={devices.error} empty={false} emptyLabel="">
+        {/* `isPending`, NOT `isLoading` (coordinator ruling 10): while the chip's client is
+            undecided the read is disabled, which TanStack v5 does not call loading. Pending
+            is "no answer yet", whatever the reason, so no empty state is drawn before it. */}
+        <QueryState loading={devices.isPending} error={devices.error} empty={false} emptyLabel="">
           {items.length === 0 ? (
             /* WHICH EMPTY THIS IS, and the distinction comes from the server
                rather than from the length of a page. `fleet.total` is the
