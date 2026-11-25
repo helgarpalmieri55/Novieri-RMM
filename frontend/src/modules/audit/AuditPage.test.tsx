@@ -25,6 +25,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { ApiClient } from "../../lib/api";
+import { NO_DATE } from "../../lib/datetime";
 import { AuditPage } from "./AuditPage";
 import type { AuditEventOut, AuditListResponse, AuditVerifyResponse } from "./types";
 
@@ -195,7 +196,7 @@ describe("AuditPage", () => {
     expect(await screen.findByText("16 Aug 2026, 14:32")).toBeInTheDocument();
   });
 
-  it("renders an em dash for an event with no timestamp, never 'Invalid Date'", async () => {
+  it("renders NO_DATE for an event with no timestamp, never 'Invalid Date'", async () => {
     // A row whose `ts` did not survive the wire is a defect worth seeing as a
     // gap, not as the words "Invalid Date" in an evidence table.
     renderPage({
@@ -207,7 +208,7 @@ describe("AuditPage", () => {
     // The When cell is the row's THIRD cell on the v3 kit (action, actor,
     // when, hash: the action leads, as the design draws it).
     const cells = [...document.querySelectorAll("tbody td")].map((cell) => cell.textContent);
-    expect(cells[2]).toBe("—");
+    expect(cells[2]).toBe(NO_DATE);
   });
 
   it("filters the loaded page client-side and distinguishes no-match from empty", async () => {
@@ -261,11 +262,12 @@ describe("AuditPage", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: /Chain integrity/ }));
     expect(await screen.findByText(/The chain is BROKEN/)).toBeInTheDocument();
-    // A count from a failed walk is never presented as events verified.
+    // A count from a failed walk is never presented as events verified: the
+    // tile draws the kit's absent mark.
     const values = [...document.querySelectorAll(".stat-card")].map(
       (card) => card.querySelector(".stat-value")?.textContent,
     );
-    expect(values[2]).toBe("—");
+    expect(values[2]).toBe("n/a");
   });
 
   it("never says verified for a verification that did not come back", async () => {

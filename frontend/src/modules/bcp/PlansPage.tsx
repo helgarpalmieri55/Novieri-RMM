@@ -153,7 +153,8 @@ export function PlansPage() {
   const plansWithFindings = (status.data ?? []).filter((row) => row.open_findings > 0).length;
   // "The plans list answered" and "there are no plans" are different facts, and
   // a tile must not print 0 for the first: an unmeasured 0 and a measured 0
-  // look identical on screen and mean opposite things.
+  // look identical on screen and mean opposite things. Without it the tiles
+  // are the kit's pending tiles, the absent mark (clarification 10a).
   const measured = plans.data !== undefined;
 
   const stateFilter = filters.values[STATE_PARAM];
@@ -201,7 +202,8 @@ export function PlansPage() {
       <StatsGrid columns={3}>
         <StatCard
           label={t("bcp.plans.tileActive")}
-          value={measured ? String(activeCount) : "—"}
+          value={String(activeCount)}
+          pending={!measured}
           icon="shield-check"
           to={withClient(`/bcp?${STATE_PARAM}=active`, filters.values.client)}
           tone="blue"
@@ -210,7 +212,8 @@ export function PlansPage() {
         />
         <StatCard
           label={t("bcp.plans.tileOverdue")}
-          value={measured ? String(overdueCount) : "—"}
+          value={String(overdueCount)}
+          pending={!measured}
           icon="clock"
           to={withClient(`/bcp?${REVIEW_PARAM}=${OVERDUE_VIEW}`, filters.values.client)}
           tone="gold"
@@ -230,10 +233,12 @@ export function PlansPage() {
         />
         <StatCard
           label={t("bcp.plans.tileFindings")}
-          // The count is a sum over the STATUS rows, so it is "—" until they
-          // arrive: `(status.data ?? []).reduce(...)` reads 0 for a response
-          // that never came, which is the reassuring version of "unknown".
-          value={status.data ? String(openFindings) : "—"}
+          // The count is a sum over the STATUS rows, so it is the kit's
+          // pending tile (the absent mark) until they arrive:
+          // `(status.data ?? []).reduce(...)` reads 0 for a response that never
+          // came, which is the reassuring version of "unknown".
+          value={String(openFindings)}
+          pending={!status.data}
           icon="alert-triangle"
           /* The period report is the only surface that lists findings across
              plans (`GET /bcp/report/period` — "Open findings by severity");

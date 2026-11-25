@@ -107,6 +107,12 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
   const summary = summariseAlerts(alerts.data ?? []);
   const autoRate =
     summary.resolved > 0 ? Math.round((summary.machineResolved / summary.resolved) * 100) : null;
+  const mttr = summary.meanTimeToResolveS;
+  // NO NUMBER BEFORE THE LIST ANSWERS (clarification 10a): until then every
+  // tile is the kit's pending tile, the absent mark, not the zeroes of an
+  // empty list. A failed read never reaches here (the alert above). The two
+  // rates over no resolution are unmeasured, and drawn the same way.
+  const noData = !alerts.data;
 
   return (
     <Panel
@@ -117,6 +123,7 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         <StatCard
           label={t("health.report.inView")}
           value={String(summary.total)}
+          pending={noData}
           icon="bell"
           to={to(ALERTS)}
           tone="neutral"
@@ -125,6 +132,7 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         <StatCard
           label={t("health.report.stillOpen")}
           value={String(summary.open)}
+          pending={noData}
           icon="warning"
           to={to(OPEN_ALERTS)}
           tone="red"
@@ -137,11 +145,8 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         />
         <StatCard
           label={t("health.report.mttr")}
-          value={
-            summary.meanTimeToResolveS === null
-              ? "—"
-              : formatSeconds(Math.round(summary.meanTimeToResolveS))
-          }
+          value={mttr === null ? "" : formatSeconds(Math.round(mttr))}
+          pending={noData || mttr === null}
           icon="clock"
           to={to(RESOLVED_ALERTS)}
           tone="blue"
@@ -150,6 +155,7 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         <StatCard
           label={t("health.report.machine")}
           value={String(summary.machineResolved)}
+          pending={noData}
           icon="automation"
           to={to(MACHINE_RESOLVED_ALERTS)}
           tone="green"
@@ -159,6 +165,7 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         <StatCard
           label={t("health.report.human")}
           value={String(summary.humanClosed)}
+          pending={noData}
           icon="user"
           to={to(HUMAN_CLOSED_ALERTS)}
           tone="gold"
@@ -167,7 +174,8 @@ export function HealthReportPanel({ chip = "" }: { chip?: string }) {
         />
         <StatCard
           label={t("health.report.autoRate")}
-          value={autoRate === null ? "—" : `${autoRate}%`}
+          value={autoRate === null ? "" : `${autoRate}%`}
+          pending={noData || autoRate === null}
           icon="activity"
           to={to(RESOLVED_ALERTS)}
           tone="green"

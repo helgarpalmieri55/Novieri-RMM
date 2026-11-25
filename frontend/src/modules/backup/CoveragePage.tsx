@@ -58,6 +58,9 @@ export function CoveragePage() {
   const filter = filters.values.coverage;
   const coverage = useBackupCoverage(filter, filters.values.client);
   const totals = coverage.data?.totals ?? {};
+  // The tiles count the report: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !coverage.data;
   const rows = coverage.data?.rows ?? [];
   // The report's totals are the server's, over every device of the answer
   // (not the rows shown, which `limit` may cut), so the chips' counts are
@@ -82,6 +85,7 @@ export function CoveragePage() {
         <StatCard
           label={t("backup.coverage.tileProtected")}
           value={String(totals.covered ?? 0)}
+          pending={noData}
           icon="circle-check"
           to={withClient("/backup/coverage?coverage=covered", filters.values.client)}
           tone="green"
@@ -90,6 +94,7 @@ export function CoveragePage() {
         <StatCard
           label={t("backup.coverage.tileStale")}
           value={String(totals.stale ?? 0)}
+          pending={noData}
           icon="clock"
           to={withClient("/backup/coverage?coverage=stale", filters.values.client)}
           tone="gold"
@@ -98,6 +103,7 @@ export function CoveragePage() {
         <StatCard
           label={t("backup.coverage.tileFailing")}
           value={String(totals.failing ?? 0)}
+          pending={noData}
           icon="alert-triangle"
           to={withClient("/backup/coverage?coverage=failing", filters.values.client)}
           tone="red"
@@ -107,6 +113,7 @@ export function CoveragePage() {
         <StatCard
           label={t("backup.coverage.tileUnprotected")}
           value={String(totals.unprotected ?? 0)}
+          pending={noData}
           icon="minus"
           to={withClient("/backup/coverage?coverage=unprotected", filters.values.client)}
           tone="red"

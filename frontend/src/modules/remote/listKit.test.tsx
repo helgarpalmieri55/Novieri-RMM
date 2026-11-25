@@ -142,14 +142,31 @@ describe("Remote sessions on the list kit", () => {
 
   it("draws no number and no claim in its tiles while the Client chip waits for /me (clarification 10a)", async () => {
     // A tile counts the narrowed read; before it answers there is nothing to
-    // count, so no "0" and no "nothing has ever…" (Health's tiles: "—", no sub).
+    // count, so no "0" and no "nothing has ever…": the kit's pending tile, the
+    // absent mark ("n/a") and no sub (Tile pending).
     mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), me: () => new Promise<never>(() => {}) }));
     const { container } = renderPage(`/remote?client=${ANDES}`, <SessionsPage />, "/remote");
     await screen.findAllByText("Loading…");
     const tiles = Array.from(container.querySelectorAll(".tile"));
     expect(tiles.length).toBe(4);
     for (const tile of tiles) {
-      expect(tile.querySelector(".v")?.textContent).toBe("—");
+      expect(tile.querySelector(".v")?.textContent).toBe("n/a");
+      expect(tile.querySelector(".z")).toBeNull();
+    }
+  });
+
+  it("draws no number and no claim in its tiles once the read they count has failed (clarification 10a)", async () => {
+    // A failed read is no data either: `isPending` is false by then, and the
+    // tiles used to count the empty list it left ("0", "nothing has ever…").
+    // The kit's pending tile is the absent mark ("n/a") and no sub.
+    const failed = () => Promise.reject(new Error("status 503"));
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listRemoteSessions: failed, listDevices: failed }));
+    const { container } = renderPage("/remote", <SessionsPage />, "/remote");
+    await screen.findAllByRole("alert");
+    const tiles = Array.from(container.querySelectorAll(".tile"));
+    expect(tiles.length).toBe(4);
+    for (const tile of tiles) {
+      expect(tile.querySelector(".v")?.textContent).toBe("n/a");
       expect(tile.querySelector(".z")).toBeNull();
     }
   });

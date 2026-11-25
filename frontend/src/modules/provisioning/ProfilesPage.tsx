@@ -65,6 +65,9 @@ export function ProfilesPage() {
   const images = useOsImages();
   const imageOptions = imagePickerOptions(images.data ?? []);
   const items = profiles.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !profiles.data;
   const enabledCount = items.filter((profile) => profile.enabled).length;
   // What the total is made of, for the first tile's second line: how many
   // distinct images these profiles lay down.
@@ -108,6 +111,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileProfiles")}
           value={String(items.length)}
+          pending={noData}
           icon="file-text"
           to="/provisioning/profiles"
           tone="neutral"
@@ -121,6 +125,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileEnabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="circle-check"
           to="/provisioning/profiles?enabled=true"
           tone="green"
@@ -134,6 +139,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileDisabled")}
           value={String(items.length - enabledCount)}
+          pending={noData}
           icon="minus"
           to="/provisioning/profiles?enabled=false"
           tone="neutral"

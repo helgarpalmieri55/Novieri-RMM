@@ -272,6 +272,8 @@ export function SecurityPage() {
   // cards: the first genuinely IS the window total (the server counts it), the
   // other two are derived from the page in hand.
   const loadedNote = t("security.page.loadedNote", { count: items.length });
+  // The search has not answered, or failed: no tile counts it (clarification 10a).
+  const noData = !events.data;
 
   function moveRange(event: KeyboardEvent<HTMLDivElement>) {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
@@ -363,8 +365,11 @@ export function SecurityPage() {
         <StatCard
           label={t("security.page.tiles.events")}
           // "The search answered with none" and "the search has not answered"
-          // are different facts and `?? 0` printed the same 0 for both.
-          value={events.data ? String(events.data.total) : "—"}
+          // are different facts and `?? 0` printed the same 0 for both: until
+          // it answers (or once it failed) the kit's pending tile, the absent
+          // mark (clarification 10a). The window it would count stays below.
+          value={String(events.data?.total ?? 0)}
+          pending={noData}
           icon="logs"
           // The whole window, with the narrowing filters dropped: this number
           // is the server's total for the window, not for the filtered view.
@@ -375,7 +380,8 @@ export function SecurityPage() {
         />
         <StatCard
           label={t("security.page.tiles.failed")}
-          value={events.data ? String(failedInWindow) : "—"}
+          value={String(failedInWindow)}
+          pending={noData}
           icon="lock"
           // The same window and the same username, narrowed to the event type
           // this tile counted — the drill-down an operator would otherwise do
@@ -384,11 +390,12 @@ export function SecurityPage() {
           tone="red"
           urgent
           zeroLabel={t("security.page.tiles.failedZero")}
-          foot={loadedNote}
+          foot={noData ? undefined : loadedNote}
         />
         <StatCard
           label={t("security.page.tiles.accounts")}
-          value={events.data ? String(distinctPrincipals) : "—"}
+          value={String(distinctPrincipals)}
+          pending={noData}
           icon="user"
           // No principals list exists to open — this control plane serves no
           // route enumerating the accounts seen in security events — so the
@@ -397,7 +404,7 @@ export function SecurityPage() {
           to={hrefWith({ [USERNAME_PARAM]: "" })}
           tone="blue"
           zeroLabel={t("security.page.tiles.accountsZero")}
-          foot={loadedNote}
+          foot={noData ? undefined : loadedNote}
         />
       </StatsGrid>
 

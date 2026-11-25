@@ -1287,7 +1287,8 @@ describe("FleetPatchPage says 'never scanned' rather than reporting an all-clear
     renderWithProviders(<FleetPatchPage />);
 
     await screen.findByText("No patch scan has completed yet");
-    expect(statValues()).toEqual(["—", "—", "—", "—"]);
+    // Unmeasured is the kit's absent mark (DESIGN.md, the Absent Zero Rule).
+    expect(statValues()).toEqual(["n/a", "n/a", "n/a", "n/a"]);
     expect(screen.getAllByText("Never scanned")).toHaveLength(4);
   });
 

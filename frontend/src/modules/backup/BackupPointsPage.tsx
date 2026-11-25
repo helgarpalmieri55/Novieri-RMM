@@ -204,6 +204,9 @@ export function BackupPointsPage() {
   // as an alert state rather than a neutral statistic". `gold` is the
   // attention treatment the Failed-jobs card beside it already uses.
   const unprotected = report.data ? report.data.devices_total - report.data.devices_covered : 0;
+  // The tiles count the report: until it answers, or once it failed, each is
+  // the kit's pending tile, the absent mark (clarification 10a).
+  const noReport = !report.data;
 
   return (
     <div>
@@ -261,19 +264,19 @@ export function BackupPointsPage() {
         <StatCard
           label={t("backup.points.tileSuccess")}
           value={
-            report.data
-              ? totalRuns === 0
-                ? t("backup.points.neverRun")
-                : t("backup.points.percent", { percent: Math.round(report.data.success_rate * 100) })
-              : "—"
+            totalRuns === 0
+              ? t("backup.points.neverRun")
+              : t("backup.points.percent", { percent: Math.round((report.data?.success_rate ?? 0) * 100) })
           }
+          pending={noReport}
           icon="circle-check"
           to="/jobs?q=backup"
           tone="green"
         />
         <StatCard
           label={t("backup.points.tileProtected")}
-          value={report.data ? `${report.data.devices_covered} / ${report.data.devices_total}` : "—"}
+          value={`${report.data?.devices_covered ?? 0} / ${report.data?.devices_total ?? 0}`}
+          pending={noReport}
           icon="shield-check"
           to="/devices"
           /* GOLD IS THE COVERAGE GAP, and it stays gold when the gap is
@@ -287,7 +290,8 @@ export function BackupPointsPage() {
         />
         <StatCard
           label={t("backup.points.tileFailed")}
-          value={report.data ? String(failedRuns) : "—"}
+          value={String(failedRuns)}
+          pending={noReport}
           icon="circle-x"
           to="/jobs?status=failed&q=backup"
           tone="red"
@@ -298,7 +302,8 @@ export function BackupPointsPage() {
         />
         <StatCard
           label={t("backup.points.tileNeedsVerification")}
-          value={report.data ? String(needsVerification) : "—"}
+          value={String(needsVerification)}
+          pending={noReport}
           icon="clock-exclamation"
           to="/backup?verify=pending"
           tone="gold"

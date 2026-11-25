@@ -1732,7 +1732,7 @@ describe("the backup overview reports what it knows and no more", () => {
     renderWithProviders(<BackupPointsPage />);
 
     // devices_covered 0 of devices_total 1 — the audit's exact card. Wait for
-    // the report to settle first; before it does every card reads "—".
+    // the report to settle first; before it does every card reads "n/a".
     await screen.findByText("Never run");
     const card = screen.getByText("Protected endpoints").closest("a");
     expect(card).toHaveTextContent("0 / 1");

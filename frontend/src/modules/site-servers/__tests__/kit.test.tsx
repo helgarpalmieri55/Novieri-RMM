@@ -36,7 +36,26 @@ function api(over: FixtureMap = {}): ApiClient {
 
 beforeEach(() => mockUseApi.mockReturnValue(api()));
 
+/**
+ * Every tile on the page draws the kit's absent mark and no zero sentence:
+ * no number and no claim before the read it counts has answered
+ * (clarification 10a; `StatCard pending`).
+ */
+async function expectTilesAbsent(count: number): Promise<void> {
+  await waitFor(() => expect(document.querySelectorAll(".stat-card")).toHaveLength(count));
+  for (const tile of document.querySelectorAll(".stat-card")) {
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile.querySelector(".stat-zero")).toBeNull();
+  }
+}
+
 describe("site servers on the list kit (4.9)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(api({ listSiteServers: () => new Promise(() => {}) }));
+    renderPage("/site-servers", <SiteServersPage />);
+    await expectTilesAbsent(3);
+  });
+
   /**
    * What the page reads on the console's own API, un-narrowed: the
    * prerequisites check above the list (the computers and the subnets a site

@@ -286,12 +286,14 @@ export function ErrorMonitorPage() {
           three of these read "0" during the first paint and after a failed
           load — "nothing has broken" and "we have not been told" printed
           identically, which is the defect `zeroLabel` exists to close. An
-          unresolved query gets an em dash; a zero on screen is then always a
-          measured zero. */}
+          unresolved query gets the kit's pending tile, the absent mark
+          (clarification 10a); a zero on screen is then always a measured
+          zero. */}
       <StatsGrid columns={3}>
         <StatCard
           label={t("errorMonitor.tiles.groups")}
-          value={data ? String(allGroups.length) : "—"}
+          value={String(allGroups.length)}
+          pending={!data}
           icon="warning"
           to="/error-monitor"
           tone="neutral"
@@ -299,7 +301,8 @@ export function ErrorMonitorPage() {
         />
         <StatCard
           label={t("errorMonitor.tiles.open")}
-          value={data ? String(openCount) : "—"}
+          value={String(openCount)}
+          pending={!data}
           icon="clock"
           to="/error-monitor?state=open"
           tone="red"
@@ -308,7 +311,8 @@ export function ErrorMonitorPage() {
         />
         <StatCard
           label={t("errorMonitor.tiles.events")}
-          value={data ? String(totalEvents) : "—"}
+          value={String(totalEvents)}
+          pending={!data}
           icon="logs"
           to="/error-monitor?sort=events"
           tone="blue"

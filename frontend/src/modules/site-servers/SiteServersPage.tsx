@@ -94,6 +94,9 @@ export function SiteServersPage() {
   }, [promoteDialog.open, resetPromote]);
 
   const servers = data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !data;
   const enabledCount = servers.filter((server) => server.enabled).length;
   const segmentCount = new Set(servers.flatMap((server) => server.segments)).size;
   const visible =
@@ -145,6 +148,7 @@ export function SiteServersPage() {
         <StatCard
           label={t("siteServers.page.registered")}
           value={String(servers.length)}
+          pending={noData}
           icon="server"
           to={withClient("/site-servers", filters.values.client)}
           tone="neutral"
@@ -154,6 +158,7 @@ export function SiteServersPage() {
         <StatCard
           label={t("siteServers.page.enabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="check"
           to={withClient("/site-servers?state=enabled", filters.values.client)}
           tone="green"
@@ -177,6 +182,7 @@ export function SiteServersPage() {
         <StatCard
           label={t("siteServers.page.segments")}
           value={String(segmentCount)}
+          pending={noData}
           icon="network"
           to={withClient("/site-servers", filters.values.client)}
           tone="blue"

@@ -30,6 +30,19 @@ function withFixtures(over: Partial<Record<keyof ApiClient, unknown>> = {}): Api
 
 beforeEach(() => mockUseApi.mockReturnValue(fixtureClient()));
 
+/**
+ * Every tile on the page draws the kit's absent mark and no zero sentence:
+ * no number and no claim before the read it counts has answered
+ * (clarification 10a; `StatCard pending`).
+ */
+async function expectTilesAbsent(count: number): Promise<void> {
+  await waitFor(() => expect(document.querySelectorAll(".stat-card")).toHaveLength(count));
+  for (const tile of document.querySelectorAll(".stat-card")) {
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile.querySelector(".stat-zero")).toBeNull();
+  }
+}
+
 describe("backup points on the list kit (4.1)", () => {
   /**
    * What the page reads on the console's own API, un-narrowed, and why each
@@ -114,6 +127,12 @@ describe("backup points on the list kit (4.1)", () => {
 });
 
 describe("backup repositories on the list kit (4.2)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(withFixtures({ listBackupRepositories: () => new Promise(() => {}) }));
+    renderPage("/backup/repositories", <RepositoriesPage />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/backup/repositories?state=retired", <RepositoriesPage />);
     const chips = await screen.findByRole("group", { name: "Filter repositories by state" });
@@ -158,6 +177,12 @@ describe("backup repositories on the list kit (4.2)", () => {
 });
 
 describe("backup coverage on the list kit (4.3)", () => {
+  it("draws no figure and no claim in its tiles before the report answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(withFixtures({ runReport: () => new Promise(() => {}) }));
+    renderPage("/backup/coverage", <CoveragePage />);
+    await expectTilesAbsent(4);
+  });
+
   /** The checks above the list (`BackupReadiness`): the page's own, under the top bar's choice, never the report. */
   const CONSOLE = ["listBackupRepositories", "listBackupPolicies", "listDevices"];
 
@@ -220,6 +245,12 @@ describe("backup coverage on the list kit (4.3)", () => {
 });
 
 describe("backup policies on the kit (the policies page)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(withFixtures({ listBackupPolicies: () => new Promise(() => {}) }));
+    renderPage("/backup/policies", <BackupPolicyEditor />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/backup/policies?enabled=false", <BackupPolicyEditor />);
     const chips = await screen.findByRole("group", { name: "Filter policies by state" });

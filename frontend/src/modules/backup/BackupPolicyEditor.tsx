@@ -109,6 +109,9 @@ export function BackupPolicyEditor() {
   const repositories = useBackupRepositories();
   const groups = useDeviceGroups();
   const items = policies.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !policies.data;
   const enabledCount = items.filter((policy) => policy.enabled).length;
   // What the totals are made of, for the tiles' second lines: how many
   // distinct repositories these policies write into, and how many of the
@@ -162,6 +165,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tilePolicies")}
           value={String(items.length)}
+          pending={noData}
           icon="calendar-week"
           to="/backup/policies"
           tone="neutral"
@@ -175,6 +179,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tileEnabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="circle-check"
           to="/backup/policies?enabled=true"
           tone="green"
@@ -194,6 +199,7 @@ export function BackupPolicyEditor() {
         <StatCard
           label={t("backup.policies.tileDisabled")}
           value={String(items.length - enabledCount)}
+          pending={noData}
           icon="minus"
           to="/backup/policies?enabled=false"
           tone="neutral"

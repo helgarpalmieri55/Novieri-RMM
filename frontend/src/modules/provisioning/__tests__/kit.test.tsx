@@ -52,6 +52,19 @@ function api(over: FixtureMap = {}): ApiClient {
 
 beforeEach(() => mockUseApi.mockReturnValue(api()));
 
+/**
+ * Every tile on the page draws the kit's absent mark and no zero sentence:
+ * no number and no claim before the read it counts has answered
+ * (clarification 10a; `StatCard pending`).
+ */
+async function expectTilesAbsent(count: number): Promise<void> {
+  await waitFor(() => expect(document.querySelectorAll(".stat-card")).toHaveLength(count));
+  for (const tile of document.querySelectorAll(".stat-card")) {
+    expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+    expect(tile.querySelector(".stat-zero")).toBeNull();
+  }
+}
+
 describe("provisioning runs on the list kit (4.6)", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/provisioning?state=failed", <ProvisioningRunsPage />);
@@ -104,6 +117,12 @@ describe("provisioning runs on the list kit (4.6)", () => {
 });
 
 describe("OS images on the list kit (4.7)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(api({ listOsImages: () => new Promise(() => {}) }));
+    renderPage("/provisioning/images", <ImagesPage />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/provisioning/images?state=inactive", <ImagesPage />);
     const chips = await screen.findByRole("group", { name: "Filter images by state" });
@@ -140,6 +159,12 @@ describe("OS images on the list kit (4.7)", () => {
 });
 
 describe("provisioning profiles on the list kit (4.8)", () => {
+  it("draws no figure and no claim in its tiles before the list answers (clarification 10a)", async () => {
+    mockUseApi.mockReturnValue(api({ listProvisionProfiles: () => new Promise(() => {}) }));
+    renderPage("/provisioning/profiles", <ProfilesPage />);
+    await expectTilesAbsent(3);
+  });
+
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     const { router } = renderPage("/provisioning/profiles?enabled=false", <ProfilesPage />);
     const chips = await screen.findByRole("group", { name: "Filter profiles by state" });

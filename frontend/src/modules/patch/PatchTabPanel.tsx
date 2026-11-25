@@ -217,17 +217,19 @@ export function PatchTabPanel({
   };
 
   /**
-   * AND BEFORE THE READ, NEITHER (clarification 10a). Until the response a
+   * AND WITHOUT THE READ, NEITHER (clarification 10a). Until the response a
    * tile counts has answered -- under the Client chip that includes the wait
-   * for `/me`, when the reads are not even sent -- there is no figure and no
-   * claim: "—" and no line under it, as Alerts' tiles do. "0 ... every
-   * reporting machine is up to date" before anything was asked was a finding
-   * the page had not made.
+   * for `/me`, when the reads are not even sent -- or once it has failed,
+   * there is no figure and no claim: the kit's pending tile (the absent mark)
+   * and no line under it, as Alerts' tiles do. "0 ... every reporting machine
+   * is up to date" before anything was asked was a finding the page had not
+   * made. A fleet never scanned is unmeasured too: the same mark, with the
+   * line that says why.
    */
-  const updatesFigure = (count: number): string =>
-    updates.isPending || neverScanned ? "—" : String(count);
+  const updatesNoData = !updates.data;
+  const devicesNoData = !devices.data;
   const updatesFoot = (count: number, words: string): string | undefined =>
-    updates.isPending ? undefined : tileFoot(count, words);
+    updatesNoData ? undefined : tileFoot(count, words);
 
   /** Both lists answered, and both are empty. Not "the filter matched nothing"
    *  — the severity filter cannot reach `total_unfiltered`, and the device
@@ -345,7 +347,8 @@ export function PatchTabPanel({
       <StatsGrid columns={4}>
         <StatCard
           label={t("patch.tab.updatesOutstanding")}
-          value={updatesFigure(outstanding)}
+          value={String(outstanding)}
+          pending={updatesNoData || neverScanned}
           icon="patch"
           to={severityHref(ALL_SEVERITIES_PARAM)}
           tone="neutral"
@@ -354,7 +357,8 @@ export function PatchTabPanel({
         />
         <StatCard
           label={t("patch.tab.critical")}
-          value={updatesFigure(criticalCount)}
+          value={String(criticalCount)}
+          pending={updatesNoData || neverScanned}
           icon="alert-triangle"
           to={severityHref("critical")}
           tone="red"
@@ -366,7 +370,8 @@ export function PatchTabPanel({
         />
         <StatCard
           label={t("patch.tab.important")}
-          value={updatesFigure(importantCount)}
+          value={String(importantCount)}
+          pending={updatesNoData || neverScanned}
           icon="clock-exclamation"
           to={severityHref("important")}
           tone="orange"
@@ -381,11 +386,12 @@ export function PatchTabPanel({
         />
         <StatCard
           label={t("patch.tab.machines")}
-          value={devices.isPending || neverScanned ? "—" : String(deviceTotal)}
+          value={String(deviceTotal)}
+          pending={devicesNoData || neverScanned}
           icon="devices"
           to={devicesHref()}
           tone="blue"
-          foot={devices.isPending ? undefined : tileFoot(deviceTotal, t("patch.tab.machinesFoot", { label }))}
+          foot={devicesNoData ? undefined : tileFoot(deviceTotal, t("patch.tab.machinesFoot", { label }))}
           zeroLabel={t("patch.tab.machinesZero", { label })}
         />
       </StatsGrid>
