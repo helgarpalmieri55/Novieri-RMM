@@ -23,7 +23,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -41,6 +41,8 @@ import type {
   MembershipEvaluation,
   RulePreview,
 } from "../../lib/api";
+import { recordingNarrowing } from "../../test/narrowing";
+import { renderPage as renderAt } from "../../test/renderPage";
 import { ApiError } from "../../lib/api";
 import {
   GroupsPage,
@@ -536,7 +538,8 @@ describe("archiving", () => {
     await screen.findByText("servers");
     expect(listDeviceGroups).toHaveBeenCalledWith({ include_archived: false });
 
-    await user.click(screen.getByRole("checkbox", { name: "Show archived" }));
+    // The checkbox is the archived chip on `?archived=1` (redesign Task 6, 1.5).
+    await user.click(screen.getByRole("button", { name: "Including archived" }));
     expect(listDeviceGroups).toHaveBeenCalledWith({ include_archived: true });
   });
 });
@@ -552,8 +555,9 @@ describe("membership", () => {
     await screen.findByText("servers");
 
     await user.click(screen.getByRole("button", { name: "Members" }));
-    const dialog = screen.getByRole("dialog", { name: "Members of servers" });
-    expect(within(dialog).getByText("in-group")).toBeTruthy();
+    // The members open in a panel beside the list (`?group=`), no longer a dialog (redesign Task 6, 1.5).
+    const dialog = (await screen.findByRole("heading", { name: "Members of servers" })).closest("section") as HTMLElement;
+    expect(await within(dialog).findByText("in-group")).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
     expect(removeDeviceGroupMember).toHaveBeenCalledWith("g-1", "d-in");
@@ -572,7 +576,8 @@ describe("membership", () => {
     await screen.findByText("servers");
 
     await user.click(screen.getByRole("button", { name: "Members" }));
-    const dialog = screen.getByRole("dialog", { name: "Members of servers" });
+    // The members open in a panel beside the list (`?group=`), no longer a dialog (redesign Task 6, 1.5).
+    const dialog = (await screen.findByRole("heading", { name: "Members of servers" })).closest("section") as HTMLElement;
     expect(
       within(dialog).getByText(/devices cannot be placed in this group by hand/),
     ).toBeTruthy();
@@ -1017,5 +1022,85 @@ describe("the rules builder", () => {
     await screen.findByText(/unavailable|error|failed/i);
     expect(screen.queryByText(/last re-evaluated/)).not.toBeInTheDocument();
     expect(screen.queryByText(/never been re-evaluated/)).not.toBeInTheDocument();
+  });
+});
+
+/* --- the list kit (redesign plan Task 6, 1.5; Receta L) ------------------------------ */
+
+describe("Device groups on the list kit", () => {
+  /** A UUID: the console reads back only a UUID as a client (`lib/clientChoice.ts`). */
+  const ANDES: MeClient = {
+    id: "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",
+    name: "Andes Logistics",
+    kind: "customer",
+    enabled_modules: [],
+    permissions: [],
+  };
+
+  function api(overrides: Partial<ApiClient> = {}): ApiClient {
+    return {
+      listDeviceGroups,
+      listDevices,
+      getDeviceGroup,
+      previewDeviceGroupRules,
+      createDeviceGroup,
+      updateDeviceGroup,
+      archiveDeviceGroup,
+      unarchiveDeviceGroup,
+      addDeviceGroupMembers,
+      removeDeviceGroupMember,
+      me: vi.fn().mockResolvedValue({ permissions: ["devices.read", "devices.manage"], org_id: ORG } as Me),
+      ...overrides,
+    } as unknown as ApiClient;
+  }
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups?archived=1", <GroupsPage />);
+    expect(await screen.findByRole("button", { name: "Including archived" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(listDeviceGroups).toHaveBeenCalledWith({ include_archived: true }));
+    await userEvent.click(screen.getByRole("button", { name: "Active" }));
+    expect(router.state.location.search).not.toContain("archived");
+  });
+
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(api());
+    renderAt("/device-groups?q=nothing-is-called-this", <GroupsPage />);
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("reads the list only through the narrowed API of the Client chip's client (decision D6)", async () => {
+    selectClient(null, [SCOPE_INTERNAL, ANDES]);
+    // Read on the console's choice, and not this list: the fleet size the rule
+    // preview counts against, and the computers prerequisite above the list.
+    const narrowing = recordingNarrowing(api(), { console: ["listDevices"] });
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderAt(`/device-groups?client=${ANDES.id}`, <GroupsPage />);
+    expect(await screen.findByText("servers")).toBeInTheDocument();
+    expect(narrowing.client(ANDES.id).listDeviceGroups).toHaveBeenCalledWith({ include_archived: false });
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("opens a group from the URL", async () => {
+    listDevices.mockResolvedValue({
+      items: [device({ id: "d-in", hostname: "in-group", device_group_id: "g-1" }), device()],
+      total: 2,
+    });
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups?group=g-1", <GroupsPage />);
+    const panel = (await screen.findByRole("heading", { name: "Members of servers" })).closest("section") as HTMLElement;
+    expect(await within(panel).findByText("in-group")).toBeInTheDocument();
+    await userEvent.click(within(panel).getByRole("button", { name: "Close" }));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("opens the editor from ?new=group and ?edit=", async () => {
+    mockUseApi.mockReturnValue(api());
+    const { router } = renderAt("/device-groups?new=group", <GroupsPage />);
+    expect(await screen.findByRole("dialog", { name: "New device group" })).toBeInTheDocument();
+    await act(() => router.navigate("/device-groups?edit=g-1"));
+    expect(await screen.findByRole("dialog", { name: /Edit servers/ })).toBeInTheDocument();
+    expect(getDeviceGroup).toHaveBeenCalledWith("g-1");
   });
 });

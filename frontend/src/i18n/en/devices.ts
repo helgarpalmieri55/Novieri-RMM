@@ -275,6 +275,11 @@ export const devices = {
     panelTitle: "Groups",
     panelSubtitle: "Lower precedence claims a device first.",
     showArchived: "Show archived",
+    // The list kit (redesign Task 6, 1.5): the search, the archived chip and closing an open group.
+    search: "Search groups",
+    chipActive: "Active",
+    chipArchived: "Including archived",
+    closeMembers: "Close",
     colGroup: "Group",
     colClient: "Client",
     colPrecedence: "Precedence",
@@ -398,7 +403,6 @@ export const devices = {
     },
     memberDialog: {
       title: "Members of {name}",
-      titleBare: "Members",
       byRules: "Membership is decided by rules, so devices cannot be placed in this group by hand.",
       none: "No devices in this group.",
       remove: "Remove",

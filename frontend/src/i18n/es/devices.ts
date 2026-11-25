@@ -274,6 +274,10 @@ export const devices: Shape<typeof en> = {
     panelTitle: "Grupos",
     panelSubtitle: "Una precedencia menor reclama antes un dispositivo.",
     showArchived: "Mostrar archivados",
+    search: "Buscar grupos",
+    chipActive: "Activos",
+    chipArchived: "Con los archivados",
+    closeMembers: "Cerrar",
     colGroup: "Grupo",
     colClient: "Cliente",
     colPrecedence: "Precedencia",
@@ -396,7 +400,6 @@ export const devices: Shape<typeof en> = {
     },
     memberDialog: {
       title: "Miembros de {name}",
-      titleBare: "Miembros",
       byRules: "La pertenencia la deciden las reglas, así que no se pueden colocar dispositivos en este grupo a mano.",
       none: "No hay dispositivos en este grupo.",
       remove: "Quitar",

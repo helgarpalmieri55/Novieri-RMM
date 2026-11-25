@@ -286,7 +286,8 @@ describe("a group's member picker", () => {
   async function openMembers(user: ReturnType<typeof userEvent.setup>, name: string): Promise<HTMLElement> {
     const row = (await screen.findByText(name)).closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Members" }));
-    return screen.getByRole("dialog", { name: `Members of ${name}` });
+    // The members open in a panel beside the list (`?group=`), no longer a dialog (redesign Task 6, 1.5).
+    return (await screen.findByRole("heading", { name: `Members of ${name}` })).closest("section") as HTMLElement;
   }
 
   it("reads the devices of the group's own client, and offers only those", async () => {

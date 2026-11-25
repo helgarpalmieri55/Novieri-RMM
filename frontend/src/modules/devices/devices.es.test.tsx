@@ -636,7 +636,8 @@ describe("the device groups page in Spanish", () => {
     const user = userEvent.setup();
     renderGroups([group()]);
     await user.click(await screen.findByRole("button", { name: "Miembros" }));
-    const dialog = await screen.findByRole("dialog", { name: "Miembros de servers" });
+    // The members open in a panel beside the list (`?group=`), no longer a dialog (redesign Task 6, 1.5).
+    const dialog = (await screen.findByRole("heading", { name: "Miembros de servers" })).closest("section") as HTMLElement;
     expect(await within(dialog).findByText("ws-01")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Quitar" })).toBeInTheDocument();
     expect(within(dialog).getByText("Un dispositivo que sale de un grupo no pierde su política: vuelve a la predeterminada de la organización.")).toBeInTheDocument();
