@@ -394,7 +394,8 @@ describe("the email tab in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Enviar un mensaje de prueba" }));
     expect(await screen.findByText("Enviado a support@toeshee.com: revisa ese buzón. Un servidor de correo puede aceptar un mensaje y aun así descartarlo.")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText("Sent to support@toeshee.com — check that mailbox. A mail server can accept a message and still drop it.")).toBeInTheDocument();
+    // No em dash in UI text (P3 adoption pass): a period where it was.
+    expect(screen.getByText("Sent to support@toeshee.com. Check that mailbox. A mail server can accept a message and still drop it.")).toBeInTheDocument();
   });
 
   it("holds a failed test send and re-words it", async () => {

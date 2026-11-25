@@ -280,7 +280,7 @@ describe("the top bar's client selector (phase 3 design §1.1)", () => {
           </MemoryRouter>
         </QueryClientProvider>,
       );
-      const toggle = await screen.findByRole("button", { name: "Open navigation — client: Andes Logistics" });
+      const toggle = await screen.findByRole("button", { name: "Open navigation. Client: Andes Logistics" });
       expect(toggle).toHaveTextContent("AL");
     } finally {
       vi.unstubAllGlobals();

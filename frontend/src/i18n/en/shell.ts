@@ -135,8 +135,8 @@ export const shell = {
     openNavigation: "Open navigation",
     // The drawer toggle on a phone while a client is chosen: it carries the
     // client's initials, and its name says the client in full.
-    openNavigationClient: "Open navigation — client: {client}",
-    closeNavigationClient: "Close navigation — client: {client}",
+    openNavigationClient: "Open navigation. Client: {client}",
+    closeNavigationClient: "Close navigation. Client: {client}",
     askAssistant: "Ask the Assistant",
     // The Assistant as the object of "Ask …" in the search panel.
     assistantObject: "the Assistant",

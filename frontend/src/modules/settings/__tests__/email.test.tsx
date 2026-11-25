@@ -282,9 +282,9 @@ describe("Settings — Email tab", () => {
     // → "mail server"): the panel's own field is labelled "Mail server", so
     // the outcome copy naming a "relay" was the system's word, not the
     // operator's. The claim under test — accepted is not delivered — is
-    // unchanged.
+    // unchanged. (No em dash in UI text, P3 adoption pass: a period now.)
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Sent to support@toeshee.com — check that mailbox. A mail server can accept a message and still drop it.",
+      "Sent to support@toeshee.com. Check that mailbox. A mail server can accept a message and still drop it.",
     );
   });
 
