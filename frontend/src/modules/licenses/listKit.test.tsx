@@ -128,6 +128,8 @@ describe("the license register on the list kit", () => {
     expect(router.state.location.search).toBe("?new=license");
     await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The blocked Back has settled once both dialogs are gone.
+    await waitFor(() => expect(screen.queryAllByRole("dialog")).toEqual([]));
     // Opened again, it starts empty (it is mounted only while open).
     await userEvent.click(screen.getByRole("button", { name: "New license" }));
     dialog = await screen.findByRole("dialog", { name: "New license" });

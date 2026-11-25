@@ -112,6 +112,8 @@ describe("the subscriptions registry on the list kit", () => {
     const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
     await userEvent.click(within(leave).getByRole("button", { name: "Leave without saving" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The blocked Back has settled once both dialogs are gone.
+    await waitFor(() => expect(screen.queryAllByRole("dialog")).toEqual([]));
     await userEvent.click(screen.getByRole("button", { name: "New subscription" }));
     dialog = await screen.findByRole("dialog", { name: "New subscription" });
     expect(within(dialog).getByLabelText("Service name")).toHaveValue("");
