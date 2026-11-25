@@ -1731,8 +1731,8 @@ describe("PlanEditor scope and procedure references", () => {
   it("explains RTO and RPO on the form rather than assuming the reader knows", async () => {
     renderEditor();
 
-    expect(screen.getByText(/RTO — how long recovery may take/)).toBeInTheDocument();
-    expect(screen.getByText(/RPO — how much recent data may be lost/)).toBeInTheDocument();
+    expect(screen.getByText(/RTO: how long recovery may take/)).toBeInTheDocument();
+    expect(screen.getByText(/RPO: how much recent data may be lost/)).toBeInTheDocument();
   });
 
   it("warns when RTO is lower than RPO without refusing the save", async () => {
