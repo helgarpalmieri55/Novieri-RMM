@@ -90,6 +90,18 @@ describe("the leave question is drawn on top of its dialog (coordinator's ruling
   });
 });
 
+describe("a sub-page names itself in the tab, as its h1 does (coordinator's ruling 1b)", () => {
+  it.each([
+    ["/subscriptions/spend", <SpendDashboard key="s" />, "Subscription spend"],
+    ["/subscriptions/renewals", <RenewalCalendar key="r" />, "Upcoming renewals"],
+  ])("%s", async (path, page, title) => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(path, page, path, { page: "shell.nav.item.subscriptions" });
+    expect(await screen.findByRole("heading", { level: 1, name: title })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${title} · Subscriptions · Novieri RMM`));
+  });
+});
+
 describe("the subscriptions registry on the list kit", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
@@ -152,17 +164,28 @@ describe("the subscriptions registry on the list kit", () => {
   it("opens, from a tile counted for the chip's client, exactly the rows it counted", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage(`/subscriptions?client=${ANDES}`, <SubscriptionsPage />, "/subscriptions");
+    // The two renewal tiles count a 90-day window, so they open the calendar
+    // on 90 days, not on its 30-day default (review M1).
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /Renewals in 90 days/ })).toHaveAttribute(
         "href",
-        `/subscriptions/renewals?client=${ANDES}`,
+        `/subscriptions/renewals?within=90&client=${ANDES}`,
       ),
     );
     expect(screen.getByRole("link", { name: /Active subscriptions/ })).toHaveAttribute("href", `/subscriptions?client=${ANDES}`);
     expect(screen.getByRole("link", { name: /Notice deadlines due/ })).toHaveAttribute(
       "href",
-      `/subscriptions/renewals?client=${ANDES}`,
+      `/subscriptions/renewals?within=90&client=${ANDES}`,
     );
+  });
+
+  it("opens the renewal calendar on the 90 days its tiles count", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    const { router } = renderPage("/subscriptions", <SubscriptionsPage />, "/subscriptions");
+    const tile = await screen.findByRole("link", { name: /Renewals in 90 days/ });
+    expect(tile).toHaveAttribute("href", "/subscriptions/renewals?within=90");
+    await act(() => router.navigate(tile.getAttribute("href") as string));
+    expect(router.state.location.search).toBe("?within=90");
   });
 
   it("asks before leaving New subscription with something typed, and opens empty again", async () => {
@@ -246,8 +269,16 @@ describe("an edit never carries to another client or record (coordinator's rulin
     act(() => setSelectedClient("org-toeshee"));
     form = await screen.findByRole("dialog", { name: "New subscription" });
     expect(within(form).getByLabelText("Service name")).toHaveValue("");
+    // A subscription entered for the new client carries nothing of the old
+    // edit (review M9: an empty form's refusal alone proved nothing).
+    await userEvent.type(within(form).getByLabelText("Service name"), "Initech HR");
+    await userEvent.clear(within(form).getByLabelText("Cost per cycle"));
+    await userEvent.type(within(form).getByLabelText("Cost per cycle"), "10.00");
+    await userEvent.clear(within(form).getByLabelText("Currency"));
+    await userEvent.type(within(form).getByLabelText("Currency"), "EUR");
     await userEvent.click(within(form).getByRole("button", { name: "Save" }));
-    expect(createSubscription).not.toHaveBeenCalled();
+    await waitFor(() => expect(createSubscription).toHaveBeenCalledTimes(1));
+    expect(createSubscription.mock.calls[0]?.[0]).toMatchObject({ client_id: "org-toeshee", service_name: "Initech HR" });
   });
 
   it("a renewal-terms edit left on one subscription does not reach the next", async () => {

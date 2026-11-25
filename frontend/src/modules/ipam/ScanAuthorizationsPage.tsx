@@ -55,6 +55,7 @@ import {
   useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // THE MODULE'S CONTROL SURFACE.
 //
@@ -90,6 +91,9 @@ export function ScanAuthorizationsPage() {
   // Opened from the add-a-computer journey: its client (design §4.4).
   useAdoptJourneyClient();
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.scans.title"));
   const permissions = useIpamPermissions();
   // ON THE LIST KIT (Receta L; Task 10, 5.10): whether revoked and expired
   // grants are listed is a chip in the URL (`?revoked=include`), and Grant

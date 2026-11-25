@@ -49,9 +49,13 @@ function byMonth(rows: readonly RenewalRow[]): { key: string; label: string; row
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
 
 export function RenewalCalendar() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.renewals.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("licenses.read");

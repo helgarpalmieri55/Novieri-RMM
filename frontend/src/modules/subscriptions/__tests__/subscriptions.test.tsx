@@ -282,17 +282,19 @@ describe("SubscriptionsPage", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(4);
     expect(tiles.map((tile) => tile.tagName)).toEqual(["A", "A", "A", "A"]);
+    // The renewal tiles open the calendar on the 90 days they count (review M1).
     expect(tiles.map((tile) => tile.getAttribute("href"))).toEqual([
       "/subscriptions",
-      "/subscriptions/renewals",
-      "/subscriptions/renewals",
+      "/subscriptions/renewals?within=90",
+      "/subscriptions/renewals?within=90",
       "/subscriptions",
     ]);
 
     const routes = staticRoutePaths();
     expect(routes.length).toBeGreaterThan(10);
+    // The path is what App.tsx serves; a query (`?within=90`) is that page's filter.
     for (const tile of tiles) {
-      expect(isServedRoute(tile.getAttribute("href"), routes)).toBe(true);
+      expect(isServedRoute(tile.getAttribute("href")?.split("?")[0] ?? null, routes)).toBe(true);
     }
   });
 
@@ -321,8 +323,8 @@ describe("SubscriptionsPage", () => {
     expect(tiles.map((tile) => tile.getAttribute("href"))).toEqual([
       "/subscriptions/spend",
       "/subscriptions",
-      "/subscriptions/renewals",
-      "/subscriptions/renewals",
+      "/subscriptions/renewals?within=90",
+      "/subscriptions/renewals?within=90",
       "/subscriptions",
     ]);
   });

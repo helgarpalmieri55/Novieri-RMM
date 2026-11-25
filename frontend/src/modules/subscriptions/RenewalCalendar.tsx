@@ -20,6 +20,7 @@ import { Icon } from "../../shell/icons";
 import { useSubscriptionRenewals } from "./api";
 import { actionKind } from "./subscriptionState";
 import { SubscriptionPageNav } from "./subscriptionsNav";
+import { useRecordTitle } from "../../shell/title";
 
 // The look-ahead windows offered by the control below.
 // backend/app/modules/subscriptions/api.py::renewals_route bounds
@@ -30,6 +31,9 @@ const WINDOWS = [30, 60, 90] as const;
 
 export function RenewalCalendar() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("subscriptions.renewals.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("subscriptions.read");

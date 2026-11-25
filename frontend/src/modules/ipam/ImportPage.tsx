@@ -33,6 +33,7 @@ import { IMPORT_FIELDS, IPAM_MANAGE, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from ".
 import { Icon } from "../../shell/icons";
 import { Btn, FormSection, PageHead, StatusPill, UnsavedGuard } from "../../shell/components";
 import { Steps, type StepState } from "../../shell/viz";
+import { useRecordTitle } from "../../shell/title";
 
 // Import is TWO STEPS BOUND BY A DIGEST, and this page cannot be used any other
 // way.
@@ -60,6 +61,9 @@ import { Steps, type StepState } from "../../shell/viz";
 // never silently skipped.
 export function ImportPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.importExport.title"));
   const permissions = useIpamPermissions();
   const { selected } = useClientScope();
   const exports = useCsvExport();

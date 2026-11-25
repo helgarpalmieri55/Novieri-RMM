@@ -212,7 +212,11 @@ export function SubscriptionsPage() {
   // that client's rows opens its page with the same `client=`, so it opens
   // exactly the rows it counted (coordinator's ruling on the wave reviews).
   const { client: narrowedTo } = useNarrowedApi(chip);
-  const withClient = (path: string) => (narrowedTo === null ? path : `${path}?client=${narrowedTo}`);
+  const withClient = (path: string) =>
+    narrowedTo === null ? path : `${path}${path.includes("?") ? "&" : "?"}client=${narrowedTo}`;
+  // The renewal tiles count a 90-day window, so they open the calendar on it
+  // (its default is 30 days): the rows they open are the rows they counted.
+  const renewalsWindow = `/subscriptions/renewals?within=${RENEWAL_WINDOW_DAYS}`;
   const subscriptions = useSubscriptions(chip);
   const renewals = useSubscriptionRenewals(RENEWAL_WINDOW_DAYS, chip);
   const spend = useSpend(chip);
@@ -368,7 +372,7 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
           value={String(renewalRows.length)}
           icon="clock"
-          to={withClient("/subscriptions/renewals")}
+          to={withClient(renewalsWindow)}
           tone="gold"
           zeroLabel={t("subscriptions.list.tileRenewalsZero")}
           pending={renewalsNoData}
@@ -385,7 +389,7 @@ export function SubscriptionsPage() {
           label={t("subscriptions.list.tileNotice")}
           value={String(noticeDueCount)}
           icon="warning"
-          to={withClient("/subscriptions/renewals")}
+          to={withClient(renewalsWindow)}
           tone="orange"
           urgent={noticeDueCount > 0}
           zeroLabel={t("subscriptions.list.tileNoticeZero")}

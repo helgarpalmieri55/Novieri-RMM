@@ -27,6 +27,7 @@ import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
+import { useRecordTitle } from "../../shell/title";
 
 /** The Client field Ignore needs with every client chosen, named like any required field. */
 const ignoreClientRules = (): readonly FieldRule[] => [
@@ -35,6 +36,9 @@ const ignoreClientRules = (): readonly FieldRule[] => [
 
 export function ReviewQueue() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.review.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];

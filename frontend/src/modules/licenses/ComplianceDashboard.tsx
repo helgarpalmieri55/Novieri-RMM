@@ -25,9 +25,13 @@ import {
   useUrlFilters,
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
 
 export function ComplianceDashboard() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.compliance.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("licenses.read");
@@ -81,9 +85,18 @@ export function ComplianceDashboard() {
       <Panel bare>
         <ListToolbar
           chips={<ClientFilter filters={filters} />}
-          end={compliance.data ? <ShowingCount shown={items.length} total={items.length} /> : null}
+          end={compliance.data && !products.isPending ? <ShowingCount shown={items.length} total={items.length} /> : null}
         />
-        <QueryState loading={compliance.isPending} error={compliance.error} empty={false} emptyLabel="">
+        {/* The rows wait for the catalog too: until it says which products
+            have a rule, a rule-less product's 0 would be drawn as measured
+            (review M4; the Absent Zero Rule, 10a in spirit). A failed catalog
+            read leaves the server's figures as they always were. */}
+        <QueryState
+          loading={compliance.isPending || products.isPending}
+          error={compliance.error}
+          empty={false}
+          emptyLabel=""
+        >
           {items.length === 0 ? (
             <ListEmpty
               filtered={filters.active}

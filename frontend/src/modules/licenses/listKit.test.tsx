@@ -118,11 +118,17 @@ describe("an edit never carries to another client or record (coordinator's rulin
     let form = await screen.findByRole("dialog", { name: "New license" });
     await userEvent.type(within(form).getByLabelText("Cost (optional)"), "12");
     act(() => setSelectedClient("org-toeshee"));
-    // The form is the new client's, empty; Save sends nothing of the old edit.
+    // The form is the new client's, empty.
     form = await screen.findByRole("dialog", { name: "New license" });
     expect(within(form).getByLabelText("Cost (optional)")).toHaveValue("");
+    // A license entered for the new client carries nothing of the old edit
+    // (review M9: an empty form's refusal alone proved nothing).
+    await userEvent.click(within(form).getByRole("combobox", { name: "Product" }));
+    const list = await within(form).findByRole("listbox", { name: "Product" });
+    await userEvent.click(await within(list).findByRole("option", { name: /Microsoft Visio/ }));
     await userEvent.click(within(form).getByRole("button", { name: "Save" }));
-    expect(createLicense).not.toHaveBeenCalled();
+    await waitFor(() => expect(createLicense).toHaveBeenCalledTimes(1));
+    expect(createLicense.mock.calls[0]?.[0]).toMatchObject({ client_id: "org-toeshee", product_id: "prod-visio", cost: null });
   });
 
   it("a revealed key does not follow to another license's record", async () => {
@@ -133,6 +139,21 @@ describe("an edit never carries to another client or record (coordinator's rulin
     await act(() => router.navigate("/licenses/lic-3"));
     expect(await screen.findByRole("heading", { name: "Microsoft Visio" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "License key" })).toBeNull();
+  });
+});
+
+describe("a sub-page names itself in the tab, as its h1 does (coordinator's ruling 1b)", () => {
+  it.each([
+    ["/licenses/products", <ProductsPage key="p" />, "Products"],
+    ["/licenses/vendors", <VendorsPage key="v" />, "Vendors"],
+    ["/licenses/compliance", <ComplianceDashboard key="c" />, "License compliance"],
+    ["/licenses/review-queue", <ReviewQueue key="r" />, "Review queue"],
+    ["/licenses/renewals", <RenewalCalendar key="n" />, "Upcoming renewals"],
+  ])("%s", async (path, page, title) => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(path, page, path, { page: "shell.nav.item.licenses" });
+    expect(await screen.findByRole("heading", { level: 1, name: title })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${title} · Licenses · Novieri RMM`));
   });
 });
 
@@ -299,6 +320,18 @@ describe("license compliance", () => {
     expect(within(row).getByText("No usage data")).toBeInTheDocument();
     expect(within(row).queryByText("300 free")).toBeNull();
   });
+
+  // Review M4 (10a in spirit): until the catalog says which products have a
+  // rule, a rule-less product's row drew a measured "0 / 300" and "300 free".
+  it("draws no row figure until the catalog says which products can be counted", async () => {
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listProducts: () => new Promise<never>(() => {}) } as never));
+    renderPage("/licenses/compliance", <ComplianceDashboard />, "/licenses/compliance");
+    expect((await screen.findAllByText("Loading…")).length).toBeGreaterThan(0);
+    // The compliance rows have answered by now; none is drawn as measured.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Windows Server 2022 user CAL")).toBeNull();
+    expect(screen.queryByText("300 free")).toBeNull();
+  });
 });
 
 describe("the renewal calendar (licenses)", () => {
@@ -406,6 +439,13 @@ describe("the product catalog", () => {
     expect(within(dialog).getByLabelText("Rule 1 pattern")).toHaveValue("Microsoft Visio");
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
+  });
+
+  it("opens one editor at a time, even from a URL that names both", async () => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage("/licenses/products?new=product&edit=prod-visio", <ProductsPage />, "/licenses/products");
+    expect(await screen.findByRole("dialog", { name: "New product" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Edit product" })).toBeNull();
   });
 
   it("asks before leaving an edit with a change in it", async () => {

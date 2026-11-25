@@ -19,6 +19,7 @@ import { useClientName } from "../settings/api";
 import { useIdleSeats, useSpend } from "./api";
 import { SubscriptionPageNav } from "./subscriptionsNav";
 import type { IdleSeatRow, SpendRow } from "./types";
+import { useRecordTitle } from "../../shell/title";
 
 // Mirrors backend/app/modules/subscriptions/reporting.py's spend_summary:
 // four roll-ups (by_currency, by_vendor, by_category, by_owner), each never
@@ -162,6 +163,9 @@ function IdleSeatsTable({
 
 export function SpendDashboard() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("subscriptions.spend.title"));
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canRead = (me.data?.permissions ?? []).includes("subscriptions.read");

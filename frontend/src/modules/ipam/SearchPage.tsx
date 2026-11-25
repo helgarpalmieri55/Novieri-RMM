@@ -11,6 +11,7 @@ import { searchKindMeaning } from "./ipamState";
 import { Icon } from "../../shell/icons";
 import { Facts } from "../../shell/viz";
 import { Btn, PageHead, Panel, SearchField, ShowingCount, StatusPill, useUrlFilters } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // One box (spec §9). Operators do not know in advance whether the thing in
 // their hand is an IP, a CIDR, a MAC, a hostname or a device name, so there is
@@ -34,6 +35,9 @@ const SEARCH_KIND_WORD: Readonly<Record<string, MessageKey>> = {
 
 export function SearchPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.search.title"));
   // THE SENT SEARCH IS IN THE URL (Task 10, 5.8): `?q=` once Search is
   // pressed, so a search is a link, a reload repeats it and Back returns to
   // the one before (each search is its own history entry). What is typed stays

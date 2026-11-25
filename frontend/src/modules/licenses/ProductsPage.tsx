@@ -28,6 +28,7 @@ import {
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 const MATCH_RULE_TYPES: MatchRule["type"][] = ["exact", "prefix", "regex"];
 
@@ -55,6 +56,9 @@ function matchesProduct(product: ProductOut, needle: string): boolean {
 
 export function ProductsPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.products.title"));
   const api = useApi();
   // ON THE LIST KIT (Receta L, a list that only searches; Task 10, 5.2): the
   // search in `?q=`, New product from `?new=product` and an edit from
@@ -191,9 +195,14 @@ export function ProductsPage() {
       </Panel>
 
       {/* Mounted per product (its `key`), so the editor's fields start from
-          the product it opens; one mounted for "new" starts empty. */}
-      {canManage && newProduct.open ? <ProductEditor key="new" product="new" onClose={newProduct.close} /> : null}
-      {editing ? <ProductEditor key={editing.id} product={editing} onClose={edit.close} /> : null}
+          the product it opens; one mounted for "new" starts empty. One editor
+          at a time: a URL carrying both `?new=` and `?edit=` opens the new one
+          (review M6), so two guards never hold the page at once. */}
+      {canManage && newProduct.open ? (
+        <ProductEditor key="new" product="new" onClose={newProduct.close} />
+      ) : editing ? (
+        <ProductEditor key={editing.id} product={editing} onClose={edit.close} />
+      ) : null}
     </div>
   );
 }

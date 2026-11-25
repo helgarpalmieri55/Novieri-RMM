@@ -33,6 +33,7 @@ import {
   useNewParam,
   useUnsavedGuard,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // VRFs, VLANs and the client's sites: what everything else is scoped by.
 //
@@ -62,6 +63,9 @@ import {
 //     nullable scoping column would let the same prefix be registered twice.
 export function RegistryPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.registry.title"));
   const permissions = useIpamPermissions();
   const { selected } = useClientScope();
   const newVrf = useNewParam("vrf");

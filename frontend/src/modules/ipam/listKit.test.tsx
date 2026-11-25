@@ -131,6 +131,21 @@ describe("the leave question is drawn on top of its dialog (coordinator's ruling
   });
 });
 
+describe("a sub-page names itself in the tab, as its h1 does (coordinator's ruling 1b)", () => {
+  it.each([
+    ["/ipam/drift", <DriftPage key="d" />, "Drift"],
+    ["/ipam/search", <SearchPage key="s" />, "Search"],
+    ["/ipam/registry", <RegistryPage key="r" />, "Registry"],
+    ["/ipam/scan-authorizations", <ScanAuthorizationsPage key="a" />, "Scan authorizations"],
+    ["/ipam/import", <ImportPage key="i" />, "Import and export"],
+  ])("%s", async (path, page, title) => {
+    mockUseApi.mockReturnValue(fixtureClient());
+    renderPage(path, page, path, { page: "shell.nav.item.ipAddresses" });
+    expect(await screen.findByRole("heading", { level: 1, name: title })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(`${title} · IP addresses · Novieri RMM`));
+  });
+});
+
 describe("the subnet tree on the list kit", () => {
   it("keeps its filters in the URL, so a filtered view is a link", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
@@ -480,6 +495,25 @@ describe("the drift page on the list kit", () => {
     await waitFor(() => expect(acknowledgeIpamDrift).toHaveBeenCalledWith("drift-1", "known printer"));
     await waitFor(() => expect(router.state.location.search).toBe(""));
     expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  // Review M2 (ruling 7): a failed Acknowledge's error stayed on screen while
+  // Suppress was being tried, and stood in for Suppress's own outcome.
+  it("clears a failed Acknowledge's error when Suppress is tried", async () => {
+    mockUseApi.mockReturnValue(
+      fixtureClient({
+        ...fixtureRegistry(),
+        acknowledgeIpamDrift: () => Promise.reject(new ApiError(503, "")),
+        suppressIpamDrift: () => new Promise<never>(() => {}),
+      } as never),
+    );
+    renderPage("/ipam/drift?finding=drift-1", <DriftPage />, "/ipam/drift");
+    await userEvent.type(await screen.findByLabelText("Note"), "known printer");
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    expect(await screen.findByText(/service is unavailable right now/i)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Suppress until"), "2026-12-31");
+    await userEvent.click(screen.getByRole("button", { name: "Suppress" }));
+    await waitFor(() => expect(screen.queryByText(/service is unavailable right now/i)).toBeNull());
   });
 
   it("says why Suppress cannot be pressed yet", async () => {

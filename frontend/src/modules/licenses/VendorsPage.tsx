@@ -26,9 +26,13 @@ import {
 } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 export function VendorsPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.vendors.title"));
   const api = useApi();
   // ON THE LIST KIT (Receta L, a list that only searches; Task 10, 5.3): the
   // search in `?q=` and New vendor from `?new=vendor`. Vendors are the

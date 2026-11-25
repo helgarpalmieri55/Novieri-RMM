@@ -51,6 +51,7 @@ import {
   useUnsavedGuard,
   useUrlFilters,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 // The drift page.
 //
@@ -88,6 +89,9 @@ const CONFIDENCE_LINE: Readonly<Record<string, MessageKey>> = {
 
 export function DriftPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("ipam.drift.title"));
   const permissions = useIpamPermissions();
   /**
    * THE VIEW IS IN THE URL, and that is what makes the tiles clickable.
@@ -546,13 +550,18 @@ function HandlePanel({ finding, onClose }: { finding: DriftOut; onClose: () => v
           icon="check"
           variant="primary"
           disabled={acknowledge.isPending}
-          onClick={() => acknowledge.mutate({ id: finding.id, note }, { onSuccess: done })}
+          onClick={() => {
+            // One outcome on screen, this act's (the coordinator's ruling 7).
+            suppress.reset();
+            acknowledge.mutate({ id: finding.id, note }, { onSuccess: done });
+          }}
         />
         <Btn
           label={t("ipam.drift.suppress")}
           icon="clock"
           disabled={suppress.isPending || suppressBlocked}
-          onClick={() =>
+          onClick={() => {
+            acknowledge.reset();
             suppress.mutate(
               {
                 id: finding.id,
@@ -567,8 +576,8 @@ function HandlePanel({ finding, onClose }: { finding: DriftOut; onClose: () => v
                 note,
               },
               { onSuccess: done },
-            )
-          }
+            );
+          }}
         />
         <Btn label={t("common.actions.cancel")} variant="ghost" onClick={onClose} />
       </div>
