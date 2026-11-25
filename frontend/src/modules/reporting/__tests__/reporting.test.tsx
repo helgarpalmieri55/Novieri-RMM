@@ -322,7 +322,10 @@ describe("the report catalogue", () => {
     renderCatalogue(client({ listReports: vi.fn().mockResolvedValue(catalogue) }));
 
     const card = await screen.findByTestId("report-card-fleet-posture");
-    expect(card.textContent).toContain("stale — so the device total");
+    // A single ` -- ` aside reads as a colon (reportProse, P3 adoption pass):
+    // the em dash it used to become is gone from the console.
+    expect(card.textContent).toContain("stale: so the device total");
+    expect(card.textContent).not.toContain("—");
     expect(card.textContent).toContain("at meta.generated_at.");
     expect(card.textContent).not.toContain(" -- ");
     expect(card.textContent).not.toContain("`");
