@@ -431,7 +431,7 @@ function Editing({ kind = "policy" }: { kind?: string }) {
   const filters = useUrlFilters(["state"] as const);
   return (
     <>
-      <button type="button" onClick={() => edit.open("pol-1")}>
+      <button type="button" onClick={() => edit.start("pol-1")}>
         Edit Pilot
       </button>
       <button type="button" onClick={() => filters.set("state", "open")}>
@@ -456,7 +456,7 @@ function TwoEditors() {
   const schedule = useEditParamFromKit("schedule");
   return (
     <>
-      <button type="button" onClick={() => policy.open("pol-1")}>
+      <button type="button" onClick={() => policy.start("pol-1")}>
         Edit policy
       </button>
       <button type="button" onClick={schedule.close}>
@@ -470,6 +470,15 @@ describe("useEditParam (kit requests batch 1, item 6)", () => {
   it("opens an editor from ?edit=<id>, so an edit is a link", () => {
     renderPage("/backup/policies?edit=pol-1", <Editing />);
     expect(screen.getByRole("dialog", { name: "Edit pol-1" })).toBeInTheDocument();
+  });
+
+  it("opens with start(id), the verb useNewParam uses, beside id and close (batch 1 review, F5)", () => {
+    function Shape() {
+      const edit = useEditParamFromKit("policy");
+      return <p>{Object.keys(edit).sort().join(",")}</p>;
+    }
+    renderPage("/backup/policies", <Shape />);
+    expect(screen.getByText("close,id,start")).toBeInTheDocument();
   });
 
   it("names no record while the URL names none", () => {
@@ -538,7 +547,7 @@ describe("useEditParam (kit requests batch 1, item 6)", () => {
       return (
         <>
           <button type="button" onClick={created.start}>New policy</button>
-          <button type="button" onClick={() => edit.open("pol-1")}>Edit Pilot</button>
+          <button type="button" onClick={() => edit.start("pol-1")}>Edit Pilot</button>
           <button type="button" onClick={edit.close}>Close editor</button>
         </>
       );
