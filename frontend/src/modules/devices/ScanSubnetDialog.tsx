@@ -5,6 +5,7 @@ import { describeSubmitError } from "../../components/form";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
+import { useUnsavedGuard } from "../../shell/components";
 import { useDispatchIpamSweepMutation, useIpamSubnets } from "../ipam/api";
 import { formatAge } from "../ipam/ipamState";
 import type { SubnetOut } from "../ipam/types";
@@ -54,11 +55,22 @@ export function ScanSubnetDialog({ open, onClose }: { open: boolean; onClose: ()
     [subnets.data],
   );
   const chosen = options.find((s) => s.id === subnetId) ?? null;
+  /**
+   * A CHOSEN SUBNET NOBODY HAS SCANNED YET ASKS BEFORE IT IS DROPPED
+   * (coordinator ruling 3). The dialog lives in `?new=scan`, so Close, Escape
+   * and Back are all a change of `new`. Once the scan is queued there is
+   * nothing left to lose.
+   */
+  const { guard } = useUnsavedGuard(subnetId !== "" && dispatched === null, { search: ["new"] });
 
+  /**
+   * CLOSING IS THE URL'S CHANGE, AND NOTHING ELSE (coordinator ruling 4). The
+   * page mounts this dialog only while `?new=scan` is set, so every opening --
+   * the button, a link, Forward -- starts from an empty picker; resetting
+   * here instead missed every close it did not see (Back), and clearing the
+   * choice before the guard could ask would have dropped it unasked.
+   */
   function close() {
-    setSubnetId("");
-    setDispatched(null);
-    dispatch.reset();
     onClose();
   }
 
@@ -71,6 +83,7 @@ export function ScanSubnetDialog({ open, onClose }: { open: boolean; onClose: ()
 
   return (
     <Dialog open={open} onClose={close} title={t("devices.scan.title")}>
+      {guard}
       {dispatched ? (
         // THE SWEEP IS A JOB, NOT AN ANSWER. It was queued for the segment's
         // agent, which runs it on its own schedule and reports back; the rows
@@ -103,6 +116,9 @@ export function ScanSubnetDialog({ open, onClose }: { open: boolean; onClose: ()
             <Button
               variant="default"
               onClick={() => {
+                // Another subnet: the picker starts empty, so the one just
+                // scanned is not held as an unsaved choice.
+                setSubnetId("");
                 setDispatched(null);
                 dispatch.reset();
               }}

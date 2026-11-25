@@ -208,13 +208,20 @@ export function CandidatesPage() {
    * server-side either way, invariant 6): it is what turns a silent,
    * permanent "—" for an operator without `devices.read` into a sentence
    * that says which permission the number needs.
+   *
+   * NARROWED LIKE THE TABLE (fix round 1; coordinator ruling 2). Under the
+   * Client chip the tile counts that client's sweep rows, through the same
+   * narrowed API and keyed on the same client, and its link opens the fleet
+   * list narrowed the same way: a tile that counts one client's rows and
+   * opens every client's is a defect.
    */
   const canReadDevices = (me.data?.permissions ?? []).includes(DEVICES_READ);
   const swept = useQuery({
-    queryKey: ["devices", { provenance: "sweep", limit: 1 }],
-    queryFn: () => api.listDevices({ provenance: "sweep", limit: 1 }),
-    enabled: canReadDevices,
+    queryKey: ["devices", { provenance: "sweep", limit: 1 }, client],
+    queryFn: () => narrowed.listDevices({ provenance: "sweep", limit: 1 }),
+    enabled: canReadDevices && ready,
   });
+  const sweptTo = client === null ? "/devices?provenance=sweep" : `/devices?provenance=sweep&client=${client}`;
 
   const promote = useMutation<PromoteOutcomes>({
     // THE CLIENT COMES FROM THE ROW (operator decision 2026-10-28). A
@@ -307,7 +314,9 @@ export function CandidatesPage() {
         }
       />
 
-      <ScanSubnetDialog open={scan.open} onClose={scan.close} />
+      {/* Mounted only while `?new=scan` is set, so each opening starts empty
+          (coordinator ruling 4), however it was opened. */}
+      {scan.open ? <ScanSubnetDialog open onClose={scan.close} /> : null}
 
       {/* Above the candidate list on purpose: a suggestion is a question the
           platform has already decided it cannot answer, and it is waiting on a
@@ -344,7 +353,7 @@ export function CandidatesPage() {
           label={t("devices.candidates.swept")}
           value={swept.data ? String(swept.data.total) : "—"}
           icon="network"
-          to="/devices?provenance=sweep"
+          to={sweptTo}
           tone="neutral"
           zeroLabel={t("devices.candidates.sweptZero")}
           foot={
@@ -432,7 +441,10 @@ export function CandidatesPage() {
           />
         </BulkBar>
 
-        <QueryState loading={candidates.isLoading || !ready} error={candidates.error} empty={false} emptyLabel="">
+        {/* `isPending`, NOT `isLoading` (coordinator ruling 10): while the chip's client is
+            undecided the read is disabled, which TanStack v5 does not call loading. Pending
+            is "no answer yet", whatever the reason, so no empty state is drawn before it. */}
+        <QueryState loading={candidates.isPending} error={candidates.error} empty={false} emptyLabel="">
           {rows.length === 0 ? (
             /* WHICH EMPTY THIS IS: nothing matches the search or the chip, or
                nothing is unaccounted for -- on the subnets that were swept, or
@@ -549,7 +561,7 @@ export function CandidatesPage() {
           k="devices.candidates.note"
           components={{
             strong: <strong />,
-            link: <Link to="/devices?provenance=sweep" style={{ textDecoration: "underline" }} />,
+            link: <Link to={sweptTo} style={{ textDecoration: "underline" }} />,
           }}
         />
       </p>

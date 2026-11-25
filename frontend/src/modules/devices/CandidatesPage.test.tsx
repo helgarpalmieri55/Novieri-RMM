@@ -814,13 +814,45 @@ describe("Discovered on the list kit", () => {
     expect(await screen.findByRole("dialog", { name: /scan a subnet/i })).toBeInTheDocument();
   });
 
+  it("opens Scan a subnet afresh after Back closed it on a queued scan (coordinator ruling 4)", async () => {
+    // The dialog's state outlived a close it did not see: Back takes `?new=`
+    // away without calling its own close, and reopening showed the last
+    // scan's "queued" answer instead of the picker.
+    const { router } = under("/discovered");
+    await userEvent.click(await screen.findByRole("button", { name: /scan a subnet/i }));
+    let dialog = await screen.findByRole("dialog", { name: /scan a subnet/i });
+    await within(dialog).findByRole("option", { name: /10\.0\.4\.0\/24/ });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "sub-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: /scan now/i }));
+    expect(await within(dialog).findByText(/queued for the/i)).toBeInTheDocument();
+
+    await act(() => router.navigate(-1));
+    expect(screen.queryByRole("dialog", { name: /scan a subnet/i })).toBeNull();
+    await act(() => router.navigate(1));
+    dialog = await screen.findByRole("dialog", { name: /scan a subnet/i });
+    expect(within(dialog).queryByText(/queued for the/i)).toBeNull();
+    expect(within(dialog).getByRole("combobox")).toHaveValue("");
+  });
+
+  it("asks before Close drops a chosen subnet nobody has scanned yet (coordinator ruling 3)", async () => {
+    const { router } = under("/discovered");
+    await userEvent.click(await screen.findByRole("button", { name: /scan a subnet/i }));
+    const dialog = await screen.findByRole("dialog", { name: /scan a subnet/i });
+    await within(dialog).findByRole("option", { name: /10\.0\.4\.0\/24/ });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "sub-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?new=scan");
+    expect(within(dialog).getByRole("combobox")).toHaveValue("sub-1");
+  });
+
   it("narrows the list and leaves the console's client alone (decision D20)", async () => {
     const select = vi.fn();
     mockClientScope.mockReturnValue({ selected: null, select, clients: TWO, ready: true });
     // The page's other reads stay on the console's choice: the suggestions
-    // panel, the "Recorded by a sweep" tile (a count of the fleet list, which
-    // its link opens unnarrowed) and the Scan a subnet dialog's subnet picker,
-    // mounted with the page. None of them is this list.
+    // panel and, once opened, the Scan a subnet dialog's subnet picker.
+    // Neither is this list. (The "Recorded by a sweep" tile is narrowed like
+    // the table since fix round 1; the test below is about it.)
     const narrowing = recordingNarrowing(
       {
         listAssetCandidates: rows,
@@ -829,7 +861,7 @@ describe("Discovered on the list kit", () => {
         listIpamSubnets: () => Promise.resolve([]),
         me: () => Promise.resolve({ org_id: "o1", permissions: [], clients: TWO } as unknown as Me),
       } as unknown as ApiClient,
-      { console: ["listAssetSuggestions", "listDevices", "listIpamSubnets"] },
+      { console: ["listAssetSuggestions", "listIpamSubnets"] },
     );
     mockUseApi.mockReturnValue(narrowing.api);
     renderAt(`/discovered?client=${ANDES.id}`, <CandidatesPage />);
@@ -845,5 +877,55 @@ describe("Discovered on the list kit", () => {
     under(`/discovered?journey_client=${ANDES.id}`);
     await screen.findByText("172.22.104.55");
     await waitFor(() => expect(select).toHaveBeenCalledWith(ANDES.id));
+  });
+
+  it("counts and opens the sweep's rows of the chip's client, like the table (fix round 1)", async () => {
+    // Coordinator ruling 2: a tile counted on a narrowed read links with the
+    // same `client`. Under the chip the tile counted every client's sweep rows
+    // and opened every client's: now it counts the chip's client's, through
+    // its narrowed API, and opens the fleet list narrowed to it. The note's
+    // link to the same rows follows.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: TWO, ready: true });
+    const narrowing = recordingNarrowing(
+      {
+        listAssetCandidates: rows,
+        listAssetSuggestions: () => Promise.resolve({ items: [] }),
+        listDevices: () => Promise.resolve({ items: [], total: 4 }),
+        listIpamSubnets: () => Promise.resolve([]),
+        me: () => Promise.resolve({ org_id: "o1", permissions: ["devices.read"], clients: TWO } as unknown as Me),
+      } as unknown as ApiClient,
+      { console: ["listAssetSuggestions", "listIpamSubnets"] },
+    );
+    mockUseApi.mockReturnValue(narrowing.api);
+    renderAt(`/discovered?client=${ANDES.id}`, <CandidatesPage />);
+    const tile = (await screen.findByText("Recorded by a sweep")).closest(".stat-card") as HTMLElement;
+    await waitFor(() => expect(within(tile).getByText("4")).toBeInTheDocument());
+    expect(narrowing.client(ANDES.id).listDevices).toHaveBeenCalledWith({ provenance: "sweep", limit: 1 });
+    expect(tile.getAttribute("href")).toBe(`/devices?provenance=sweep&client=${ANDES.id}`);
+    expect(screen.getByRole("link", { name: /review them there/i })).toHaveAttribute(
+      "href",
+      `/devices?provenance=sweep&client=${ANDES.id}`,
+    );
+    expect(narrowing.unnarrowed).toEqual([]);
+  });
+
+  it("draws loading, not an empty list, while /me has not said whose the chip's client is (ruling 10)", async () => {
+    // Coordinator ruling 10: with the chip set and `/me` pending the narrowed
+    // read is disabled, and a disabled query is not "loading" to TanStack v5.
+    // The page must not say "nothing matches" or "nothing unaccounted" about
+    // a list it has not read.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    const listAssetCandidates = vi.fn(rows);
+    under(`/discovered?client=${ANDES.id}`, {
+      listAssetCandidates,
+      me: () => new Promise<never>(() => {}),
+    } as Partial<ApiClient>);
+    // The list's own panel: the one its search sits in (the suggestions panel
+    // above it draws its own loading).
+    const list = (await screen.findByRole("textbox", { name: "Search the addresses found" })).closest(".panel") as HTMLElement;
+    expect(within(list).getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches these filters.")).toBeNull();
+    expect(screen.queryByText(/nothing unaccounted/i)).toBeNull();
+    expect(listAssetCandidates).not.toHaveBeenCalled();
   });
 });
