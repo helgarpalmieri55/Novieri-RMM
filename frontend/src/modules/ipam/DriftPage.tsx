@@ -471,7 +471,7 @@ function DriftTable({
                 </Td>
                 {canAssign && (
                   <Td>
-                    <Btn label={t("ipam.drift.handle")} icon="edit" small onClick={() => handling.open(item.id)} />
+                    <Btn label={t("ipam.drift.handle")} icon="edit" small onClick={() => handling.start(item.id)} />
                   </Td>
                 )}
               </tr>
