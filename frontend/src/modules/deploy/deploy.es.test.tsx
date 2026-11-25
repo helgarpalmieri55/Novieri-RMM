@@ -256,7 +256,8 @@ describe("the deployments page, in Spanish", () => {
 
   it("words the head, the tiles, the filter, the table and the row actions", async () => {
     const { container } = renderPage(<DeployPage />);
-    expect(await screen.findByRole("heading", { name: "Despliegue de software" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Software», shell.nav.item.software).
+    expect(await screen.findByRole("heading", { name: "Software", level: 1 })).toBeInTheDocument();
     await screen.findByText("dep1");
     expect(screen.getByRole("button", { name: "Nuevo despliegue" })).toBeInTheDocument();
     // The section nav is a row of links now (redesign plan, SectionNav).
@@ -365,7 +366,8 @@ describe("the deployments page, in Spanish", () => {
     renderPage(<DeployPage />);
     await screen.findByText("dep2");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Software deployment" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label.
+    expect(screen.getByRole("heading", { name: "Software", level: 1 })).toBeInTheDocument();
     const row = screen.getByText("dep2").closest("tr") as HTMLElement;
     expect(within(row).getByText("Dispatching")).toBeInTheDocument();
     expect(within(row).getByText("Update")).toBeInTheDocument();

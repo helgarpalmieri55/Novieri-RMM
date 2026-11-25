@@ -57,7 +57,9 @@ describe("Deployments (/deploy)", () => {
     });
     mockUseApi.mockReturnValue(narrowing.api);
     renderPage(`/deploy?client=${ANDES}`, <DeployPage />, "/deploy");
-    expect(await screen.findByRole("table", { name: "Software deployment" })).toBeInTheDocument();
+    // The table is named for what it lists ("Deployments", the section nav's word): the heading
+    // became the rail's "Software" (coordinator ruling, wave O3 fix round 1).
+    expect(await screen.findByRole("table", { name: "Deployments" })).toBeInTheDocument();
     expect(narrowing.client(ANDES).listDeployments).toHaveBeenCalledWith();
     expect(narrowing.unnarrowed).toEqual([]);
   });
@@ -71,7 +73,7 @@ describe("Deployments (/deploy)", () => {
   it("still asks before executing, through the same confirmation", async () => {
     mockUseApi.mockReturnValue(fixtureClient());
     renderPage("/deploy", <DeployPage />, "/deploy");
-    const table = await screen.findByRole("table", { name: "Software deployment" });
+    const table = await screen.findByRole("table", { name: "Deployments" });
     await userEvent.click(within(table).getAllByRole("button", { name: "Execute" })[0]!);
     expect(await screen.findByRole("dialog", { name: "Execute deployment" })).toBeInTheDocument();
   });

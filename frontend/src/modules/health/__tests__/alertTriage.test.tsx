@@ -302,7 +302,8 @@ describe("Health page anchors", () => {
     ] as const) {
       stubApi({});
       const { unmount } = renderAt(<HealthPage />, `/health?view=${view}`);
-      await screen.findByRole("heading", { name: "Health & alerts" });
+      // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label ("Alerts", shell.nav.item.alerts).
+      await screen.findByRole("heading", { name: "Alerts", level: 1 });
       await waitFor(() => expect(at(id)).not.toBeNull());
       expect(within(at(id)!).getAllByRole("heading", { name: heading }).length).toBeGreaterThan(0);
       unmount();

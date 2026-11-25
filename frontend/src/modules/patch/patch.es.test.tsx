@@ -243,7 +243,8 @@ describe("the fleet patch page in Spanish", () => {
   it("words the head, the platform strip, the tiles, both lists and the records below", async () => {
     mockUseApi.mockReturnValue({});
     const { container } = renderPage(<FleetPatchPage />);
-    expect(await screen.findByRole("heading", { name: "Gestión de parches" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Parches», shell.nav.item.patching).
+    expect(await screen.findByRole("heading", { name: "Parches", level: 1 })).toBeInTheDocument();
     await screen.findByText("Acumulativa de octubre");
     await screen.findAllByText("sentinel");
     expect(screen.getByText("Actualizaciones de toda la flota, aprobadas en anillos de despliegue.")).toBeInTheDocument();
@@ -749,11 +750,12 @@ describe("a live language switch on the patch pages", () => {
   it("re-words a mounted fleet page, its record tables and its decision bar", async () => {
     mockUseApi.mockReturnValue({});
     renderPage(<FleetPatchPage />);
-    expect(await screen.findByRole("heading", { name: "Gestión de parches" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Parches», shell.nav.item.patching).
+    expect(await screen.findByRole("heading", { name: "Parches", level: 1 })).toBeInTheDocument();
     await screen.findByText("Acumulativa de octubre");
     expect(screen.getByText(/Mostrando 1–2 de 2 actualizaciones\./)).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Patch management" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Patching", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Showing 1–2 of 2 updates.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Select all 2 updates — Windows updates" })).toBeInTheDocument();
     expect(screen.getByText("An approval here covers the 2 devices of your organisation's own client in the test ring.")).toBeInTheDocument();

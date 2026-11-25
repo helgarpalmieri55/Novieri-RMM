@@ -55,7 +55,8 @@ export const deploy = {
     filterWeek: "Deployed in the last 7 days",
     rulePackage: "Package",
     ruleTarget: "Target",
-    title: "Software deployment",
+    // The rail's label (coordinator ruling, wave O3 fix round 1: the heading is the rail's word).
+    title: "Software",
     description: "Packages and scripts, deployed to a device or a group.",
     newDeployment: "New deployment",
     rateNone: "No completed runs yet",

@@ -53,7 +53,7 @@ export const deploy: Shape<typeof en> = {
     filterWeek: "Desplegados en los últimos 7 días",
     rulePackage: "Paquete",
     ruleTarget: "Destino",
-    title: "Despliegue de software",
+    title: "Software",
     description: "Paquetes y scripts, desplegados en un dispositivo o en un grupo.",
     newDeployment: "Nuevo despliegue",
     rateNone: "Aún no hay ejecuciones completadas",

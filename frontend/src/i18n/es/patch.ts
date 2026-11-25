@@ -477,7 +477,7 @@ export const patch: Shape<typeof en> = {
     open: "<link>Abrir {hostname}</link> para ver su estado de reinicio, su historial de tareas y su inventario.",
   },
   fleet: {
-    title: "Gestión de parches",
+    title: "Parches",
     description: "Actualizaciones de toda la flota, aprobadas en anillos de despliegue.",
     policies: "Políticas",
     exportEvidence: "Exportar evidencias",

@@ -419,7 +419,9 @@ export function DeployPage() {
               }
             />
           ) : (
-          <Table label={t("deploy.deployments.title")}>
+          // Named for what it lists: the heading is the rail's "Software" now
+          // (coordinator ruling, wave O3 fix round 1), too broad for a table.
+          <Table label={t("deploy.nav.deployments")}>
             <thead>
               <tr>
                 <Th>{t("deploy.deployments.colPackage")}</Th>

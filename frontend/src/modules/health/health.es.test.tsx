@@ -587,7 +587,8 @@ describe("the health page, in Spanish", () => {
       listApprovedActions: vi.fn().mockResolvedValue([approved({ autonomy: "autonomous" })]),
     });
     const { container } = renderUi(<HealthPage />);
-    expect(await screen.findByRole("heading", { name: "Salud y alertas" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Alertas», shell.nav.item.alerts).
+    expect(await screen.findByRole("heading", { name: "Alertas", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Las alertas que ha generado el parque y lo que puede ejecutarse para cerrarlas.")).toBeInTheDocument();
     expect(await screen.findByText("Disco libre en WS-01")).toBeInTheDocument();
     expect(screen.getByText("Críticas")).toBeInTheDocument();
@@ -598,7 +599,8 @@ describe("the health page, in Spanish", () => {
     expect(screen.getByText("Antes de que las alertas lleguen a alguien")).toBeInTheDocument();
     expect(screen.getByText("Informes de alertas")).toBeInTheDocument();
     // Redesign decision D21: the configuration panels live in their own views, each a tab of the page.
-    const views = screen.getByRole("tablist", { name: "Salud y alertas" });
+    // The views are named apart from the heading they sit under (same ruling).
+    const views = screen.getByRole("tablist", { name: "Vistas de alertas" });
     expect(within(views).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Alertas",
       "Perfiles",
@@ -633,7 +635,8 @@ describe("the health page, in Spanish", () => {
     renderUi(<HealthPage />);
     expect(await screen.findByText("Por 1 persona")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Health & alerts" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label.
+    expect(screen.getByRole("heading", { name: "Alerts", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("By 1 person")).toBeInTheDocument();
   });
 });

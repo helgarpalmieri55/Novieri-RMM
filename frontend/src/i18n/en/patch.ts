@@ -486,7 +486,8 @@ export const patch = {
     open: "<link>Open {hostname}</link> for its reboot state, job history and inventory.",
   },
   fleet: {
-    title: "Patch management",
+    // The rail's label (coordinator ruling, wave O3 fix round 1: the heading is the rail's word).
+    title: "Patching",
     description: "Updates across the fleet, approved into deployment rings.",
     policies: "Policies",
     exportEvidence: "Export evidence",

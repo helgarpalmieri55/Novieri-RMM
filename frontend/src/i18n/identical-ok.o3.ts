@@ -18,6 +18,7 @@ export const IDENTICAL_OK_O3: Record<string, string> = {
   "remote.screen.monitorOption": "\"Monitor\" is the same word in Spanish, followed by a number and the resolution.",
   "deploy.nav.scripts": "\"Scripts\" is the word Spanish uses for scripts.",
   "deploy.scripts.title": "\"Scripts\" is the word Spanish uses for scripts.",
+  "deploy.deployments.title": "\"Software\" is the rail's word in Spanish too (shell.nav.item.software).",
   "deploy.schedules.ruleScript": "\"Script\" is the word Spanish uses for a script.",
   "deploy.schedules.fieldScript": "\"Script\" is the word Spanish uses for a script.",
   "deploy.runOnDevice.rule": "\"Script\" is the word Spanish uses for a script.",

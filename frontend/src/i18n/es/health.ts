@@ -179,7 +179,7 @@ export const health: Shape<typeof en> = {
     subtitle: "Lo que otras pantallas tienen que configurar para que se generen y se vean las alertas.",
   },
   page: {
-    title: "Salud y alertas",
+    title: "Alertas",
     description: "Las alertas que ha generado el parque y lo que puede ejecutarse para cerrarlas.",
     noPermission: "No tienes permiso para ver el estado de los dispositivos, así que los paneles de abajo estarán vacíos.",
     tileCritical: "Críticas",
@@ -198,7 +198,7 @@ export const health: Shape<typeof en> = {
     drawerTitle: "Alerta",
   },
   views: {
-    label: "Salud y alertas",
+    label: "Vistas de alertas",
     alerts: "Alertas",
     profiles: "Perfiles",
     actions: "Acciones aprobadas",

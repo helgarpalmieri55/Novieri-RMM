@@ -178,7 +178,8 @@ export const health = {
     subtitle: "What other screens have to set up for alerts to be raised and seen.",
   },
   page: {
-    title: "Health & alerts",
+    // The rail's label (coordinator ruling, wave O3 fix round 1: the heading is the rail's word).
+    title: "Alerts",
     description: "Alerts the fleet has raised, and what may run to clear them.",
     noPermission: "You don’t have permission to view device health, so the panels below will be empty.",
     tileCritical: "Critical",
@@ -198,7 +199,7 @@ export const health = {
   },
   /** The page's four views (redesign decision D21). */
   views: {
-    label: "Health and alerts",
+    label: "Alert views",
     alerts: "Alerts",
     profiles: "Profiles",
     actions: "Approved actions",
