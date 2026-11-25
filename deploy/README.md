@@ -221,8 +221,10 @@ command.
   about it, and nothing checks that `:443` and `:8443` answer on IPv6. An
   `AAAA` record would send browsers and agents, which try IPv6 first, to an
   address nobody has checked serves this stack — or, if it is another
-  machine's, to that machine. (Not for Let's Encrypt's sake: its TLS-ALPN-01
-  validation falls back to IPv4 after any IPv6 error.) `scripts/preflight.sh`
+  machine's, to that machine. Let's Encrypt is no safety net either: it
+  retries over IPv4 only on a connection timeout, "not on other types of
+  error", so an `AAAA` pointing at a host that answers but is wrong fails
+  validation (<https://letsencrypt.org/docs/ipv6-support/>). `scripts/preflight.sh`
   asks the public DNS, not `/etc/hosts`, for the A record (the AAAA check
 also reads `/etc/hosts`), and refuses either mistake.
 - **Inbound 22 (SSH), 443 (console, API, object storage) and 8443 (agents),
