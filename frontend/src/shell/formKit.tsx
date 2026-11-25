@@ -4,7 +4,17 @@
  * Save" -- for the whole console. Atera's walkthrough counts six ways to save;
  * this console has one. A page with changes asks before it is left.
  */
-import { useCallback, useContext, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { Link, UNSAFE_DataRouterContext, useBeforeUnload, useBlocker, type Location } from "react-router-dom";
 
@@ -403,7 +413,30 @@ function LeaveQuestion({ search, pass }: { search: GuardedQuery; pass: ReleasePa
     // `release()` lets this one through, and only this one.
     return !pass.take();
   });
-  if (blocker.state !== "blocked") return null;
+  const asking = blocker.state === "blocked";
+  // ESCAPE ANSWERS THE QUESTION, AND ONLY THE QUESTION (kit requests batch 2,
+  // G2). Every surface listens for Escape on `document` (`useDialogSurface`,
+  // `Drawer`), so one keypress also reached the form's dialog behind: it
+  // tried to close again, was blocked again, and the question never went. So
+  // while it asks, the question takes Escape first, in the capture phase on
+  // `window` (the first listener on the event's path, before any `document`
+  // handler and before React's own root listeners), stops it there, and
+  // answers it: stay, as its Cancel does. The form keeps what was typed.
+  const latest = useRef(blocker);
+  useLayoutEffect(() => {
+    latest.current = blocker;
+  });
+  useEffect(() => {
+    if (!asking) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      latest.current.reset?.();
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [asking]);
+  if (!asking) return null;
   return createPortal(
     <div className="leave-layer">
       <ConfirmDialog

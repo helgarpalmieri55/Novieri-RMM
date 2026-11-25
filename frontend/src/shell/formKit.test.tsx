@@ -710,3 +710,44 @@ describe("the leave question over a form's dialog (kit requests batch 2, G1)", (
   });
 });
 
+describe("Escape on the leave question (kit requests batch 2, G2)", () => {
+  it("answers the question alone: it stays, and the form stays open with what was typed", async () => {
+    const closes = vi.fn();
+    const { router } = await askToLeave(false, closes);
+    expect(closes).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "New ticket" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toHaveValue("Printer");
+    expect(router.state.location.search).toBe("?new=ticket");
+    // The form's dialog never heard it: it did not try to close a second time.
+    expect(closes).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers it alone when the guard is inside the dialog too", async () => {
+    const closes = vi.fn();
+    await askToLeave(true, closes);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+    expect(screen.getByLabelText("Title")).toHaveValue("Printer");
+    expect(closes).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not held back once the question is gone: the next Escape is the form's again", async () => {
+    const closes = vi.fn();
+    await askToLeave(false, closes);
+    await userEvent.keyboard("{Escape}");
+    await userEvent.keyboard("{Escape}");
+    // The form tried to close, so it asks again: the guard still holds the change.
+    expect(closes).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+  });
+
+  it("is not vacuous: with nothing typed, Escape closes the form's dialog as before", async () => {
+    const { router } = renderPage("/service-desk", <DialogForm />, "/service-desk");
+    await userEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+    expect(router.state.location.search).toBe("");
+  });
+});

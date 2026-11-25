@@ -1194,23 +1194,34 @@ function KitPreview() {
  */
 function GuardedDialogBench() {
   const created = useNewParam("kit-ticket");
-  const [subject, setSubject] = useState("");
-  const { guard } = useUnsavedGuard(subject !== "", { search: ["new"] });
   return (
     <div style={{ marginTop: 24 }}>
       <Btn label="New ticket in a dialog" icon="plus" onClick={created.start} />
+      {/* The form lives while its dialog is open, so closing drops the draft
+          and opening starts clean, as a page's create dialog does. */}
+      {created.open ? <GuardedTicketForm onClose={created.close} /> : null}
+    </div>
+  );
+}
+
+function GuardedTicketForm({ onClose }: { onClose: () => void }) {
+  const [subject, setSubject] = useState("");
+  const { guard } = useUnsavedGuard(subject !== "", { search: ["new"] });
+  return (
+    <>
+      {/* BEFORE the dialog on purpose: the order that hid the question. */}
       {guard}
-      <Dialog open={created.open} onClose={created.close} title="New ticket">
+      <Dialog open onClose={onClose} title="New ticket">
         <div className="form-grid">
           <Field label="Subject" full>
             <input className={inputClass} value={subject} onChange={(event) => setSubject(event.target.value)} />
           </Field>
         </div>
         <div className="confirm-actions">
-          <Btn label="Cancel" onClick={created.close} />
+          <Btn label="Cancel" onClick={onClose} />
         </div>
       </Dialog>
-    </div>
+    </>
   );
 }
 
