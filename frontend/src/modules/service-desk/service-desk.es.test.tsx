@@ -884,19 +884,22 @@ describe("the service desk settings in Spanish", () => {
     expectNoEnglish(container);
   });
 
-  it("edits a queue inline with Spanish controls", async () => {
+  // A row is edited in a dialog now, not in place (redesign plan, Task 7,
+  // 2.5: "la edición de una fila en diálogo"); the controls are the same.
+  it("edits a queue in its dialog with Spanish controls", async () => {
     vi.useRealTimers();
     baseApi();
     const user = userEvent.setup();
-    const { container } = renderAt(<ServiceDeskAdminPage />, "/service-desk/admin");
+    renderAt(<ServiceDeskAdminPage />, "/service-desk/admin");
     const row = (await screen.findByText("Soporte general")).closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Editar" }));
-    expect(within(row).getByLabelText("Nombre de la cola")).toBeInTheDocument();
-    expect(within(row).getByLabelText("Cola activa")).toBeInTheDocument();
-    expect(within(row).getByText("Activa")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Guardar" })).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
-    expectNoEnglish(container);
+    const dialog = screen.getByRole("dialog", { name: "Editar cola" });
+    expect(within(dialog).getByLabelText("Nombre de la cola")).toHaveValue("Soporte general");
+    expect(within(dialog).getByLabelText("Cola activa")).toBeInTheDocument();
+    expect(within(dialog).getByText("Activa")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Guardar" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
+    expectNoEnglish(dialog);
   });
 
   it("refuses an empty queue, an empty category and an empty saved reply, and re-words each on a switch", async () => {

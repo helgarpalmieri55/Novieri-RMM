@@ -13,6 +13,7 @@ import { MyWorkPage } from "../MyWorkPage";
 import { NewTicketDialog } from "../NewTicketDialog";
 import { ServiceDeskAdminPage } from "../ServiceDeskAdminPage";
 import { TicketDetailPage } from "../TicketDetailPage";
+import { renderPage } from "../../../test/renderPage";
 import { TicketListPage } from "../TicketListPage";
 import {
   commentVisibilityVariant,
@@ -1943,6 +1944,56 @@ describe("ServiceDeskAdminPage wiring", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("No queues yet.")).not.toBeInTheDocument();
+  });
+
+  // ON THE FORM KIT (redesign plan, Task 7, 2.5): the create dialogs open
+  // from the URL (decision D8), and a row is edited in its own dialog, saved
+  // there with the same call.
+  it("opens New queue from ?new=queue", async () => {
+    mockUseApi.mockReturnValue(baseApi() as ApiClient);
+    renderPage("/service-desk/admin?new=queue", <ServiceDeskAdminPage />);
+    expect(await screen.findByRole("dialog", { name: "New queue" })).toBeInTheDocument();
+  });
+
+  it("opens New category from ?new=category, and nothing for someone who may not create one", async () => {
+    mockUseApi.mockReturnValue(baseApi() as ApiClient);
+    const first = renderPage("/service-desk/admin?new=category", <ServiceDeskAdminPage />);
+    expect(await screen.findByRole("dialog", { name: "New category" })).toBeInTheDocument();
+    first.unmount();
+    mockUseApi.mockReturnValue(baseApi({ me: vi.fn().mockResolvedValue(ME_TECHNICIAN) }) as ApiClient);
+    renderPage("/service-desk/admin?new=category", <ServiceDeskAdminPage />);
+    await screen.findByText("No categories yet.");
+    expect(screen.queryByRole("dialog", { name: "New category" })).toBeNull();
+  });
+
+  it("edits a category in its dialog and saves it there", async () => {
+    const user = userEvent.setup();
+    const api = baseApi({
+      listTicketCategories: vi.fn().mockResolvedValue(CATEGORIES),
+      updateTicketCategory: vi.fn().mockResolvedValue({ ...CATEGORIES[0], name: "Hardware faults" }),
+    });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    const row = (await screen.findByText("Hardware")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit category" });
+    // The row does not turn into a form in place.
+    expect(within(row).queryByRole("textbox")).toBeNull();
+    await user.clear(within(dialog).getByLabelText("Category name"));
+    await user.type(within(dialog).getByLabelText("Category name"), "Hardware faults");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(api.updateTicketCategory).toHaveBeenCalledWith(CATEGORIES[0]?.id, { name: "Hardware faults", active: true });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit category" })).toBeNull());
+  });
+
+  it("draws no primary button in the body but the open dialog's", async () => {
+    mockUseApi.mockReturnValue(baseApi({ listTicketCategories: vi.fn().mockResolvedValue(CATEGORIES) }) as ApiClient);
+    renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    await screen.findByText("Hardware");
+    expect(document.querySelectorAll(".btn.primary")).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "New queue" }));
+    const dialog = await screen.findByRole("dialog", { name: "New queue" });
+    expect(document.querySelectorAll(".btn.primary").length).toBe(dialog.querySelectorAll(".btn.primary").length);
   });
 
   it("hides all write controls without ticket.admin", async () => {

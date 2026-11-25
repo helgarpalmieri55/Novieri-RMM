@@ -5,7 +5,8 @@ import type { Attempt, FieldRule } from "../../components/form";
 import { Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import { Btn, Panel, QueryState } from "../../shell/components";
+import { Btn, FormSection, QueryState } from "../../shell/components";
+import { SectionLead } from "./SectionLead";
 import { Icon } from "../../shell/icons";
 import {
   useCannedResponses,
@@ -37,16 +38,16 @@ export function SavedRepliesPanel({ canAdmin }: { canAdmin: boolean }) {
   const [deleting, setDeleting] = useState<CannedResponseOut | null>(null);
 
   return (
-    <Panel
-      title={t("serviceDesk.replies.title")}
-      subtitle={t("serviceDesk.replies.subtitle")}
-      bare
-      actions={
-        canAdmin ? (
-          <Btn label={t("serviceDesk.replies.newReply")} icon="plus" variant="primary" onClick={() => setEditing("new")} />
-        ) : undefined
-      }
-    >
+    // A SECTION OF THE SETTINGS PAGE (redesign plan, Task 7, 2.5), drawn as
+    // queues and categories are: its sentence, its "New ..." as a secondary
+    // button (the open dialog's Save is the one primary), its table.
+    <FormSection title={t("serviceDesk.replies.title")} icon="mail">
+      <SectionLead
+        text={t("serviceDesk.replies.subtitle")}
+        action={
+          canAdmin ? <Btn label={t("serviceDesk.replies.newReply")} icon="plus" onClick={() => setEditing("new")} /> : undefined
+        }
+      />
       <QueryState
         loading={replies.isLoading}
         error={replies.error}
@@ -114,7 +115,7 @@ export function SavedRepliesPanel({ canAdmin }: { canAdmin: boolean }) {
         }}
         onCancel={() => setDeleting(null)}
       />
-    </Panel>
+    </FormSection>
   );
 }
 
