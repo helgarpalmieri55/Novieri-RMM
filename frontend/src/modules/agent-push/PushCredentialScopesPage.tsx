@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
+import { translate } from "../../i18n/core";
 import { Button, Dialog, Field, Td, Th, inputClass } from "../../components/ui";
 import {
   Btn,
@@ -256,6 +257,9 @@ function BindForm({ onClose }: { onClose: () => void }) {
   const [credentialId, setCredentialId] = useState("");
   const [prefix, setPrefix] = useState("");
   const [note, setNote] = useState("");
+  // Populated on Bind, never while typing (the form kernel's rule).
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const problems = attemptProblems(attempt);
   /**
    * THE PAGE'S ONE GUARD (coordinator ruling 3, fix round 1 of wave O1). The
    * form lives in the `?new=scope` dialog, so Back, Close and Escape are all
@@ -280,16 +284,6 @@ function BindForm({ onClose }: { onClose: () => void }) {
 
   const parsed = parsePrefix(prefix);
   const available = credentials.data ?? [];
-  // WHAT BIND WAITS FOR, ON SCREEN (coordinator ruling 8): a disabled button
-  // says why. A prefix that does not parse already says so, in red.
-  const waitsFor =
-    credentialId === "" && prefix.trim() === ""
-      ? t("agentPush.scopes.form.needsBoth")
-      : credentialId === ""
-        ? t("agentPush.scopes.form.needsCredential")
-        : prefix.trim() === ""
-          ? t("agentPush.scopes.form.needsPrefix")
-          : null;
 
   return frame(
     <>
@@ -375,7 +369,27 @@ function BindForm({ onClose }: { onClose: () => void }) {
 
       <div className="mt-3">
         <Button
-          onClick={() =>
+          onClick={() => {
+            // ENABLED, AND SAYS WHAT IS MISSING ON SUBMIT (coordinator
+            // clarification 8a): the form has several inputs, so Bind never
+            // waits disabled on one of them. A refusal of the last attempt is
+            // cleared first (ruling 7).
+            const next: Attempt = {
+              rules: () => [
+                { name: "credential", label: translate("agentPush.shared.credential") },
+                {
+                  name: "prefix",
+                  label: translate("agentPush.shared.prefix"),
+                  validate: (value: string) => (parsePrefix(value) ? null : translate("agentPush.shared.notAPrefix")),
+                },
+              ],
+              values: { credential: credentialId, prefix },
+            };
+            setAttempt(next);
+            if (attemptProblems(next).length > 0) {
+              bind.reset();
+              return;
+            }
             bind.mutate(
               { credential_id: credentialId, prefix, note },
               {
@@ -387,24 +401,27 @@ function BindForm({ onClose }: { onClose: () => void }) {
                   onClose();
                 },
               },
-            )
-          }
-          disabled={bind.isPending || parsed === null || credentialId === ""}
+            );
+          }}
+          disabled={bind.isPending}
         >
           {t("agentPush.scopes.form.submit")}
         </Button>
       </div>
-      {waitsFor !== null ? <p className="note mt-2">{waitsFor}</p> : null}
 
       {/* SEPARATION OF DUTIES, AT THE CONTROL, as on the authorizations page.
           It was the tail of a 391-char page description. */}
       <p className="note mt-2">{t("agentPush.scopes.form.separation")}</p>
 
-      {bind.isError && (
+      {bind.isError ? (
         <p role="alert" className="form-error mt-2">
           {describeSubmitError(bind.error)}
         </p>
-      )}
+      ) : problems.length > 0 ? (
+        <p role="alert" className="form-error mt-2">
+          {problems.map((problem) => problem.message).join(". ")}.
+        </p>
+      ) : null}
     </>,
   );
 }

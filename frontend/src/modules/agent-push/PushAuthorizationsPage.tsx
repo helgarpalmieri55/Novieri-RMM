@@ -444,10 +444,19 @@ function GrantForm({ onClose }: { onClose: () => void }) {
       <div className="mt-3">
         <Button
           onClick={() => {
+            // ENABLED, AND SAYS WHAT IS MISSING ON SUBMIT (coordinator
+            // clarification 8a): this form has several inputs, so Authorize
+            // never waits disabled on one of them.
             const next: Attempt = {
-              rules: () =>
-                client.needsField ? [{ name: "client", label: translate("components.clientField.label") }] : [],
-              values: { client: grantClient },
+              rules: () => [
+                ...(client.needsField ? [{ name: "client", label: translate("components.clientField.label") }] : []),
+                {
+                  name: "prefix",
+                  label: translate("agentPush.shared.prefix"),
+                  validate: (value: string) => (parsePrefix(value) ? null : translate("agentPush.shared.notAPrefix")),
+                },
+              ],
+              values: { client: grantClient, prefix },
             };
             setAttempt(next);
             if (attemptProblems(next).length > 0) {
@@ -482,17 +491,11 @@ function GrantForm({ onClose }: { onClose: () => void }) {
               },
             );
           }}
-          disabled={create.isPending || parsed === null}
+          disabled={create.isPending}
         >
           {t("agentPush.authorizations.form.submit")}
         </Button>
       </div>
-      {/* WHAT AUTHORIZE WAITS FOR, ON SCREEN (coordinator ruling 8): a
-          disabled button says why. A prefix that does not parse already says
-          so above, in red. */}
-      {prefix.trim() === "" ? (
-        <p className="note mt-2">{t("agentPush.authorizations.form.needsPrefix")}</p>
-      ) : null}
 
       {/* SEPARATION OF DUTIES, AT THE CONTROL. It was the tail of a 465-char
           page description; the fact is about who may press this button, so it

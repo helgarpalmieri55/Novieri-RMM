@@ -323,14 +323,15 @@ describe("PushAuthorizationsPage", () => {
 
   it("refuses to preview something that is not a prefix", async () => {
     // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
-    stubApi();
+    const api = stubApi();
     renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "server-17.corp.example");
     await waitFor(() => expect(screen.getByText(/That is not a prefix/)).toBeTruthy());
-    expect((screen.getByRole("button", { name: "Authorize" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    // Authorize stays enabled (coordinator clarification 8a: a form of several
+    // inputs reports on submit); the attempt sends nothing.
+    await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
+    expect(api.createPushAuthorization).not.toHaveBeenCalled();
   });
 });
 
@@ -398,11 +399,15 @@ describe("PushCredentialScopesPage", () => {
     expect(screen.queryByText(/windows_domain/)).toBeNull();
   });
 
-  it("keeps Bind disabled until both a credential and a prefix are chosen", async () => {
+  it("sends no binding until both a credential and a prefix are chosen", async () => {
     // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // Both halves are the bound: a credential with no prefix binds nothing,
-    // and a prefix with no credential binds nothing to it.
+    // and a prefix with no credential binds nothing to it. Bind stays enabled
+    // and says what is missing (coordinator clarification 8a), where it was
+    // disabled with no reason on screen.
+    const bindPushCredentialScope = vi.fn().mockResolvedValue(scope());
     stubApi({
+      bindPushCredentialScope,
       listCredentials: vi
         .fn()
         .mockResolvedValue([
@@ -410,12 +415,17 @@ describe("PushCredentialScopesPage", () => {
         ]),
     });
     renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
-    const button = (await screen.findByRole("button", { name: "Bind" })) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    const button = await screen.findByRole("button", { name: "Bind" });
     await userEvent.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
-    await waitFor(() => expect(button.disabled).toBe(true));
+    await userEvent.click(button);
+    expect(screen.getByRole("alert")).toHaveTextContent("Credential is required");
+    expect(bindPushCredentialScope).not.toHaveBeenCalled();
+    await screen.findByRole("option", { name: "branch-installer" });
     await userEvent.selectOptions(screen.getByRole("combobox"), "c1");
-    await waitFor(() => expect(button.disabled).toBe(false));
+    await userEvent.click(button);
+    await waitFor(() =>
+      expect(bindPushCredentialScope).toHaveBeenCalledWith({ credential_id: "c1", prefix: "10.4.7.0/24", note: "" }),
+    );
   });
 
   it("says binding authorizes nothing on its own", async () => {
@@ -982,36 +992,53 @@ describe("the grant and bind forms ask before Back drops them", () => {
 });
 
 /*
- * A DISABLED BUTTON SAYS WHY ON SCREEN (coordinator ruling 8, fix round 1 of
- * wave O1). Authorize and Bind wait for what they need; the form says what
- * that is, beside them, and stops saying it once it is there.
+ * A FORM OF SEVERAL INPUTS KEEPS ITS SUBMIT ENABLED AND SAYS WHAT IS MISSING ON
+ * SUBMIT (coordinator clarification 8a): only a single-input form may wait,
+ * disabled, on its one empty input. Authorize and Bind each have several, so
+ * they stay enabled, send nothing while something is missing, and say what.
  */
-describe("the disabled submits say what they wait for", () => {
-  it("says Authorize needs a prefix while none is typed", async () => {
-    stubApi();
+describe("Authorize and Bind say what is missing on submit (ruling 8a)", () => {
+  it("Authorize with no prefix sends nothing and names the prefix", async () => {
+    const createPushAuthorization = vi.fn();
+    stubApi({ createPushAuthorization });
     renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const dialog = await screen.findByRole("dialog", { name: "Authorize a prefix" });
-    expect(within(dialog).getByRole("button", { name: "Authorize" })).toBeDisabled();
-    expect(within(dialog).getByText("Type the prefix to authorize.")).toBeInTheDocument();
-    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
-    expect(within(dialog).queryByText("Type the prefix to authorize.")).toBeNull();
-    expect(within(dialog).getByRole("button", { name: "Authorize" })).toBeEnabled();
+    const authorize = within(dialog).getByRole("button", { name: "Authorize" });
+    expect(authorize).toBeEnabled();
+    await userEvent.click(authorize);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Prefix is required");
+    expect(createPushAuthorization).not.toHaveBeenCalled();
   });
 
-  it("says Bind needs a credential and a prefix, naming the one still missing", async () => {
+  it("Bind with nothing chosen sends nothing and names the credential and the prefix", async () => {
+    const bindPushCredentialScope = vi.fn();
+    stubApi({ bindPushCredentialScope });
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    const bind = within(dialog).getByRole("button", { name: "Bind" });
+    expect(bind).toBeEnabled();
+    await userEvent.click(bind);
+    const alert = within(dialog).getByRole("alert");
+    expect(alert).toHaveTextContent("Credential is required");
+    expect(alert).toHaveTextContent("Prefix is required");
+    expect(bindPushCredentialScope).not.toHaveBeenCalled();
+  });
+
+  it("Bind with a prefix that does not parse sends nothing and says so", async () => {
+    const bindPushCredentialScope = vi.fn();
     stubApi({
+      bindPushCredentialScope,
       listCredentials: vi
         .fn()
         .mockResolvedValue([{ id: "c1", name: "branch-installer", type: "push_install", has_secret: true }]),
     });
     renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
-    expect(within(dialog).getByText("Choose a credential and type the prefix to bind it to.")).toBeInTheDocument();
-    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
-    expect(within(dialog).getByText("Choose the credential to bind.")).toBeInTheDocument();
     await within(dialog).findByRole("option", { name: "branch-installer" });
     await userEvent.selectOptions(within(dialog).getByRole("combobox"), "c1");
-    expect(within(dialog).queryByText(/^Choose the credential|^Choose a credential/)).toBeNull();
-    expect(within(dialog).getByRole("button", { name: "Bind" })).toBeEnabled();
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "server-17");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Bind" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(/That is not a prefix/);
+    expect(bindPushCredentialScope).not.toHaveBeenCalled();
   });
 });
