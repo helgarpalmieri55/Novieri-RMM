@@ -44,9 +44,9 @@ describe("no empty state before the narrowed read (coordinator's ruling 10)", ()
   });
 });
 
-/** The coordinator's ruling 10a: a tile whose read has not answered draws no figure and no claim. */
+/** The coordinator's ruling 10a: a tile with no data (pending or failed) draws "—" and no line under it. */
 function expectNoFigure(tile: HTMLElement) {
-  expect(tile.querySelector(".stat-value")).not.toHaveTextContent(/\d/);
+  expect(tile.querySelector(".v")?.textContent).toBe("—");
   expect(tile.querySelector(".z")).toBeNull();
 }
 
@@ -61,16 +61,17 @@ describe("no tile figure before its read (coordinator's ruling 10a)", () => {
     }
   });
 
-  it("draws no seat count on a license's record before its allocations answer", async () => {
-    mockUseApi.mockReturnValue(
-      fixtureClient({ ...fixtureRegistry(), listAllocations: () => new Promise<never>(() => {}) } as never),
-    );
+  it.each([
+    ["before its allocations answer", () => new Promise<never>(() => {}), false],
+    ["when its allocations fail", () => Promise.reject(new Error("unavailable")), true],
+  ])("draws no seat count on a license's record %s", async (_when, listAllocations, fails) => {
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listAllocations } as never));
     renderPage("/licenses/lic-1", <LicenseDetail />, "/licenses/:licenseId");
     const inUse = (await screen.findByText("In use", { selector: ".k" })).closest(".tile") as HTMLElement;
-    expect(inUse.querySelector(".v")).toHaveTextContent("—");
-    const free = screen.getByText("Free", { selector: ".k" }).closest(".tile") as HTMLElement;
-    expect(free.querySelector(".v")).toHaveTextContent("—");
-    expect(free.querySelector(".z")).toBeNull();
+    // A failed read: the allocations list beside the tiles says why.
+    if (fails) expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expectNoFigure(inUse);
+    expectNoFigure(screen.getByText("Free", { selector: ".k" }).closest(".tile") as HTMLElement);
   });
 });
 

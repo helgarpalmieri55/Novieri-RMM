@@ -41,9 +41,9 @@ describe("no empty state before the narrowed read (coordinator's ruling 10)", ()
   });
 });
 
-/** The coordinator's ruling 10a: a tile whose read has not answered draws no figure and no claim. */
+/** The coordinator's ruling 10a: a tile with no data (pending or failed) draws "—" and no line under it. */
 function expectNoFigure(tile: HTMLElement) {
-  expect(tile.querySelector(".stat-value")).not.toHaveTextContent(/\d/);
+  expect(tile.querySelector(".v")?.textContent).toBe("—");
   expect(tile.querySelector(".z")).toBeNull();
 }
 

@@ -85,6 +85,8 @@ import { Person } from "../../shell/viz";
 
 const BILLING_CYCLES: BillingCycle[] = ["monthly", "quarterly", "annual"];
 const RENEWAL_WINDOW_DAYS = 90;
+/** A tile with no data, pending or failed (the coordinator's ruling 10a). */
+const NO_DATA = "—";
 
 /**
  * What a subscription may not be registered without, and what each field may
@@ -344,28 +346,26 @@ export function SubscriptionsPage() {
         )}
         <StatCard
           label={t("subscriptions.list.tileActive")}
-          value={subscriptions.error ? t("subscriptions.common.na") : String(activeCount)}
+          value={subscriptions.data ? String(activeCount) : NO_DATA}
           icon="subscription"
           to={withClient("/subscriptions")}
           tone="blue"
           zeroLabel={t("subscriptions.list.tileActiveZero")}
-          pending={subscriptions.isPending && !subscriptions.error}
           foot={
-            !subscriptions.error && activeCount > 0 && items.length > activeCount
+            subscriptions.data && activeCount > 0 && items.length > activeCount
               ? t("subscriptions.list.ofRecorded", { count: items.length })
               : undefined
           }
         />
         <StatCard
           label={t("subscriptions.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
-          value={renewals.error ? t("subscriptions.common.na") : String(renewalRows.length)}
+          value={renewals.data ? String(renewalRows.length) : NO_DATA}
           icon="clock"
           to={withClient("/subscriptions/renewals")}
           tone="gold"
           zeroLabel={t("subscriptions.list.tileRenewalsZero")}
-          pending={renewals.isPending && !renewals.error}
           foot={
-            !renewals.error && nextRenewal?.renews_at
+            renewals.data && nextRenewal?.renews_at
               ? t("subscriptions.list.nextRenewal", {
                   service: nextRenewal.service_name,
                   date: formatDate(nextRenewal.renews_at, "UTC"),
@@ -375,30 +375,28 @@ export function SubscriptionsPage() {
         />
         <StatCard
           label={t("subscriptions.list.tileNotice")}
-          value={renewals.error ? t("subscriptions.common.na") : String(noticeDueCount)}
+          value={renewals.data ? String(noticeDueCount) : NO_DATA}
           icon="warning"
           to={withClient("/subscriptions/renewals")}
           tone="orange"
-          urgent={!renewals.error && noticeDueCount > 0}
+          urgent={renewals.data !== undefined && noticeDueCount > 0}
           zeroLabel={t("subscriptions.list.tileNoticeZero")}
-          pending={renewals.isPending && !renewals.error}
           foot={
-            !renewals.error && noticeDueCount > 0
+            renewals.data && noticeDueCount > 0
               ? nameList(noticeDue.map((row) => row.service_name))
               : undefined
           }
         />
         <StatCard
           label={t("subscriptions.list.tileNoOwner")}
-          value={subscriptions.error ? t("subscriptions.common.na") : String(noOwnerCount)}
+          value={subscriptions.data ? String(noOwnerCount) : NO_DATA}
           icon="user"
           to={withClient("/subscriptions")}
           tone="gold"
-          urgent={!subscriptions.error && noOwnerCount > 0}
+          urgent={subscriptions.data !== undefined && noOwnerCount > 0}
           zeroLabel={t("subscriptions.list.tileNoOwnerZero")}
-          pending={subscriptions.isPending && !subscriptions.error}
           foot={
-            !subscriptions.error && noOwnerCount > 0
+            subscriptions.data && noOwnerCount > 0
               ? nameList(noOwner.map((sub) => sub.service_name))
               : undefined
           }

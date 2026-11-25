@@ -14,7 +14,6 @@ export const subscriptions = {
     renewals: "Renewals",
   },
   common: {
-    na: "n/a",
     cancel: "Cancel",
     save: "Save",
     noOwner: "No owner",

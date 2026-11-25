@@ -301,20 +301,20 @@ export function SubnetTreePage() {
           />
           <StatCard
             label={t("ipam.tree.withDrift")}
-            value={String(driftBySubnet.size)}
+            /* No data (pending, narrowing undecided or failed): "—" and no line
+               under it, never a zero it did not count (the coordinator's ruling
+               10a); the drift page's list says why a read failed. */
+            value={drift.data ? String(driftBySubnet.size) : "—"}
             icon="arrows-exchange"
             to={withClient("/ipam/drift")}
             tone="gold"
-            urgent
-            pending={drift.data === undefined}
+            urgent={drift.data !== undefined}
             /* The zero this module most needs to disambiguate: the drift list
                answered and no subnet is in it. The "nothing has been measured"
                zero never reaches a tile at all; the whole row is replaced by
                the first-run sentence below. */
             zeroLabel={t("ipam.tree.withDriftZero")}
-            /* Until the drift answers (or when it failed) no figure and no line
-               under it (coordinator's ruling 10a): never a zero it did not count. */
-            foot={drift.data === undefined ? undefined : <span>{t("ipam.tree.withDriftFoot")}</span>}
+            foot={drift.data ? <span>{t("ipam.tree.withDriftFoot")}</span> : undefined}
           />
           <StatCard
             label={t("ipam.tree.neverSwept")}

@@ -9,7 +9,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -205,7 +205,7 @@ describe("the subscriptions register in Spanish", () => {
     expectNoEnglish(container, RECORDED);
   });
 
-  it("says a failed tile query as n/d, counts the one-seat case and words the empty state", async () => {
+  it("draws a failed tile query as a dash, counts the one-seat case and words the empty state", async () => {
     mockUseApi.mockReturnValue(
       api({
         renewals: vi.fn().mockRejectedValue(new ApiError(503, "")),
@@ -214,7 +214,11 @@ describe("the subscriptions register in Spanish", () => {
     );
     const { container } = mount(<SubscriptionsPage />);
     expect(await screen.findByText("1 puesto")).toBeInTheDocument();
-    expect((await screen.findAllByText("n/d")).length).toBeGreaterThan(0);
+    // A tile with no data shows "—", in either language (the coordinator's ruling 10a).
+    await waitFor(() =>
+      expect([...container.querySelectorAll(".stat-card .stat-value")].map((v) => v.textContent)).toContain("—"),
+    );
+    expect(screen.queryByText("n/d")).toBeNull();
     expect(screen.getByText("En prueba")).toBeInTheDocument();
     expect(screen.getAllByText("Sin responsable").length).toBeGreaterThan(0);
     expect((await screen.findByRole("alert")).textContent).toMatch(/no está disponible/i);

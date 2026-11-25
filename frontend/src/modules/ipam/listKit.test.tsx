@@ -45,9 +45,9 @@ describe("no empty state before the narrowed read (coordinator's ruling 10)", ()
   });
 });
 
-/** The coordinator's ruling 10a: a tile whose read has not answered draws no figure and no claim. */
+/** The coordinator's ruling 10a: a tile with no data (pending or failed) draws "—" and no line under it. */
 function expectNoFigure(tile: HTMLElement) {
-  expect(tile.querySelector(".stat-value")).not.toHaveTextContent(/\d/);
+  expect(tile.querySelector(".v")?.textContent).toBe("—");
   expect(tile.querySelector(".z")).toBeNull();
 }
 
@@ -60,14 +60,28 @@ describe("no tile figure before its read (coordinator's ruling 10a)", () => {
     expect(screen.queryByText(/No subnet is registered, so there is no drift figure/)).toBeNull();
   });
 
-  it("draws no drift count and no line under it on the tree until the drift answers", async () => {
-    mockUseApi.mockReturnValue(
-      fixtureClient({ ...fixtureRegistry(), listIpamDrift: () => new Promise<never>(() => {}) } as never),
-    );
-    renderPage("/ipam", <SubnetTreePage />, "/ipam");
+  it.each([
+    ["until the drift answers", () => new Promise<never>(() => {}), false],
+    ["when the drift fails", () => Promise.reject(new Error("unavailable")), true],
+  ])("draws no drift count and no line under it on the tree %s", async (_when, listIpamDrift, fails) => {
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listIpamDrift } as never));
+    const { queryClient } = renderPage("/ipam", <SubnetTreePage />, "/ipam");
     const tile = await screen.findByRole("link", { name: /With drift/ });
+    // The failed read has settled once nothing is fetching any more.
+    if (fails) await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expectNoFigure(tile);
     expect(screen.queryByText("No subnet has an unresolved finding")).toBeNull();
+  });
+
+  it("draws no count and no claim on the drift page's tiles when its lists fail", async () => {
+    const down = () => Promise.reject(new Error("unavailable"));
+    mockUseApi.mockReturnValue(fixtureClient({ ...fixtureRegistry(), listIpamDrift: down, listIpamOrphans: down } as never));
+    const { container } = renderPage("/ipam/drift", <DriftPage />, "/ipam/drift");
+    // The list beside the tiles says why.
+    expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(container.querySelectorAll(".stat-card .v")[2]?.textContent).toBe("—"));
+    for (const tile of container.querySelectorAll<HTMLElement>(".stat-card")) expectNoFigure(tile);
+    expect(screen.queryByText("No unresolved finding")).toBeNull();
   });
 
   it("draws no count and no claim on the drift page's tiles while the chip's client is being decided", async () => {

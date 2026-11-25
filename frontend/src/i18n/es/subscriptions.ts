@@ -9,7 +9,6 @@ export const subscriptions: Shape<typeof en> = {
     renewals: "Renovaciones",
   },
   common: {
-    na: "n/d",
     cancel: "Cancelar",
     save: "Guardar",
     noOwner: "Sin responsable",

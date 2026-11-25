@@ -94,6 +94,8 @@ const LICENSE_TYPES: LicenseType[] = [
 ];
 
 const RENEWAL_WINDOW_DAYS = 90;
+/** A tile with no data, pending or failed (the coordinator's ruling 10a). */
+const NO_DATA = "—";
 
 /**
  * What a license record may not be created without.
@@ -314,10 +316,11 @@ export function LicensesPage() {
           critical wash; the renewal window is the warning; the compliant
           count colours its figure ok; the catalog count is plain.
 
-          The zero labels are safe against the failed-query case above them:
-          a failed query renders "n/a", not "0", so "nothing over-deployed"
-          can only appear when the compliance query actually returned and
-          found nothing.
+          NO DATA IS A DASH (the coordinator's ruling 10a): while a tile's
+          read is pending, its narrowing is not decided, or the read failed,
+          the tile draws "—" and no line under it (the alert below the row
+          says why a read failed). So "nothing over-deployed" can only appear
+          when the compliance query actually returned and found nothing.
 
           The over-deployed tile carries v3's foot line: the names of the
           products that are over, which are already in the compliance result.
@@ -331,57 +334,52 @@ export function LicensesPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("licenses.list.tileOver")}
-          value={compliance.error ? t("licenses.common.na") : String(breachCount)}
+          value={compliance.data ? String(breachCount) : NO_DATA}
           icon="alert-triangle"
           to={withClient("/licenses/compliance")}
           tone="red"
-          urgent={!compliance.error && breachCount > 0}
+          urgent={compliance.data !== undefined && breachCount > 0}
           zeroLabel={t("licenses.list.tileOverZero")}
-          pending={compliance.isPending && !compliance.error}
           foot={
             // One compliance row per (client, product): two clients over on
             // one product are one product over and one name.
-            !compliance.error && breachCount > 0
-              ? [
-                  ...new Set(
-                    (compliance.data ?? []).filter((row) => row.breach).map((row) => row.name),
-                  ),
-                ].join(", ")
+            compliance.data && breachCount > 0
+              ? [...new Set(compliance.data.filter((row) => row.breach).map((row) => row.name))].join(", ")
               : undefined
           }
         />
         <StatCard
           label={t("licenses.list.tileRenewals", { count: RENEWAL_WINDOW_DAYS })}
-          value={renewals.error ? t("licenses.common.na") : String((renewals.data ?? []).length)}
+          value={renewals.data ? String(renewals.data.length) : NO_DATA}
           icon="clock"
           to={withClient("/licenses/renewals")}
           tone="gold"
           zeroLabel={t("licenses.list.tileRenewalsZero")}
-          pending={renewals.isPending && !renewals.error}
-          foot={renewingProducts.length > 0 ? renewingProducts.join(", ") : undefined}
+          foot={renewals.data && renewingProducts.length > 0 ? renewingProducts.join(", ") : undefined}
         />
         <StatCard
           label={t("licenses.list.tileProducts")}
-          value={products.error ? t("licenses.common.na") : String(products.data?.length ?? 0)}
+          value={products.data ? String(products.data.length) : NO_DATA}
           icon="license"
           to="/licenses/products"
           tone="blue"
           zeroLabel={t("licenses.list.tileProductsZero")}
-          pending={products.isPending && !products.error}
           foot={
-            publisherCount > 0 ? t("licenses.list.publishers", { count: publisherCount }) : undefined
+            products.data && publisherCount > 0
+              ? t("licenses.list.publishers", { count: publisherCount })
+              : undefined
           }
         />
         <StatCard
           label={t("licenses.list.tileCompliant")}
-          value={compliance.error ? t("licenses.common.na") : String(compliantCount)}
+          value={compliance.data ? String(compliantCount) : NO_DATA}
           icon="circle-check"
           to={withClient("/licenses/compliance")}
-          tone="green"
+          // No figure, no colour: green is for a count that was read.
+          tone={compliance.data ? "green" : "neutral"}
           zeroLabel={t("licenses.list.tileCompliantZero")}
-          pending={compliance.isPending && !compliance.error}
           foot={
-            !compliance.error && compliantCount > 0
+            compliance.data && compliantCount > 0
               ? t("licenses.list.reconciled", { count: reconciledCount })
               : undefined
           }
