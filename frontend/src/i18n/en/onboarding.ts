@@ -1,6 +1,8 @@
 export const onboarding = {
   page: {
     title: "Add a computer",
+    // The form page's way back (redesign Task 6, 1.6): the fleet list, by the rail's word.
+    back: "Devices",
     description: "Install the agent on one machine, or find every machine on a network.",
     oneComputer: {
       title: "One computer",

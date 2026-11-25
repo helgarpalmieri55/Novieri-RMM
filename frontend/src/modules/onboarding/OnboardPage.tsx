@@ -35,6 +35,13 @@
  * whichever one the operator happens to be standing on. Where they are is
  * carried by `aria-current="step"` and by the words "You are here", both of
  * which a colour bar cannot say to a screen reader anyway.
+ *
+ * A PAGE OF THE KIT'S FORM SHAPE, WITH NOTHING TO SAVE (redesign plan Task 6,
+ * 1.6): `FormPage` with the way back to the computers, and each of today's
+ * blocks a `FormSection` -- the client and site, one computer, many at once,
+ * the networks. No save bar: the page keeps nothing, every act is a link to
+ * the page that owns it. It is the destination of "New → Computer" and of
+ * Devices' "Add a computer", which is where Atera's "Install agent" lives.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -45,7 +52,7 @@ import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { Btn, PageHead, Panel, QueryState, StatusPill, TableWrap } from "../../shell/components";
+import { Btn, FormPage, FormSection, QueryState, StatusPill, TableWrap } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { permissionsSentence } from "../../lib/permissions";
 import { Steps, type Kind, type StepState as StepBar } from "../../shell/viz";
@@ -184,13 +191,13 @@ export function OnboardPage() {
   const here = currentStep(steps);
 
   return (
-    <>
-      <PageHead
-        title={t("onboarding.page.title")}
-        description={t("onboarding.page.description")}
-      />
-
-      <Panel title={t("onboarding.target.title")} subtitle={t("onboarding.target.subtitle")}>
+    <FormPage
+      back={{ to: "/devices", label: t("onboarding.page.back") }}
+      title={t("onboarding.page.title")}
+      description={t("onboarding.page.description")}
+    >
+      <FormSection title={t("onboarding.target.title")} icon="building">
+        <p className="note mb-3">{t("onboarding.target.subtitle")}</p>
         {chosenClient === null ? (
           <div className="form-grid">
             {/* Nothing is kept here: choosing switches the console to the
@@ -220,47 +227,38 @@ export function OnboardPage() {
           </>
         )}
         {linkQuery === "" ? <p className="note">{t("onboarding.target.pickFirst")}</p> : null}
-      </Panel>
+      </FormSection>
 
       {/* THE COMMON CASE FIRST. This page is the console's one "Add a
-          computer" entry (top bar and Devices head), and most of the time the
-          machine is in front of the operator: the review found this panel at
-          the bottom, below a five-step network journey. */}
-      <Panel
-        title={t("onboarding.page.oneComputer.title")}
-        subtitle={t("onboarding.page.oneComputer.subtitle")}
-        actions={
-          <>
-            <Link className="btn" to={withJourney("/agent-packages", linkQuery)}>
-              <Icon name="download" size={14} />
-              <span>{t("onboarding.page.oneComputer.getInstaller")}</span>
-            </Link>
-            <Link className="btn" to={withJourney("/enrollment", linkQuery)}>
-              <Icon name="certificate" size={14} />
-              <span>{t("onboarding.page.oneComputer.enrollmentTokens")}</span>
-            </Link>
-          </>
-        }
-      >
+          computer" entry (New → Computer and the Devices head), and most of
+          the time the machine is in front of the operator: the review found
+          this block at the bottom, below a five-step network journey. */}
+      <FormSection title={t("onboarding.page.oneComputer.title")} icon="devices">
+        <p className="note mb-3">{t("onboarding.page.oneComputer.subtitle")}</p>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Link className="btn" to={withJourney("/agent-packages", linkQuery)}>
+            <Icon name="download" size={14} />
+            <span>{t("onboarding.page.oneComputer.getInstaller")}</span>
+          </Link>
+          <Link className="btn" to={withJourney("/enrollment", linkQuery)}>
+            <Icon name="certificate" size={14} />
+            <span>{t("onboarding.page.oneComputer.enrollmentTokens")}</span>
+          </Link>
+        </div>
         {/* KEPT, AND DELIBERATELY. The private half never leaves the machine
             on either path -- the one fact here an operator would be surprised
             by, and the console says it nowhere else. */}
-        <p className="note">
-          {t("onboarding.page.oneComputer.note")}
-        </p>
-      </Panel>
+        <p className="note">{t("onboarding.page.oneComputer.note")}</p>
+      </FormSection>
 
-      {/* SAID ONCE, AT THE TOP, BECAUSE IT SHAPES EVERY STEP BELOW. An
-          operator who does not know it reads step 3's `no_agent` as a bug and
-          step 5 as a missing button. What was cut is the mechanism -- who runs
-          a sweep, who runs an installer -- which is a docs page (copy-voice
-          spec rule 5); what stays is the invariant and the consequence for
-          step 1. */}
-      <p className="note mb-4">
-        {t("onboarding.page.manyNote")}
-      </p>
-
-      <Panel title={t("onboarding.page.manyTitle")} bare>
+      <FormSection title={t("onboarding.page.manyTitle")} icon="network">
+        {/* SAID ONCE, AT THE TOP, BECAUSE IT SHAPES EVERY STEP BELOW. An
+            operator who does not know it reads step 3's `no_agent` as a bug
+            and step 5 as a missing button. What was cut is the mechanism --
+            who runs a sweep, who runs an installer -- which is a docs page
+            (copy-voice spec rule 5); what stays is the invariant and the
+            consequence for step 1. */}
+        <p className="note mb-4">{t("onboarding.page.manyNote")}</p>
         <Steps
           items={steps.map((step) => {
             const isHere = here?.key === step.key;
@@ -305,18 +303,15 @@ export function OnboardPage() {
             };
           })}
         />
-      </Panel>
+      </FormSection>
 
       {/* THE PER-NETWORK TABLE, and it is not a second copy of the subnet list.
           It carries exactly the two columns the journey is about -- is this
           authorized, and when was it last swept -- because those are the two an
           operator cannot get from any single existing screen. Everything else
           about a subnet stays on the subnet page. */}
-      <Panel
-        title={t("onboarding.page.networks.title")}
-        subtitle={t("onboarding.page.networks.subtitle")}
-        bare
-      >
+      <FormSection title={t("onboarding.page.networks.title")} icon="network">
+        <p className="note mb-3">{t("onboarding.page.networks.subtitle")}</p>
         <QueryState
           loading={subnets.isLoading}
           error={subnets.error}
@@ -325,7 +320,7 @@ export function OnboardPage() {
           emptyIcon="network"
         >
           <TableWrap>
-            <table>
+            <table aria-label={t("onboarding.page.networks.title")}>
               <thead>
                 <tr>
                   <th scope="col">{t("onboarding.page.networks.network")}</th>
@@ -371,7 +366,7 @@ export function OnboardPage() {
             </table>
           </TableWrap>
         </QueryState>
-      </Panel>
-    </>
+      </FormSection>
+    </FormPage>
   );
 }
