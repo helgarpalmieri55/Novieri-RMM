@@ -151,9 +151,9 @@ describe("Waiting for review", () => {
 });
 
 const DID_NOT_CONFIRM =
-  "Rejected — the agent didn't confirm it removed itself. Uninstall it on the computer by hand.";
+  "Rejected: the agent didn't confirm it removed itself. Uninstall it on the computer by hand.";
 const TOO_OLD =
-  "Rejected — this agent is too old to remove itself. Uninstall it on the computer by hand.";
+  "Rejected: this agent is too old to remove itself. Uninstall it on the computer by hand.";
 
 function leftBehind(outcome: NonNullable<Device["rejection_outcome"]>): Device {
   return device({

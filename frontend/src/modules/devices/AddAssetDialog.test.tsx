@@ -192,7 +192,7 @@ describe("AddAssetDialog", () => {
     renderDialog();
     const dns = screen.getByLabelText(/^dns name$/i);
     expect(dns).toHaveAccessibleDescription(
-      "The computer's full name, e.g. pc1.corp.example.com — Windows push needs it.",
+      "The computer's full name, e.g. pc1.corp.example.com. Windows push needs it.",
     );
     await userEvent.type(screen.getByLabelText(/^name$/i), "PC1");
     await userEvent.type(dns, "pc1.corp.example.com");
