@@ -21,6 +21,7 @@ import {
 } from "./api";
 import { OsIcon } from "../../shell/viz";
 import { DeployPageNav } from "./deployNav";
+import { fold, OS_FILTERS } from "./listFilters";
 import { SchedulesPanel } from "./SchedulesPanel";
 import {
   devicePickerEmptyHint,
@@ -69,14 +70,6 @@ const authorRules = (): readonly FieldRule[] => [
 const runRules = (): readonly FieldRule[] => [{ name: "targetId", label: translate("deploy.scripts.ruleTarget") }];
 
 const editRules = (): readonly FieldRule[] => [{ name: "body", label: translate("deploy.scripts.ruleBody") }];
-
-/** The platforms of the System filter, in this order. */
-const OS_FILTERS = ["windows", "linux", "macos"] as const;
-
-/** For the search: case and accents do not count, the console's rule. */
-function fold(text: string): string {
-  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
-}
 
 export function ScriptsPage() {
   const t = useT();

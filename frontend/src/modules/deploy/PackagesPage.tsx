@@ -19,6 +19,7 @@ import {
 } from "./api";
 import { OsIcon } from "../../shell/viz";
 import { DeployPageNav } from "./deployNav";
+import { fold, OS_FILTERS } from "./listFilters";
 import { osFamilyLabel } from "./pickerOptions";
 import type { Package } from "./types";
 import {
@@ -54,14 +55,6 @@ const packageRules = (): readonly FieldRule[] => [
 /** `sha256 9f3a…c21e`: the first and last four hex digits, as the design prints them. */
 function shortSha(sha: string): string {
   return sha.length > 12 ? `${sha.slice(0, 4)}…${sha.slice(-4)}` : sha;
-}
-
-/** The platforms a package is built for, the chips of the System filter, in this order. */
-const OS_FILTERS = ["windows", "linux", "macos"] as const;
-
-/** For the search: case and accents do not count, the console's rule. */
-function fold(text: string): string {
-  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
 }
 
 export function PackagesPage() {
