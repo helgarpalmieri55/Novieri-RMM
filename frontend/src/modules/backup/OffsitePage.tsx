@@ -43,9 +43,9 @@ import {
   SaveBar,
   StatusPill,
   useDraft,
+  useEditParam,
   useNewParam,
   useUnsavedGuard,
-  useUrlFilters,
 } from "../../shell/components";
 import {
   useBackupRepositories,
@@ -83,11 +83,12 @@ export function OffsitePage() {
   const canManageKey = permissions.includes("backup.recovery.manage");
   const zone = me.data?.timezone;
   // Add off-site storage opens from `?new=target`; the storage being edited
-  // is `?edit=<id>`, so a reload or a link opens the same form.
+  // is `?edit=<id>`, so a reload or a link opens the same form. Closing
+  // either undoes its opening (Back from the entry `start` added).
   const adding = useNewParam("target");
-  const editing = useUrlFilters(["edit"] as const);
+  const editing = useEditParam("target");
   const targets = useOffsiteTargets();
-  const edited = canManageStorage ? (targets.data ?? []).find((target) => target.id === editing.values.edit) : undefined;
+  const edited = canManageStorage ? (targets.data ?? []).find((target) => target.id === editing.id) : undefined;
   // ONE GUARD FOR THE PAGE (general ruling 3; formKit: one dirty guard per
   // page), fed by the storage edited in `?edit=` and the one being added in
   // `?new=target`. Each form's key is guarded only while that form holds a
@@ -114,7 +115,7 @@ export function OffsitePage() {
       <StoragePanel
         canManage={canManageStorage}
         zone={zone}
-        onEdit={(target) => editing.set("edit", target.id)}
+        onEdit={(target) => editing.start(target.id)}
         add={
           canManageStorage ? <Btn label={t("backup.offsite.storageAdd")} icon="plus" small onClick={adding.start} /> : null
         }
@@ -126,7 +127,7 @@ export function OffsitePage() {
         <TargetEditor
           key={edited.id}
           target={edited}
-          onClose={() => editing.set("edit", "")}
+          onClose={editing.close}
           onDirty={setEditorDirty}
         />
       ) : null}

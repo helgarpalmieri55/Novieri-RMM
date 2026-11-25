@@ -98,6 +98,20 @@ describe("the off-site copy page on the form kit (4.4)", () => {
     expect(await editor()).toBeInTheDocument();
   });
 
+  it("closes an editor its Edit opened by going Back, so Back afterwards does not reopen it (useEditParam)", async () => {
+    // Written through `useUrlFilters`, Close pushed a second entry and the
+    // next Back landed on `?edit=` again, reopening the editor (O4 review,
+    // item 7). The kit's `useEditParam` closes by undoing the opening.
+    const { router } = page("");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const form = await editor();
+    await userEvent.click(within(form).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
+    expect(screen.queryByRole("button", { name: "Edit Wasabi (Amsterdam)" })).toBeNull();
+  });
+
   it("saves the same body the edit dialog sent, and says Saved", async () => {
     // A server that keeps what it is sent, as the real one does: the list read
     // after the save answers the stored storage.

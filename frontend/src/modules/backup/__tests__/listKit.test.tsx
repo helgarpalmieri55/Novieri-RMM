@@ -5,7 +5,7 @@
  * (decision D6) -- asserted on the narrowed double's own spy, with nothing
  * read un-narrowed (`recordingNarrowing`, src/test/narrowing.ts).
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -249,6 +249,21 @@ describe("backup policies on the kit (the policies page)", () => {
     expect(router.state.location.search).toBe("?edit=pol-pilot");
     const dialog = await screen.findByRole("dialog", { name: "Edit policy" });
     expect(within(dialog).getByRole("checkbox")).not.toBeChecked();
+  });
+
+  it("closes an editor its Edit opened by going Back, so Back afterwards does not reopen it (useEditParam)", async () => {
+    // Written through `useUrlFilters`, Cancel pushed a second entry and the
+    // next Back landed on `?edit=` again, reopening the editor (O4 review,
+    // item 7). The kit's `useEditParam` closes by undoing the opening.
+    const { router } = renderPage("/backup/policies", <BackupPolicyEditor />, "/backup/policies");
+    const row = (await screen.findAllByRole("row")).find((tr) => tr.textContent?.includes("Legacy NAS")) as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit policy" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
+    expect(screen.queryByRole("dialog", { name: "Edit policy" })).toBeNull();
   });
 
   it("asks before Cancel drops a change, and closes an unchanged editor at once", async () => {

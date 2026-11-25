@@ -33,6 +33,7 @@ import {
   StatCard,
   StatsGrid,
   StatusPill,
+  useEditParam,
   useNewParam,
   useUrlFilters,
 } from "../../shell/components";
@@ -42,9 +43,10 @@ export function ProfilesPage() {
   const t = useT();
   const api = useApi();
   // The editor opens from the URL: `?new=profile` (decision D8) for a new
-  // profile, `?edit=<id>` for an existing one, so either is a link.
+  // profile, `?edit=<id>` for an existing one, so either is a link. Closing
+  // either undoes its opening (Back from the entry `start` added).
   const creating = useNewParam("profile");
-  const edit = useUrlFilters(["edit"] as const);
+  const edit = useEditParam("profile");
   // In the URL, so the "Enabled" tile opens the rows it counted.
   const filters = useUrlFilters(["enabled"] as const);
   const enabledFilter = filters.values.enabled;
@@ -76,9 +78,9 @@ export function ProfilesPage() {
   // What the editor edits: a new profile, the one `?edit=` names once the list
   // has it, or nothing. Only for someone who may manage profiles, whatever
   // the URL asks: a courtesy, the server checks (invariant 6).
-  const edited = items.find((profile) => profile.id === edit.values.edit);
+  const edited = items.find((profile) => profile.id === edit.id);
   const editing = !canManage ? null : creating.open ? ("new" as const) : (edited ?? null);
-  const closeEditor = creating.open ? creating.close : () => edit.set("edit", "");
+  const closeEditor = creating.open ? creating.close : edit.close;
 
   return (
     <div>
@@ -224,7 +226,7 @@ export function ProfilesPage() {
                     />
                   </Td>
                   <Td>
-                    {canManage && <Btn label={t("provisioning.profiles.edit")} icon="edit" small onClick={() => edit.set("edit", profile.id)} />}
+                    {canManage && <Btn label={t("provisioning.profiles.edit")} icon="edit" small onClick={() => edit.start(profile.id)} />}
                   </Td>
                 </tr>
               ))}

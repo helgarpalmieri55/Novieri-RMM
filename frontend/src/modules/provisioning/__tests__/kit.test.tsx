@@ -4,7 +4,7 @@
  * create or edit dialog opened from the URL (`?new=`, `?edit=`). No Client
  * chip: imaging works in the client chosen at the top.
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -170,6 +170,21 @@ describe("provisioning profiles on the list kit (4.8)", () => {
     expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Workstation standard");
     expect(within(dialog).getByDisplayValue("corp.toeshee.example")).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue("svc-join")).toBeInTheDocument();
+  });
+
+  it("closes an editor its Edit opened by going Back, so Back afterwards does not reopen it (useEditParam)", async () => {
+    // Written through `useUrlFilters`, Cancel pushed a second entry and the
+    // next Back landed on `?edit=` again, reopening the editor (O4 review,
+    // item 7). The kit's `useEditParam` closes by undoing the opening.
+    const { router } = renderPage("/provisioning/profiles", <ProfilesPage />, "/provisioning/profiles");
+    const row = (await screen.findByText("Workstation standard")).closest("tr") as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit profile" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
+    expect(screen.queryByRole("dialog", { name: "Edit profile" })).toBeNull();
   });
 
   it("asks before Cancel drops a change in a profile's editor (general ruling 3)", async () => {
