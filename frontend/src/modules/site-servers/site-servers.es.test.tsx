@@ -154,7 +154,12 @@ describe("site servers in Spanish", () => {
     expect(screen.getByText("de 3 registrados")).toBeInTheDocument();
     expectNoEnglish(container, ["Storage"]);
 
-    await user.selectOptions(screen.getByLabelText("Filtrar los servidores de sitio por estado"), "disabled");
+    // The filter is a row of chips now (Receta L: `FilterChips`), same values, same words.
+    await user.click(
+      within(screen.getByRole("group", { name: "Filtrar los servidores de sitio por estado" })).getByRole("button", {
+        name: "Deshabilitados",
+      }),
+    );
     expect(screen.queryByText("rack-b4-relay")).toBeNull();
     expect(screen.getByText("por-branch-relay")).toBeInTheDocument();
     expectNoEnglish(container, ["Storage"]);
@@ -175,14 +180,17 @@ describe("site servers in Spanish", () => {
 
     stubApi({ listSiteServers: vi.fn().mockResolvedValue([]) });
     const empty = renderApp("/site-servers");
-    expect(await screen.findByText("No hay servidores de sitio")).toBeInTheDocument();
+    // The list kit's "nothing yet" sentence (redesign plan, Task 9, 4.9; Receta L, 3).
+    expect(await screen.findByText("Aún no hay servidores de sitio: promueve un equipo de la red del cliente.")).toBeInTheDocument();
     expect(screen.getByText("No hay ningún servidor de sitio que habilitar")).toBeInTheDocument();
     expectNoEnglish(empty.container);
     empty.unmount();
 
     stubApi({ listSiteServers: vi.fn().mockResolvedValue([server({ enabled: false })]) });
     const filtered = renderApp("/site-servers?state=enabled");
-    expect(await screen.findByText("Ningún servidor de sitio coincide con ese filtro.")).toBeInTheDocument();
+    // The list kit's filtered-empty sentence, with its way out (Receta L, 3).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expect(screen.getByText("Todos los servidores de sitio están deshabilitados, así que ninguno presta servicio")).toBeInTheDocument();
     expectNoEnglish(filtered.container);
   });

@@ -21,8 +21,7 @@ export const siteServers: Shape<typeof en> = {
     filterEnabled: "Habilitados",
     filterDisabled: "Deshabilitados",
     rolesNote: "El almacenamiento en caché de contenido y el arranque por PXE no están disponibles en esta versión.",
-    noMatchTitle: "Ningún servidor de sitio coincide con ese filtro.",
-    noMatchBody: "El parque no está vacío; el filtro sí. Elige otro estado.",
+    emptyYet: "Aún no hay servidores de sitio: promueve un equipo de la red del cliente.",
     promoteTitle: "Promover un dispositivo a servidor de sitio",
   },
   list: {
@@ -47,6 +46,7 @@ export const siteServers: Shape<typeof en> = {
     pxe: "Arranque por PXE",
   },
   detail: {
+    back: "Todos los servidores de sitio",
     loading: "Cargando…",
     article: "Servidor de sitio {name}",
     state: "Estado",

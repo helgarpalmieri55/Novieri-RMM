@@ -137,6 +137,8 @@ export function SiteServerDetail({
       </Panel>
 
       {canWake ? (
+        // The head's Wake a computer brings this form into view (`WAKE_FORM_ID`).
+        <div id="site-server-wake">
         <Panel
           title={t("siteServers.detail.wakeTitle")}
           subtitle={t("siteServers.detail.wakeSubtitle")}
@@ -150,6 +152,7 @@ export function SiteServerDetail({
             zone={zone}
           />
         </Panel>
+        </div>
       ) : null}
     </article>
   );

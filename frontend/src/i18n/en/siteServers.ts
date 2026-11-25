@@ -18,8 +18,7 @@ export const siteServers = {
     filterEnabled: "Enabled",
     filterDisabled: "Disabled",
     rolesNote: "Content caching and PXE delivery are not available in this release.",
-    noMatchTitle: "No site server matches that filter.",
-    noMatchBody: "The estate is not empty; the filter is. Choose another state.",
+    emptyYet: "No site servers yet: promote a computer on the client's network.",
     promoteTitle: "Promote a device to site server",
   },
   list: {
@@ -44,6 +43,7 @@ export const siteServers = {
     pxe: "PXE delivery",
   },
   detail: {
+    back: "All site servers",
     loading: "Loading…",
     article: "Site server {name}",
     state: "State",
