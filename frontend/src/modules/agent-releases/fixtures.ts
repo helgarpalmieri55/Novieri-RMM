@@ -101,10 +101,10 @@ const generateAgentInstallCommand: FixtureMap["generateAgentInstallCommand"] = (
     release,
     token,
     token_expires_at: at(hours),
-    download_url: `https://console.toeshee.example/artifacts/its-agent-${release.os}-${release.arch}`,
+    download_url: `https://console.toeshee.example/artifacts/novieri-agent-${release.os}-${release.arch}`,
     download_expires_in_s: 900,
     sha256: release.sha256,
-    command: `curl -fsSL https://console.toeshee.example/artifacts/its-agent-${release.os}-${release.arch} -o its-agent && echo "${release.sha256}  its-agent" | sha256sum -c && sudo ./its-agent enroll --server console.toeshee.example --token ${token}`,
+    command: `curl -fsSL https://console.toeshee.example/artifacts/novieri-agent-${release.os}-${release.arch} -o novieri-agent && echo "${release.sha256}  novieri-agent" | sha256sum -c && sudo ./novieri-agent enroll --server console.toeshee.example --token ${token}`,
   };
 };
 
@@ -113,19 +113,19 @@ const getAgentDeploymentPackage: FixtureMap["getAgentDeploymentPackage"] = (id, 
   return {
     release,
     channel,
-    download_url: `https://console.toeshee.example/artifacts/its-agent-${release.os}-${release.arch}`,
+    download_url: `https://console.toeshee.example/artifacts/novieri-agent-${release.os}-${release.arch}`,
     download_expires_in_s: 900,
     sha256: release.sha256,
     staging: [
-      { title: "Download the artefact", detail: "Fetch the file once, on the administrator's machine.", command: `curl -fsSL -o its-agent https://console.toeshee.example/artifacts/its-agent-${release.os}-${release.arch}` },
-      { title: "Verify the digest", detail: "Compare it against the value shown here before it reaches a share.", command: `echo "${release.sha256}  its-agent" | sha256sum -c` },
+      { title: "Download the artefact", detail: "Fetch the file once, on the administrator's machine.", command: `curl -fsSL -o novieri-agent https://console.toeshee.example/artifacts/novieri-agent-${release.os}-${release.arch}` },
+      { title: "Verify the digest", detail: "Compare it against the value shown here before it reaches a share.", command: `echo "${release.sha256}  novieri-agent" | sha256sum -c` },
       { title: "Stage it on the distribution point", detail: channel === "intune" ? "Wrap it as a Win32 app package." : "Copy it to the SYSVOL share the startup script reads.", command: "" },
     ],
-    install_command: "its-agent install --server console.toeshee.example",
-    enrol_command: "its-agent enroll --server console.toeshee.example --token-from-env ITS_ENROLL_TOKEN",
+    install_command: "novieri-agent install --server console.toeshee.example",
+    enrol_command: "novieri-agent enroll --server console.toeshee.example --token-from-env ITS_ENROLL_TOKEN",
     integrity: {
       sha256: release.sha256,
-      verify_command: `echo "${release.sha256}  its-agent" | sha256sum -c`,
+      verify_command: `echo "${release.sha256}  novieri-agent" | sha256sum -c`,
       verified_at_install: false,
       notes: [
         "The distribution point copies the file and runs it; it does not check a digest.",
@@ -204,7 +204,7 @@ const downloadInstallLinkMsi: FixtureMap["downloadInstallLinkMsi"] = (_siteId, b
   }
   return {
     blob: new Blob(["fixture MSI"], { type: "application/x-msi" }),
-    filename: `ITMS-Agent-console.toeshee.example-${body.arch}.msi`,
+    filename: `NovieriRMM-Agent-console.toeshee.example-${body.arch}.msi`,
     sha256: "9c1e5b2f4a7d8e3c6b0a1f2e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c",
   };
 };

@@ -1,5 +1,5 @@
 // Package layout is the Windows install layout as DATA: the one place that
-// names %ProgramFiles%\ITSuite, %ProgramData%\ITSuite\agent, the push staging
+// names %ProgramFiles%\NovieriRMM, %ProgramData%\NovieriRMM\agent, the push staging
 // directory, the service name and its recovery actions.
 //
 // It also carries the SSH push's hand-off constants and the enroll-origin
@@ -23,9 +23,9 @@ import (
 // internal/install's plan_test.go reads that script to keep them identical.
 // ServiceDescription is exported for that test.
 const (
-	serviceName         = "its-agent"
-	displayName         = "ITMS Agent"
-	ServiceDescription  = "Toeshee endpoint agent. Maintains one outbound mutual-TLS connection to the control plane and executes only cryptographically signed jobs. Opens no listening port."
+	serviceName         = "novieri-agent"
+	displayName         = "Novieri RMM Agent"
+	ServiceDescription  = "Novieri RMM endpoint agent. Maintains one outbound mutual-TLS connection to the control plane and executes only cryptographically signed jobs. Opens no listening port."
 	defaultProgramFiles = `C:\Program Files`
 	defaultProgramData  = `C:\ProgramData`
 )
@@ -62,14 +62,14 @@ func NewPlan(programFiles, programData, console string) Plan {
 	if programData == "" {
 		programData = defaultProgramData
 	}
-	installDir := winJoin(programFiles, "ITSuite")
-	dataDir := winJoin(programData, "ITSuite", "agent")
+	installDir := winJoin(programFiles, "NovieriRMM")
+	dataDir := winJoin(programData, "NovieriRMM", "agent")
 	return Plan{
 		InstallDir:     installDir,
-		Target:         winJoin(installDir, "its-agent.exe"),
+		Target:         winJoin(installDir, "novieri-agent.exe"),
 		DataDir:        dataDir,
 		TokenPath:      winJoin(dataDir, "enroll-token"),
-		StagingDir:     winJoin(programData, "ITSuite", "push"),
+		StagingDir:     winJoin(programData, "NovieriRMM", "push"),
 		ServiceName:    serviceName,
 		DisplayName:    displayName,
 		Description:    ServiceDescription,

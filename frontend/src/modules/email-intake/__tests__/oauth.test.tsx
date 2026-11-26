@@ -11,9 +11,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiClient, type Me } from "../../../lib/api";
+import { Icon } from "../../../shell/icons";
+import { KIND_ICON } from "../../../shell/viz";
 import { browser } from "../browser";
 import { EmailIntakeAdminPage } from "../EmailIntakeAdminPage";
 import { OAuthCallback } from "../OAuthCallback";
@@ -302,5 +305,46 @@ describe("The Microsoft return page", () => {
     renderCallback(client, "?code=abc&state=xyz");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/start it again/);
+  });
+
+  // THE OUTCOME IS A NOTICE WITH ITS KIND'S ICON (final review I1, the
+  // critique's P2): the console's way of saying what happened, as the auth
+  // screens do, so colour is never the only carrier of success or failure.
+  it.each([
+    ["connected", "?code=abc&state=xyz", "status", "notice", KIND_ICON.ok, /^Connected/],
+    ["cancelled", "?error=access_denied&state=xyz", "status", "notice", KIND_ICON.info, /was not completed/],
+    ["not started", "", "alert", "notice red", KIND_ICON.crit, /^Not connected\. This page was not opened/],
+  ] as const)("says the %s outcome as a notice with its kind's icon", async (_name, query, role, className, icon, text) => {
+    renderCallback(api(), query);
+    const outcome = await screen.findByText(text);
+    const notice = outcome.closest(".notice") as HTMLElement;
+    expect(notice).not.toBeNull();
+    expect(notice).toHaveAttribute("role", role);
+    expect(notice.className).toBe(className);
+    // The kind's own glyph, serialised the way the DOM serialises the page's.
+    const expected = document.createElement("template");
+    expected.innerHTML = renderToStaticMarkup(<Icon name={icon} size={16} />);
+    expect(notice.querySelector("svg")?.outerHTML).toBe(expected.content.firstElementChild?.outerHTML);
+  });
+
+  // A ROUTE IS A LINK (the critique's P2): it can be opened in a new tab,
+  // copied and middle-clicked, and it is announced as what it is.
+  it("leads back to Email intake with a link in the button's skin, after every outcome", async () => {
+    renderCallback(api(), "?code=abc&state=xyz");
+    await screen.findByText(/Connected/);
+    const back = screen.getByRole("link", { name: "Back to Email intake" });
+    expect(back).toHaveAttribute("href", "/email-intake");
+    expect(back).toHaveClass("btn");
+    expect(screen.queryByRole("button", { name: "Back to Email intake" })).toBeNull();
+  });
+
+  // Inside the console's frame (redesign plan, Task 7, 2.7): the page's own
+  // head, with the way back to Email intake, around the same panel.
+  it("names itself in its head and leads back to Email intake", async () => {
+    renderCallback(api(), "?code=abc&state=xyz");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Microsoft 365 sign-in" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Email intake" })).toHaveAttribute("href", "/email-intake");
+    expect(await screen.findByText(/Connected/)).toBeInTheDocument();
   });
 });

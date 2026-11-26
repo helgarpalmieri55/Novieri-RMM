@@ -283,7 +283,7 @@ async def test_a_recovery_link_tells_only_once_its_session_is_made(
     assert accepted.json() == {"state": "enroll_required"}, accepted.text
     assert cookie(accepted, SESSION_COOKIE)
     assert [m["Subject"] for m in _Relay.sent[issued:]] == [
-        "Your Novieri sign-in methods were reset"
+        "Your Novieri RMM sign-in methods were reset"
     ]
     await _assert_mail_and_checkout_paired(relay_env, org)
 
@@ -394,8 +394,8 @@ async def test_a_recovery_that_sets_a_password_tells_only_once_its_session_is_ma
     assert accepted.json() == {"state": "enroll_required"}, accepted.text
     assert await _mark(relay_env, who) is None
     assert [m["Subject"] for m in _Relay.sent[issued:]] == [
-        "Your Novieri password was changed",
-        "Your Novieri sign-in methods were reset",
+        "Your Novieri RMM password was changed",
+        "Your Novieri RMM sign-in methods were reset",
     ]
     assert await _count(relay_env, org, "auth.password_changed") == 1
     await _assert_mail_and_checkout_paired(relay_env, org)
@@ -440,7 +440,7 @@ async def test_a_vault_error_in_the_second_closing_notice_lets_the_first_stand(
     assert accepted.status_code == 200, accepted.text
     assert accepted.json() == {"state": "enroll_required"}
     assert calls == 2
-    assert [m["Subject"] for m in _Relay.sent[issued:]] == ["Your Novieri password was changed"]
+    assert [m["Subject"] for m in _Relay.sent[issued:]] == ["Your Novieri RMM password was changed"]
     await _assert_mail_and_checkout_paired(relay_env, org)
     assert await _count(relay_env, org, "auth.password_changed") == 1
     assert await _count(relay_env, org, "user.recovery_link_used") == 1

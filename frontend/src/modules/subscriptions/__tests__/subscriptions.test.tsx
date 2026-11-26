@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_DATE } from "../../../lib/datetime";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, ClientOut, Me, MeClient } from "../../../lib/api";
 import { RenewalCalendar } from "../RenewalCalendar";
@@ -282,17 +283,19 @@ describe("SubscriptionsPage", () => {
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles).toHaveLength(4);
     expect(tiles.map((tile) => tile.tagName)).toEqual(["A", "A", "A", "A"]);
+    // The renewal tiles open the calendar on the 90 days they count (review M1).
     expect(tiles.map((tile) => tile.getAttribute("href"))).toEqual([
       "/subscriptions",
-      "/subscriptions/renewals",
-      "/subscriptions/renewals",
+      "/subscriptions/renewals?within=90",
+      "/subscriptions/renewals?within=90",
       "/subscriptions",
     ]);
 
     const routes = staticRoutePaths();
     expect(routes.length).toBeGreaterThan(10);
+    // The path is what App.tsx serves; a query (`?within=90`) is that page's filter.
     for (const tile of tiles) {
-      expect(isServedRoute(tile.getAttribute("href"), routes)).toBe(true);
+      expect(isServedRoute(tile.getAttribute("href")?.split("?")[0] ?? null, routes)).toBe(true);
     }
   });
 
@@ -321,8 +324,8 @@ describe("SubscriptionsPage", () => {
     expect(tiles.map((tile) => tile.getAttribute("href"))).toEqual([
       "/subscriptions/spend",
       "/subscriptions",
-      "/subscriptions/renewals",
-      "/subscriptions/renewals",
+      "/subscriptions/renewals?within=90",
+      "/subscriptions/renewals?within=90",
       "/subscriptions",
     ]);
   });
@@ -479,6 +482,28 @@ describe("SubscriptionsPage", () => {
   // Pins the NewSubscriptionDialog submit path: the dialog is driven the way
   // a user drives it (by label and role) and the exact create body is
   // asserted, so a form that renders but is wired to nothing fails here.
+  // The coordinator's ruling 7 (review I2): the 503 of the last attempt used to
+  // stay on screen over the next attempt's missing field.
+  it("clears the last attempt's 503 before naming a missing field", async () => {
+    const user = userEvent.setup();
+    api.createSubscription = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    await user.type(screen.getByLabelText("Service name"), "Globex CRM");
+    await user.clear(screen.getByLabelText("Cost per cycle"));
+    await user.type(screen.getByLabelText("Cost per cycle"), "1200.00");
+    await user.clear(screen.getByLabelText("Currency"));
+    await user.type(screen.getByLabelText("Currency"), "EUR");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Service name"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Service name/);
+    expect(alert).not.toHaveTextContent(/unavailable/i);
+  });
+
   it("wires the New subscription dialog to the real createSubscription mutation with the entered values", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SubscriptionsPage />);
@@ -574,7 +599,8 @@ describe("SubscriptionsPage", () => {
     expect(await screen.findByText(/Client is required/)).toBeInTheDocument();
     expect(api.createSubscription).not.toHaveBeenCalled();
 
-    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    // The dialog's field: the list's Client chip carries the same name (Receta L, point 6).
+    await user.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.createSubscription).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", service_name: "Globex CRM" })));
   });
@@ -592,7 +618,8 @@ describe("SubscriptionsPage", () => {
     renderWithProviders(<SubscriptionsPage />);
     await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
     await user.click(screen.getByRole("button", { name: "New subscription" }));
-    const field = screen.getByLabelText("Client");
+    // The dialog's field: the list's Client chip carries the same name (Receta L, point 6).
+    const field = within(screen.getByRole("dialog")).getByLabelText("Client");
     expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Choose a client",
       "Novieri",
@@ -795,9 +822,11 @@ describe("SubscriptionDetail", () => {
 
     await screen.findByText("Acme SaaS");
 
-    const head = document.querySelector(".ph") as HTMLElement;
-    expect(head.querySelectorAll("[data-kind]")).toHaveLength(0);
-    expect(head).not.toHaveTextContent("Billed monthly");
+    // The record kit's head (redesign plan, Receta F) draws the status and the
+    // context in its meta row, under the title: still never in the button row.
+    const actions = document.querySelector(".ph .ph-act") as HTMLElement;
+    expect(actions.querySelectorAll("[data-kind]")).toHaveLength(0);
+    expect(actions).not.toHaveTextContent("Billed monthly");
 
     const cadence = screen.getByText("Billed monthly");
     // A chip, not a pill: no `data-kind`, so it claims no severity and carries
@@ -805,9 +834,10 @@ describe("SubscriptionDetail", () => {
     expect(cadence).toHaveClass("chip");
     expect(cadence.hasAttribute("data-kind")).toBe(false);
 
-    // The status and the cadence share ONE row, and it is not the head's.
-    const meta = cadence.parentElement as HTMLElement;
-    expect(meta.closest(".ph")).toBeNull();
+    // The status and the cadence share ONE row: the head's meta row.
+    const meta = cadence.closest(".detail-meta") as HTMLElement;
+    expect(meta).not.toBeNull();
+    expect(meta.closest(".ph-act")).toBeNull();
     const pills = [...meta.querySelectorAll<HTMLElement>("[data-kind]")];
     expect(pills).toHaveLength(1);
     expect(pills[0]).toHaveTextContent("Active");
@@ -845,7 +875,7 @@ describe("SubscriptionDetail", () => {
   // Cycle 5. `assigned_at`/`released_at` are `datetime` -- instants -- so they
   // take the operator's PROFILE zone, and a seat still held renders NO_DATE
   // rather than "Invalid Date".
-  it("renders seat instants in the profile timezone and an unreleased seat as an em dash", async () => {
+  it("renders seat instants in the profile timezone and an unreleased seat as the absent date", async () => {
     api.listSeats = vi
       .fn()
       .mockResolvedValue([{ ...SEATS[0], assigned_at: "2026-01-01T23:00:00.000Z" }]);
@@ -855,7 +885,7 @@ describe("SubscriptionDetail", () => {
     // cannot produce this string unless the runner happens to be in Tokyo.
     const row = (await screen.findByText("Jane Doe")).closest("tr") as HTMLElement;
     expect(within(row).getByText("02 Jan 2026, 08:00")).toBeInTheDocument();
-    expect(within(row).getByText("—")).toBeInTheDocument();
+    expect(within(row).getByText(NO_DATE)).toBeInTheDocument();
     expect(row.textContent).not.toContain("Invalid Date");
   });
 
@@ -1048,16 +1078,16 @@ describe("RenewalCalendar", () => {
     expect(row.textContent).not.toContain("30 Jun 2026");
   });
 
-  // An absent deadline must be the em dash, never "Invalid Date" -- which is
-  // what `new Date(null).toLocaleDateString()` produces.
-  it("renders an absent notice deadline as an em dash, never Invalid Date", async () => {
+  // An absent deadline must be the absent date (`NO_DATE`), never "Invalid
+  // Date" -- which is what `new Date(null).toLocaleDateString()` produces.
+  it("renders an absent notice deadline as the absent date, never Invalid Date", async () => {
     api.renewals = vi
       .fn()
       .mockResolvedValue([{ ...NEAR, notice_deadline: null, renews_at: null }]);
     renderWithProviders(<RenewalCalendar />);
 
     const row = (await screen.findByText("Acme SaaS")).closest("tr") as HTMLElement;
-    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(within(row).getAllByText(NO_DATE)).toHaveLength(2);
     expect(row.textContent).not.toContain("Invalid Date");
   });
 
@@ -1075,7 +1105,8 @@ describe("RenewalCalendar", () => {
     renderWithProviders(<RenewalCalendar />);
 
     await screen.findByText("Acme SaaS");
-    await user.selectOptions(screen.getByLabelText("Window"), "60");
+    // The window is a row of chips in the URL now (Task 10, 5.4: `?within=`).
+    await user.click(screen.getByRole("button", { name: "Next 60 days" }));
 
     expect(await screen.findByText("Globex CRM")).toBeInTheDocument();
     expect(api.renewals).toHaveBeenCalledWith(60);
@@ -1124,11 +1155,14 @@ describe("SpendDashboard", () => {
     ],
   };
 
+  // The by-currency totals are tiles now (Task 10, 5.4), so "whose" is said in
+  // each tile's label: the client named with every client, not with one.
   it("hides the Client column while one client is chosen at the top", async () => {
     selectClient("c-x");
     api.spend = vi.fn().mockResolvedValue(ONE_ROW);
     renderWithProviders(<SpendDashboard />);
-    await screen.findByText("100.00");
+    await screen.findByText("100.00 USD");
+    expect(screen.getByText("Monthly spend in USD")).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
   });
 
@@ -1136,7 +1170,7 @@ describe("SpendDashboard", () => {
     selectClient(null);
     api.spend = vi.fn().mockResolvedValue(ONE_ROW);
     renderWithProviders(<SpendDashboard />);
-    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(await screen.findByText(/: monthly spend in USD$/)).toBeInTheDocument();
   });
 
   // MSP clients phase 2: a subscription is one client's, so every roll-up
@@ -1164,11 +1198,12 @@ describe("SpendDashboard", () => {
     });
     renderWithProviders(<SpendDashboard />);
 
-    const novieri = (await screen.findByText("Novieri")).closest("tr") as HTMLElement;
-    expect(within(novieri).getByText("100.00")).toBeInTheDocument();
-    const globex = screen.getByText("Globex").closest("tr") as HTMLElement;
-    expect(within(globex).getByText("40.00")).toBeInTheDocument();
-    expect(screen.queryByText("140.00")).not.toBeInTheDocument();
+    // Each total is a tile naming its client (Task 10, 5.4).
+    const novieri = (await screen.findByText("Novieri: monthly spend in USD")).closest("a") as HTMLElement;
+    expect(within(novieri).getByText("100.00 USD")).toBeInTheDocument();
+    const globex = screen.getByText("Globex: monthly spend in USD").closest("a") as HTMLElement;
+    expect(within(globex).getByText("40.00 USD")).toBeInTheDocument();
+    expect(screen.queryByText(/140\.00/)).not.toBeInTheDocument();
   });
 
   it("renders the idle-seat rows from the mocked api", async () => {
@@ -1524,7 +1559,8 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
     await user.type(screen.getByLabelText("Notice period (days)"), "90");
     await user.click(screen.getByLabelText(/Renews automatically/));
     await pick(user, "Owner", /Priya Owner/);
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    // The page's one save bar saves the terms (Receta FO).
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.updateSubscription).toHaveBeenCalledWith("s1", {
       renews_at: "2026-08-01",
@@ -1540,7 +1576,7 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
 
     await screen.findByText("Renewal terms");
     await user.clear(screen.getByLabelText("Renews on"));
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.updateSubscription).toHaveBeenCalledWith(
       "s1",
@@ -1555,7 +1591,7 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
     await screen.findByText("Renewal terms");
     await user.clear(screen.getByLabelText("Notice period (days)"));
     await user.type(screen.getByLabelText("Notice period (days)"), "400");
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/365 days or fewer/);
     expect(api.updateSubscription).not.toHaveBeenCalled();
@@ -1567,12 +1603,31 @@ describe("SubscriptionDetail: editing the renewal terms", () => {
     renderDetail();
 
     await screen.findByText("Renewal terms");
-    await user.click(screen.getByRole("button", { name: "Save renewal terms" }));
+    // The save bar appears with a change (Receta FO): one is made first.
+    await user.click(screen.getByLabelText(/Renews automatically/));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/service is unavailable right now/i);
     expect(alert.textContent).not.toContain("ApiError");
     expect(screen.queryByText("Renewal terms saved.")).not.toBeInTheDocument();
+  });
+
+  // The coordinator's ruling 7 (review I2).
+  it("clears the last attempt's 503 before naming a field problem", async () => {
+    const user = userEvent.setup();
+    api.updateSubscription = vi.fn().mockRejectedValue(bodylessUnavailable());
+    renderDetail();
+    await screen.findByText("Renewal terms");
+    await user.click(screen.getByLabelText(/Renews automatically/));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/service is unavailable right now/i);
+    await user.clear(screen.getByLabelText("Notice period (days)"));
+    await user.type(screen.getByLabelText("Notice period (days)"), "400");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/365 days or fewer/);
+    expect(alert).not.toHaveTextContent(/unavailable/i);
   });
 
   it("is not offered on a cancelled subscription, whose terms no longer apply", async () => {

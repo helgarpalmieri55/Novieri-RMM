@@ -1,21 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { RowMenu } from "../../components/rowmenu";
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
+import type { Attempt } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
 import { Icon } from "../../shell/icons";
-import { Btn, Panel, StatusPill, Toggle } from "../../shell/components";
+import { Btn, FormSection, StatusPill, Toggle, useNewParam } from "../../shell/components";
+import { SectionLead } from "../service-desk/SectionLead";
+import { useSwitches } from "./switches";
 import { useApi } from "../../lib/ApiContext";
 import {
   useCreateNotificationRuleMutation,
   useDeleteNotificationRuleMutation,
   useNotificationChannels,
   useNotificationRules,
-  useUpdateNotificationRuleMutation,
 } from "./api";
 import { eventTypeLabel, recipientKindLabel } from "./labels";
 import { channelKindLabel } from "./notificationState";
@@ -43,7 +45,6 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   const rules = useNotificationRules();
   const channels = useNotificationChannels();
   const create = useCreateNotificationRuleMutation();
-  const update = useUpdateNotificationRuleMutation();
   const del = useDeleteNotificationRuleMutation();
 
   // Ticket queues are a CROSS-MODULE read (service-desk's `ticket.read`),
@@ -62,7 +63,10 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   });
   const queuesForbidden = queues.error instanceof ApiError && queues.error.status === 403;
 
-  const [creating, setCreating] = useState(false);
+  // Add rule opens from the URL (`?new=rule`, decision D8), and only for
+  // someone who may create one, whatever the URL asks.
+  const created = useNewParam("rule");
+  const creating = canAdmin && created.open;
   const [eventType, setEventType] = useState<string>(DEFAULT_EVENT_TYPE);
   const [channelId, setChannelId] = useState("");
   const [recipientKind, setRecipientKind] = useState<RecipientKind>("queue_members");
@@ -71,6 +75,8 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   // name what is being deleted rather than asking "are you sure?" about
   // nothing in particular (components/confirm.tsx).
   const [pendingDelete, setPendingDelete] = useState<RuleOut | null>(null);
+  // Set ON SUBMIT, never while choosing.
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   const forbidden = rules.error instanceof ApiError && rules.error.status === 403;
   const failed = rules.error != null && !forbidden;
@@ -85,6 +91,14 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
       : RECIPIENT_KINDS;
 
   function submit() {
+    // SAVE STAYS PRESSABLE (general ruling 8; fix round 2): a rule with no
+    // channel is named on Save instead of a dead button.
+    const next: Attempt = {
+      rules: () => [{ name: "channelId", label: t("notification.rules.channel") }],
+      values: { channelId },
+    };
+    setAttempt(next);
+    if (attemptProblems(next).length > 0) return;
     create.mutate(
       {
         event_type: eventType,
@@ -98,15 +112,44 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
           setChannelId("");
           setRecipientKind("queue_members");
           setQueueId("");
-          setCreating(false);
+          switches.release();
+          created.close();
         },
       },
     );
   }
 
-  function toggleActive(id: string, active: boolean) {
-    update.mutate({ id, body: { active: !active } });
+  // A rule's on/off switch is one of the page's settings: held in the page's
+  // one draft (`switches.tsx`) and saved by its one save bar.
+  const switches = useSwitches();
+  // The Add rule form starts empty whenever its dialog opens, however it was
+  // opened (general ruling 4), and the page's one guard covers it while it
+  // holds a change (ruling 3).
+  useLayoutEffect(() => {
+    if (!creating) return;
+    setEventType(DEFAULT_EVENT_TYPE);
+    setChannelId("");
+    setRecipientKind("queue_members");
+    setQueueId("");
+    setAttempt(null);
+    create.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creating]);
+  const dialogDirty =
+    creating && (eventType !== DEFAULT_EVENT_TYPE || channelId !== "" || recipientKind !== "queue_members" || queueId !== "");
+  const { reportDialog } = switches;
+  useEffect(() => {
+    reportDialog(dialogDirty);
+    return () => reportDialog(false);
+  }, [dialogDirty, reportDialog]);
+  function closeCreate() {
+    // Only the rule form's own change is the person's to drop by Cancel: with
+    // the form untouched, the page's one guard still holds the thrown switches
+    // (fix round 2, M2), and leaving afterwards still asks.
+    if (dialogDirty) switches.release();
+    created.close();
   }
+  const activeOf = (rule: RuleOut): boolean => switches.active("rule", rule.id, rule.active);
 
   function channelName(id: string): string {
     return channels.data?.find((c) => c.id === id)?.name ?? id;
@@ -139,23 +182,17 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
   return (
     // The Rules stat tile links to `/notifications#rules`.
     <div id="rules">
-      <Panel
-        title={t("notification.rules.title")}
-        // Same sentence, verbatim, as Settings → Notifications
-        // (`NotificationsTab.tsx`): "reaches" here and "goes" there was one
-        // job described in two verbs. Picked "goes" — the glossary's own
-        // replacement for "channel" is "where it goes", so the family of
-        // words this panel already needs to speak in is the "goes" one.
-        subtitle={t("notification.rules.subtitle")}
-        bare
-        actions={canAdmin ? <Btn label={t("notification.rules.add")} icon="plus" variant="primary" onClick={() => setCreating(true)} /> : undefined}
-      >
+      <FormSection title={t("notification.rules.title")} icon="bell">
+        <SectionLead
+          text={t("notification.rules.subtitle")}
+          action={canAdmin ? <Btn label={t("notification.rules.add")} icon="plus" onClick={created.start} /> : undefined}
+        />
         {rules.isLoading ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.common.loading")}</p>
+          <p className="note">{t("notification.common.loading")}</p>
         ) : forbidden ? (
-          <p className="note" style={{ padding: "16px 18px" }}>{t("notification.rules.forbidden")}</p>
+          <p className="note">{t("notification.rules.forbidden")}</p>
         ) : failed ? (
-          <p role="alert" className="notice red" style={{ margin: 14 }}>
+          <p role="alert" className="notice red">
             {t("notification.rules.failed", { reason: describeSubmitError(rules.error) })}
           </p>
         ) : (
@@ -202,10 +239,10 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
                         "Pending" and "Sent". */}
                     {canAdmin ? (
                       <Toggle
-                        checked={r.active}
-                        onChange={() => toggleActive(r.id, r.active)}
-                        label={r.active ? t("notification.rules.on") : t("notification.rules.off")}
-                        disabled={update.isPending}
+                        checked={activeOf(r)}
+                        onChange={() => switches.toggle("rule", r.id)}
+                        label={activeOf(r) ? t("notification.rules.on") : t("notification.rules.off")}
+                        disabled={switches.saving}
                       />
                     ) : (
                       <StatusPill value={r.active ? "active" : "inactive"} />
@@ -251,9 +288,12 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
             rendered "Error: " for a bodyless 503 -- the row kept its old badge
             and the operator read a label with nothing after it, which is the
             silently-swallowed destructive call Auditor A filed as a BLOCKER. */}
-        {(create.isError || update.isError || del.isError) && (
+        {/* A refused switch keeps its own sentence here ("The rule was not
+            changed."), the error text of today; the save bar stays up with
+            the change still unsaved. */}
+        {(create.isError || switches.ruleError != null || del.isError) && (
           <p role="alert" className="notice red" style={{ margin: 14 }}>
-            {t("notification.rules.notChanged", { reason: describeSubmitError(create.error ?? update.error ?? del.error) })}
+            {t("notification.rules.notChanged", { reason: describeSubmitError(create.error ?? switches.ruleError ?? del.error) })}
           </p>
         )}
 
@@ -276,7 +316,9 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
           }}
         />
 
-        <Dialog open={creating} onClose={() => setCreating(false)} title={t("notification.rules.addTitle")}>
+      </FormSection>
+        <Dialog open={creating} onClose={closeCreate} title={t("notification.rules.addTitle")}>
+          <Form onSubmit={submit}>
           <div className="form-grid">
             <Field label={t("notification.rules.eventType")} full>
               <select className={inputClass} value={eventType} onChange={(e) => setEventType(e.target.value)}>
@@ -334,21 +376,21 @@ export function RulesPanel({ canAdmin }: { canAdmin: boolean }) {
               )}
             </Field>
           </div>
-          {create.isError && (
-            <p role="alert" className="notice red" style={{ marginBottom: 12 }}>
-              {describeSubmitError(create.error)}
-            </p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setCreating(false)}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* `type="button"`: inside a <form>, an untyped button submits. */}
+            <Button type="button" variant="ghost" onClick={closeCreate}>
               {t("notification.rules.cancel")}
             </Button>
-            <Button onClick={submit} disabled={create.isPending || !channelId}>
-              {create.isPending ? t("notification.common.saving") : t("notification.rules.save")}
-            </Button>
+            <FormActions
+              label={t("notification.rules.save")}
+              pendingLabel={t("notification.common.saving")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
           </div>
+          </Form>
         </Dialog>
-      </Panel>
     </div>
   );
 }

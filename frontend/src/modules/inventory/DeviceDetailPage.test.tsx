@@ -115,11 +115,13 @@ describe("DeviceDetailPage", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-08-16T12:00:00Z"));
     try {
-      renderPage();
+      // The facts are the Overview's "Device information" list now (redesign
+      // Task 6, 1.2: the record's information on the left, as "atera 8" has it).
+      renderPage({}, ME, "/devices/d1");
       expect(await screen.findByRole("heading", { name: "ws-alpha" })).toBeInTheDocument();
-      // The four inventory facts, in v3's `facts` strip (the stat tiles the
-      // previous design drew here); `.stat-value` is the hook each value keeps.
-      const values = [...document.querySelectorAll(".facts .stat-value")].map(
+      // The four inventory facts; `.stat-value` is the hook each value keeps.
+      await screen.findByText("Intel i7");
+      const values = [...document.querySelectorAll(".kv .stat-value")].map(
         (el) => el.textContent,
       );
       // The last fact carries the AGE (cycle 12), because "[LOW] 'Last sweep'
@@ -128,7 +130,7 @@ describe("DeviceDetailPage", () => {
       expect(values).toEqual(["Intel i7", "16.0 GiB", "SN-001", "3h ago"]);
       // The instant is not lost: it moves to the fact's secondary line, in the
       // SHARED format (lib/datetime), never `toLocaleString()`.
-      const feet = [...document.querySelectorAll(".facts .stat-foot")].map(
+      const feet = [...document.querySelectorAll(".kv .stat-foot")].map(
         (el) => el.textContent,
       );
       expect(feet).toContain("16 Aug 2026, 09:00");
@@ -137,13 +139,13 @@ describe("DeviceDetailPage", () => {
     }
   });
 
-  it("keeps the strip to the six cells its row draws, with the record's origin on the chip line", async () => {
-    // A seventh cell opened a second row that held one value and a band of
-    // bordered white under the page head: `.facts` is
-    // `repeat(auto-fit, minmax(170px, 1fr))`, six tracks at the desktop
-    // width, so the cell count has to divide the row. Provenance is the one
-    // that was never a measurement, and it moves to the chips beside the
-    // agent state rather than being dropped.
+  it("lists the record's information, with how the record came to exist", async () => {
+    // THE STRIP BECAME A LIST (redesign Task 6, 1.2; the "atera 8" capture's
+    // "Device info"). The six-cell rule was the strip's arithmetic -- `.facts`
+    // drew six tracks at the desktop width -- and a list in the Overview's left
+    // column has no row to divide, so the machine's own facts (operating
+    // system, architecture, address) and its origin join the six that were
+    // there, in one list. The origin is still the fleet list's words.
     renderPage({
       getDevice: vi.fn().mockResolvedValue({
         id: "d1",
@@ -153,19 +155,23 @@ describe("DeviceDetailPage", () => {
         source: "agent",
         provenance: "sweep",
       }),
-    });
+    }, ME, "/devices/d1");
     await screen.findByRole("heading", { name: "ws-alpha" });
-    const cells = [...document.querySelectorAll(".facts > div")];
-    expect(cells.map((cell) => cell.querySelector(".k")?.textContent)).toEqual([
+    const info = (await screen.findByRole("heading", { name: "Device information" })).closest("section") as HTMLElement;
+    expect([...info.querySelectorAll(".kv > dt")].map((term) => term.textContent)).toEqual([
+      "Operating system",
+      "Architecture",
+      "IP address",
       "Agent",
       "Certificate",
       "CPU",
       "Memory",
       "Serial",
       "Last sweep",
+      "Recorded by",
     ]);
-    // Moved, not lost -- same words as the fleet list's own provenance column.
-    expect(await screen.findByText("Found by a sweep")).toBeInTheDocument();
+    // Same words as the fleet list's own provenance column.
+    expect(within(info).getByText("Found by a sweep")).toBeInTheDocument();
   });
 
   it("says the serial is not reported instead of a bare em dash in stat type", async () => {
@@ -175,9 +181,10 @@ describe("DeviceDetailPage", () => {
       getDeviceInventory: vi
         .fn()
         .mockResolvedValue({ ...INVENTORY, summary: { ...INVENTORY.summary, serial: null } }),
-    });
+    }, ME, "/devices/d1");
     await screen.findByRole("heading", { name: "ws-alpha" });
-    const card = (await screen.findByText("Serial")).closest("div") as HTMLElement;
+    // The fact's value is the term's own definition in the Overview's list.
+    const card = (await screen.findByText("Serial")).nextElementSibling as HTMLElement;
     expect(within(card).getByText("Not reported")).toBeInTheDocument();
     expect(within(card).getByText(/did not report a serial number/)).toBeInTheDocument();
     expect(card.querySelector(".stat-value")?.textContent).not.toBe("—");
@@ -264,9 +271,10 @@ describe("times are read in the profile's zone", () => {
     // browser zone renders 09:00 under the runner's default TZ=UTC. The
     // instant lives on the card's secondary line since cycle 12; the zone
     // requirement is unchanged.
-    renderPage({}, NY);
+    renderPage({}, NY, "/devices/d1");
     await screen.findByRole("heading", { name: "ws-alpha" });
-    const card = (await screen.findByText("Last sweep")).closest("div") as HTMLElement;
+    // The fact's value is the term's own definition in the Overview's list.
+    const card = (await screen.findByText("Last sweep")).nextElementSibling as HTMLElement;
     expect(card.querySelector(".stat-foot")?.textContent).toBe("16 Aug 2026, 05:00");
     expect(card.textContent).not.toContain("09:00");
   });
@@ -341,9 +349,11 @@ describe("times are read in the profile's zone", () => {
           .mockResolvedValue({ ...INVENTORY, snapshot_taken_at: null }),
       },
       NY,
+      "/devices/d1",
     );
     await screen.findByRole("heading", { name: "ws-alpha" });
-    const values = [...document.querySelectorAll(".facts .stat-value")].map(
+    await screen.findByText("Intel i7");
+    const values = [...document.querySelectorAll(".kv .stat-value")].map(
       (el) => el.textContent,
     );
     expect(values[3]).toBe(NO_DATE);
@@ -405,7 +415,8 @@ describe("what the detail page owes the operator", () => {
   };
 
   it("shows whether the agent is answering, and when it last did", async () => {
-    renderPage({ getDevice: vi.fn().mockResolvedValue(OFFLINE_DEVICE) }, NY);
+    // On the Overview, whose information list holds the agent's fact.
+    renderPage({ getDevice: vi.fn().mockResolvedValue(OFFLINE_DEVICE) }, NY, "/devices/d1");
     await screen.findByRole("heading", { name: "ws-alpha" });
 
     // Timeout raised over the 1s default: this assertion waits on a SECOND
@@ -657,15 +668,17 @@ describe("what the detail page owes the operator", () => {
     // element on the page has `role='tabpanel'` (count = 0)."
     renderPage();
     await screen.findByRole("heading", { name: "ws-alpha" });
+    // The kit's `UrlTabs` names the panel with a generated id; what the
+    // finding asks for is that every tab controls the panel there is.
     const panel = screen.getByRole("tabpanel");
-    expect(panel).toHaveAttribute("id", "device-tabpanel");
+    expect(panel.id).not.toBe("");
     for (const tab of screen.getAllByRole("tab")) {
-      expect(tab).toHaveAttribute("aria-controls", "device-tabpanel");
+      expect(tab).toHaveAttribute("aria-controls", panel.id);
     }
   });
 
   it("offers a way back to the device list", async () => {
-    // "[MEDIUM] Breadcrumb 'ITMS / Fleet' is not navigable — there is no link
+    // (on record by 2026-10-23) "[MEDIUM] Breadcrumb 'ITMS / Fleet' is not navigable — there is no link
     // back to the device list … a classic navigation dead end."
     renderPage();
     await screen.findByRole("heading", { name: "ws-alpha" });
@@ -694,7 +707,8 @@ describe("what the detail page owes the operator", () => {
       NY,
     );
     const row = (await screen.findByText("cpu0")).closest("tr") as HTMLElement;
-    expect(within(row).getByText(NO_DATE)).toBeInTheDocument();
+    // A NoValue: the kit's absent mark (kit requests batch 3, B3-9), no longer a dash.
+    expect(within(row).getByText("n/a")).toBeInTheDocument();
     expect(row.textContent).not.toContain("{}");
   });
 });
@@ -711,12 +725,14 @@ describe("what the detail page owes the operator", () => {
  */
 describe("the inventory facts are links, and the tab is addressable", () => {
   it("points each fact at the tab holding its detail", async () => {
-    renderPage();
+    // The facts live in the Overview's "Device information" list.
+    renderPage({}, ME, "/devices/d1");
     await screen.findByRole("heading", { name: "ws-alpha" });
-    // Each inventory fact in the strip is an anchor: the fact's caption, the
-    // element that carries the href, and where it goes.
-    const tiles = [...document.querySelectorAll(".facts .stat-value")].map((value) => [
-      value.closest("div")?.querySelector(".k")?.textContent,
+    await screen.findByText("Intel i7");
+    // Each inventory fact in the list is an anchor: the fact's caption (its
+    // term), the element that carries the href, and where it goes.
+    const tiles = [...document.querySelectorAll(".kv .stat-value")].map((value) => [
+      value.closest("dd")?.previousElementSibling?.textContent,
       value.tagName,
       value.getAttribute("href"),
     ]);

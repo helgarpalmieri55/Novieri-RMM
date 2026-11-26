@@ -1,6 +1,6 @@
-import { NavLink } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import { SectionNav } from "../../shell/components";
 
 // The three provisioning surfaces this module contributes, routed separately
 // (App.tsx: /provisioning, /provisioning/images, /provisioning/profiles)
@@ -13,6 +13,10 @@ import { translate } from "../../i18n/core";
 // post-config + target scope), so "Profiles" stands in for "Task sequences"
 // rather than inventing a fourth entity the backend does not have.
 // The labels are accessors over the catalogue, read when the strip is drawn.
+//
+// ON THE KIT'S SECTION NAV (redesign plan, waves' common rules): links
+// between pages, so a navigation with `aria-current="page"`, not the
+// `role="tablist"` it used to claim.
 export const PROVISIONING_NAV_ITEMS: ReadonlyArray<{ to: string; label: string }> = [
   { to: "/provisioning", get label() { return translate("provisioning.nav.runs"); } },
   { to: "/provisioning/images", get label() { return translate("provisioning.nav.images"); } },
@@ -23,18 +27,9 @@ export function ProvisioningPageNav({ canRead }: { canRead: boolean }) {
   const t = useT();
   if (!canRead) return null;
   return (
-    <nav aria-label={t("provisioning.nav.label")} className="tabs" role="tablist">
-      {PROVISIONING_NAV_ITEMS.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === "/provisioning"}
-          role="tab"
-          className={({ isActive }) => `tab${isActive ? " active" : ""}`}
-        >
-          {item.label}
-        </NavLink>
-      ))}
-    </nav>
+    <SectionNav
+      label={t("provisioning.nav.label")}
+      items={PROVISIONING_NAV_ITEMS.map((item) => ({ to: item.to, label: item.label, end: item.to === "/provisioning" }))}
+    />
   );
 }

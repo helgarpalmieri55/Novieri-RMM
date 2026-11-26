@@ -1,6 +1,6 @@
-import { NavLink } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import { SectionNav } from "../../shell/components";
 
 // The six licenses surfaces this module contributes. App.tsx's top-level
 // Shell nav links only to "/licenses" (LicensesPage) -- these are what make
@@ -13,6 +13,12 @@ import { translate } from "../../i18n/core";
 // Labels are distinct from in-page action-button text (e.g. LicensesPage's
 // own "New license") so an accessible-name query never collides between the
 // nav link and a page control.
+//
+// ON THE KIT'S SECTION NAV (redesign plan, waves' common rules: "Los menús de
+// sección ... pasan a dibujarse con SectionNav"). These are links between
+// pages, not tabs over panels: the strip used to say `role="tablist"`, which
+// promises arrow keys and panels that links do not have. `SectionNav` is a
+// plain navigation and marks the current page with `aria-current="page"`.
 // The labels are accessors over the catalogue, read when the strip is drawn.
 export const LICENSE_NAV_ITEMS: ReadonlyArray<{ to: string; label: string }> = [
   { to: "/licenses", get label() { return translate("licenses.nav.licenses"); } },
@@ -27,18 +33,9 @@ export function LicensePageNav({ canRead }: { canRead: boolean }) {
   const t = useT();
   if (!canRead) return null;
   return (
-    <nav aria-label={t("licenses.nav.label")} className="tabs" role="tablist">
-      {LICENSE_NAV_ITEMS.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === "/licenses"}
-          role="tab"
-          className={({ isActive }) => `tab${isActive ? " active" : ""}`}
-        >
-          {item.label}
-        </NavLink>
-      ))}
-    </nav>
+    <SectionNav
+      label={t("licenses.nav.label")}
+      items={LICENSE_NAV_ITEMS.map((item) => ({ to: item.to, label: item.label, end: item.to === "/licenses" }))}
+    />
   );
 }

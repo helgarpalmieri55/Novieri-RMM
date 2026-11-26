@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -19,8 +19,26 @@ import {
 } from "./serviceDeskState";
 import { TicketTable } from "./TicketTable";
 import type { TicketOut, TicketScope, TicketSort } from "./types";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid } from "../../shell/components";
-import { Chips } from "../../shell/viz";
+import {
+  Btn,
+  ChipSelect,
+  ClientFilter,
+  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  useNewParam,
+  useUrlFilters,
+  withClient,
+  writeQuery,
+} from "../../shell/components";
 import { intlLocale } from "../../lib/datetime";
 
 // The two priorities a technician picks work from first.
@@ -65,6 +83,9 @@ const SORTS: ReadonlyArray<{ value: TicketSort; label: MessageKey }> = [
 ];
 const DEFAULT_SORT: TicketSort = "due";
 
+/** The URL keys of this list, unchanged by the redesign (Task 7, 2.2), and the Client chip's. */
+const FILTER_KEYS = ["q", "scope", "status", "queue", "priority", "type", "origin", "assignee", "sort", "client"] as const;
+
 // The route's largest page.
 const MAX_LIST_LIMIT = 200;
 
@@ -93,32 +114,49 @@ const FOOT_PRIORITY: Record<string, MessageKey> = {
 export function TicketListPage() {
   const t = useT();
   const api = useApi();
-  const [creating, setCreating] = useState(false);
+  // New → Ticket (redesign decision D8): `?new=ticket` opens New ticket.
+  const created = useNewParam("ticket");
 
   // Every filter lives in the URL, so a tile, a pasted link or Back can carry
-  // it. An empty value is absent from the URL; typing replaces history.
+  // it (the kit's `useUrlFilters`; the keys are the ones this list always
+  // had). An empty value is absent from the URL; typing replaces history.
+  const filters = useUrlFilters(FILTER_KEYS);
   const [params, setParams] = useSearchParams();
-  const scope = parseScope(params.get("scope"));
-  const sort = parseSort(params.get("sort"));
-  const typeFilter = params.get("type") ?? "";
-  const statusFilter = params.get("status") ?? "";
-  const queueFilter = params.get("queue") ?? "";
-  const assigneeFilter = params.get("assignee") ?? "";
-  const priorityFilter = params.get("priority") ?? "";
-  const originFilter = params.get("origin") ?? "";
-  const searchFilter = params.get("q") ?? "";
+  const scope = parseScope(filters.values.scope || null);
+  const sort = parseSort(filters.values.sort || null);
+  const typeFilter = filters.values.type;
+  const statusFilter = filters.values.status;
+  const queueFilter = filters.values.queue;
+  const assigneeFilter = filters.values.assignee;
+  const priorityFilter = filters.values.priority;
+  const originFilter = filters.values.origin;
+  const searchFilter = filters.values.q;
+  // The Client chip only narrows the read (decision D20): it never changes
+  // the console's client, and it never changes where a write goes.
+  const clientChip = filters.values.client;
+  // "Nothing matches these filters" is said of a filter, never of the sort.
+  const filtered = FILTER_KEYS.some((key) => key !== "sort" && filters.values[key] !== "");
 
-  function update(patch: Record<string, string>, replace = false) {
+  /** "Clear filters" drops every filter and keeps the sort, which is not one (fix round 1). */
+  function clearFilters() {
+    update(Object.fromEntries(FILTER_KEYS.filter((key) => key !== "sort").map((key) => [key, ""])));
+  }
+
+  /** Several keys in one history entry (one Back undoes the change); only when the query changes. */
+  function update(patch: Record<string, string>) {
     const next = new URLSearchParams(params);
     for (const [key, value] of Object.entries(patch)) {
       if (value === "") next.delete(key);
       else next.set(key, value);
     }
-    setParams(next, { replace });
+    writeQuery(params, next, setParams);
   }
 
-  // "Mine" and "Unassigned" already say who the ticket belongs to, so they
-  // clear a picked assignee; picking one widens those two to "All open".
+  // THE SCOPE IS NOT AN ORDINARY FILTER (pre-flight review, W-M4). Without
+  // `?scope=` the queue shows the open tickets (`DEFAULT_SCOPE`), so "All
+  // open" is the chip that writes nothing and "All" writes `scope=all`. "Mine"
+  // and "Unassigned" already say who the ticket belongs to, so they clear a
+  // picked assignee; picking one widens those two to "All open".
   const setScope = (value: TicketScope) =>
     update({
       scope: value === DEFAULT_SCOPE ? "" : value,
@@ -148,17 +186,20 @@ export function TicketListPage() {
   // language the page opened in.
   const userOptions = userPickerOptions(users.data ?? []);
 
-  const tickets = useTickets({
-    type: typeFilter || undefined,
-    status: statusFilter || undefined,
-    queue_id: queueFilter || undefined,
-    priority: serverPriority,
-    q: searchFilter || undefined,
-    assigned_to: assigneeFilter || undefined,
-    scope,
-    sort,
-    limit: MAX_LIST_LIMIT,
-  });
+  const tickets = useTickets(
+    {
+      type: typeFilter || undefined,
+      status: statusFilter || undefined,
+      queue_id: queueFilter || undefined,
+      priority: serverPriority,
+      q: searchFilter || undefined,
+      assigned_to: assigneeFilter || undefined,
+      scope,
+      sort,
+      limit: MAX_LIST_LIMIT,
+    },
+    { chip: clientChip },
+  );
 
   const visibleTickets = useMemo((): TicketOut[] => {
     const wanted = priorityFilter.includes(",") ? priorityFilter.split(",") : [];
@@ -171,6 +212,17 @@ export function TicketListPage() {
 
   const dataReady = tickets.data !== undefined;
   const truncated = tickets.data != null && tickets.data.items.length < tickets.data.total;
+  // "Showing x of y": the server's total of the query, unless the page narrows
+  // its rows further (a pair of priorities, an origin). Then the total is
+  // known only when the whole query came back, and is otherwise not drawn.
+  const narrowedOnPage = priorityFilter.includes(",") || originFilter !== "";
+  const shownTotal = !tickets.data
+    ? null
+    : !narrowedOnPage
+      ? tickets.data.total
+      : truncated
+        ? null
+        : visibleTickets.length;
 
   // Every figure is counted from the rows on screen.
   const stats = useMemo(
@@ -247,29 +299,28 @@ export function TicketListPage() {
 
   // One clock for every relative time in the table.
   const now = Date.now();
+  const newTicket = canWrite ? (
+    <Btn label={t("serviceDesk.list.newTicket")} icon="plus" variant="primary" onClick={created.start} />
+  ) : undefined;
 
   return (
     <div>
-      <PageHead
-        title={t("serviceDesk.list.title")}
-        description={t("serviceDesk.list.description")}
-        actions={
-          canWrite ? (
-            <Btn label={t("serviceDesk.list.newTicket")} icon="plus" variant="primary" onClick={() => setCreating(true)} />
-          ) : undefined
-        }
-      />
+      <PageHead title={t("shell.nav.item.tickets")} description={t("serviceDesk.list.description")} actions={newTicket} />
       <ServiceDeskNav canRead={canRead} canAdmin={canAdmin} />
       <TicketReadiness />
 
       {/* Each tile counts rows on screen and links at the URL that shows
-          exactly those rows. */}
+          exactly those rows. A TILE COUNTED ON A NARROWED READ OPENS THE SAME
+          CLIENT'S ROWS (general ruling 2): with the Client chip set, the kit's
+          `withClient` adds it to every tile's link. */}
       <StatsGrid columns={4}>
         <StatCard
           label={t("serviceDesk.list.shown")}
           value={String(stats.total)}
           icon="ticket"
-          to="/service-desk"
+          to={withClient("/service-desk", clientChip)}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="neutral"
           foot={foot.total}
           zeroLabel={t("serviceDesk.list.zeroShown")}
@@ -278,7 +329,9 @@ export function TicketListPage() {
           label={t("serviceDesk.common.unassigned")}
           value={String(stats.unassigned)}
           icon="help-circle"
-          to="/service-desk?scope=unassigned"
+          to={withClient("/service-desk?scope=unassigned", clientChip)}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="gold"
           urgent
           foot={foot.unassigned}
@@ -288,7 +341,9 @@ export function TicketListPage() {
           label={t("serviceDesk.common.highOrUrgentPriority")}
           value={String(stats.urgent)}
           icon="alert-triangle"
-          to="/service-desk?priority=high,urgent"
+          to={withClient("/service-desk?priority=high,urgent", clientChip)}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="red"
           urgent
           foot={foot.urgent}
@@ -298,7 +353,9 @@ export function TicketListPage() {
           label={t("serviceDesk.list.fromAlerts")}
           value={String(stats.fromAlerts)}
           icon="bell-ringing"
-          to="/service-desk?origin=alert"
+          to={withClient("/service-desk?origin=alert", clientChip)}
+          // Not counted before the read (general ruling 10): "n/a", never 0.
+          pending={!dataReady}
           tone="blue"
           foot={foot.fromAlerts}
           zeroLabel={t("serviceDesk.list.zeroFromAlerts")}
@@ -307,32 +364,102 @@ export function TicketListPage() {
 
       <h2 className="sr-only">{t("serviceDesk.list.heading")}</h2>
       <Panel bare>
+        {/* THE LIST'S TOOLBAR (Receta L; Atera's "Tickets": search, then the
+            filters): the search, the scope (the question an operator asks
+            before any filter: "mine, or what nobody has picked up?"), the
+            status (a named select) and the Client chip; the count at the end. The rest of the
+            filters sit in a second row of the same panel, each with its
+            name on it, and the sort on the right. */}
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("serviceDesk.list.searchPlaceholder")}
+              aria-label={t("serviceDesk.list.searchAria")}
+              maxLength={128}
+              value={searchFilter}
+              onChange={(e) => filters.set("q", e.target.value)}
+            />
+          }
+          chips={
+            <>
+              <FilterChips
+                label={t("serviceDesk.list.show")}
+                options={SCOPES.map((option) => ({
+                  value: option.value === DEFAULT_SCOPE ? "" : option.value,
+                  label: t(option.label),
+                }))}
+                value={scope === DEFAULT_SCOPE ? "" : scope}
+                onChange={(value) => setScope(parseScope(value || null))}
+              />
+              {/* THE STATUS IS A NAMED SELECT, NOT ELEVEN CHIPS (the critique of
+                  this page, P1): a row of every status wrapped to three lines at
+                  1440 and pushed the first ticket below the fold. Still the
+                  closed vocabulary, in the first row beside the scope. */}
+              <ChipSelect
+                label={t("serviceDesk.list.statusAria")}
+                value={statusFilter}
+                onChange={(value) => filters.set("status", value)}
+                options={[
+                  { value: "", label: t("serviceDesk.list.anyStatus") },
+                  ...ALL_STATUSES.map((status) => ({ value: status, label: ticketStatusLabel(status) })),
+                ]}
+              />
+              <ClientFilter filters={filters} />
+            </>
+          }
+          // No count before the list has answered: "Showing 0" would be an invented zero.
+          end={dataReady ? <ShowingCount shown={visibleTickets.length} total={shownTotal} /> : null}
+        />
         <FilterBar>
-          {/* The scope comes first: it is the question an operator asks
-              before any filter ("mine, or what nobody has picked up?"). */}
-          <Chips
-            label={t("serviceDesk.list.show")}
-            items={SCOPES.map((s) => t(s.label))}
-            active={SCOPES.findIndex((s) => s.value === scope)}
-            onSelect={(index) => {
-              const chosen = SCOPES[index];
-              if (chosen) setScope(chosen.value);
-            }}
+          <ChipSelect
+            label={t("serviceDesk.list.queueAria")}
+            value={queueFilter}
+            onChange={(value) => filters.set("queue", value)}
+            options={[
+              { value: "", label: t("serviceDesk.list.allQueues") },
+              ...(queues.data ?? []).map((q) => ({ value: q.id, label: q.name })),
+            ]}
           />
-          <SearchField
-            placeholder={t("serviceDesk.list.searchPlaceholder")}
-            aria-label={t("serviceDesk.list.searchAria")}
-            maxLength={128}
-            value={searchFilter}
-            onChange={(e) => update({ q: e.target.value }, true)}
+          <ChipSelect
+            label={t("serviceDesk.list.priorityAria")}
+            value={priorityFilter}
+            onChange={(value) => filters.set("priority", value)}
+            options={PRIORITY_FILTERS.map((p) => ({
+              value: p.value,
+              label:
+                p.value === "" ? t("serviceDesk.list.allPriorities") : p.label ? t(p.label) : ticketPriorityLabel(p.value),
+            }))}
           />
+          <ChipSelect
+            label={t("serviceDesk.list.typeAria")}
+            value={typeFilter}
+            onChange={(value) => filters.set("type", value)}
+            options={TYPE_FILTERS.map((type) => ({
+              value: type,
+              label: type === "" ? t("serviceDesk.list.allTypes") : ticketTypeLabel(type),
+            }))}
+          />
+          <ChipSelect
+            label={t("serviceDesk.list.originAria")}
+            value={originFilter}
+            onChange={(value) => filters.set("origin", value)}
+            options={ORIGIN_FILTERS.map((o) => ({ value: o.value, label: t(o.label) }))}
+          />
+          <ChipSelect
+            label={t("serviceDesk.list.assigneeAria")}
+            value={assigneeFilter}
+            onChange={setAssigneeFilter}
+            options={[
+              { value: "", label: t("serviceDesk.list.anyone") },
+              ...userOptions.map((option) => ({ value: option.id, label: option.label })),
+            ]}
+          />
+          <span className="filter-spacer" />
           <select
             className="select-field"
             aria-label={t("serviceDesk.list.sortAria")}
             value={sort}
-            onChange={(e) =>
-              update({ sort: e.target.value === DEFAULT_SORT ? "" : e.target.value })
-            }
+            onChange={(e) => filters.set("sort", e.target.value === DEFAULT_SORT ? "" : e.target.value)}
           >
             {SORTS.map((s) => (
               <option key={s.value} value={s.value}>
@@ -340,92 +467,6 @@ export function TicketListPage() {
               </option>
             ))}
           </select>
-          <span aria-hidden="true" style={{ flexBasis: "100%", height: 0 }} />
-          <select
-            className="select-field"
-            aria-label={t("serviceDesk.list.typeAria")}
-            value={typeFilter}
-            onChange={(e) => update({ type: e.target.value })}
-          >
-            {TYPE_FILTERS.map((type) => (
-              <option key={type} value={type}>
-                {type === "" ? t("serviceDesk.list.allTypes") : ticketTypeLabel(type)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("serviceDesk.list.statusAria")}
-            value={statusFilter}
-            onChange={(e) => update({ status: e.target.value })}
-          >
-            <option value="">{t("serviceDesk.list.anyStatus")}</option>
-            {ALL_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {ticketStatusLabel(s)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("serviceDesk.list.queueAria")}
-            value={queueFilter}
-            onChange={(e) => update({ queue: e.target.value })}
-          >
-            <option value="">{t("serviceDesk.list.allQueues")}</option>
-            {queues.data?.map((q) => (
-              <option key={q.id} value={q.id}>
-                {q.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("serviceDesk.list.priorityAria")}
-            value={priorityFilter}
-            onChange={(e) => update({ priority: e.target.value })}
-          >
-            {PRIORITY_FILTERS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.value === ""
-                  ? t("serviceDesk.list.allPriorities")
-                  : p.label
-                    ? t(p.label)
-                    : ticketPriorityLabel(p.value)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("serviceDesk.list.originAria")}
-            value={originFilter}
-            onChange={(e) => update({ origin: e.target.value })}
-          >
-            {ORIGIN_FILTERS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {t(o.label)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="select-field"
-            aria-label={t("serviceDesk.list.assigneeAria")}
-            value={assigneeFilter}
-            onChange={(e) => setAssigneeFilter(e.target.value)}
-          >
-            <option value="">{t("serviceDesk.list.anyone")}</option>
-            {userOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-          {dataReady ? (
-            <span className="mono cell-sub">
-              {t("serviceDesk.list.shownCount", { count: visibleTickets.length, n: formatCount(visibleTickets.length) })}
-            </span>
-          ) : null}
         </FilterBar>
 
         {truncated && tickets.data && (
@@ -441,23 +482,27 @@ export function TicketListPage() {
           </p>
         )}
 
-        <QueryState
-          loading={!dataReady && !tickets.error}
-          error={tickets.error}
-          empty={dataReady && visibleTickets.length === 0}
-          emptyIcon="ticket"
-          emptyLabel={t("serviceDesk.list.empty")}
-        >
-          <TicketTable
-            tickets={visibleTickets}
-            queueName={queueName}
-            userOptions={userOptions}
-            now={now}
-          />
+        <QueryState loading={!dataReady && !tickets.error} error={tickets.error} empty={false} emptyLabel="">
+          {visibleTickets.length === 0 ? (
+            // NO SECOND "NEW TICKET" HERE: the default view is the OPEN
+            // tickets, so an empty queue is "nothing open", not "nothing
+            // yet", and the head offers New ticket one line above.
+            <ListEmpty filtered={filtered} onClear={clearFilters} nothingYet={t("serviceDesk.list.empty")} icon="ticket" />
+          ) : (
+            <TicketTable
+              tickets={visibleTickets}
+              queueName={queueName}
+              userOptions={userOptions}
+              now={now}
+              label={t("shell.nav.item.tickets")}
+            />
+          )}
         </QueryState>
       </Panel>
 
-      <NewTicketDialog open={creating} onClose={() => setCreating(false)} myUserId={myUserId} />
+      {/* Open only for someone who may write a ticket: the same code the
+          button checks, so a bare `?new=ticket` opens nothing for a reader. */}
+      <NewTicketDialog open={canWrite && created.open} onClose={created.close} myUserId={myUserId} guardNew />
     </div>
   );
 }

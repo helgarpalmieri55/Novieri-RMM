@@ -145,7 +145,8 @@ describe("the job history in Spanish", () => {
     expect(screen.getByRole("button", { name: "Esperando demasiado" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "En cola" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancelado" })).toBeInTheDocument();
-    expect(screen.getByText("4 tareas")).toBeInTheDocument();
+    // The kit's count at the end of the toolbar (redesign plan, Receta L).
+    expect(screen.getByText("Mostrando 4 de 4")).toBeInTheDocument();
     expect(screen.getByLabelText("Buscar tareas")).toBeInTheDocument();
     // The table.
     const table = screen.getByRole("table");
@@ -180,7 +181,8 @@ describe("the job history in Spanish", () => {
   it("filters to nothing with a Spanish message", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const { container } = renderPage([BASE], "/jobs?status=failed");
-    expect(await screen.findByText("Ninguna tarea coincide con ese filtro.")).toBeInTheDocument();
+    // The kit's filtered sentence (redesign plan, Receta L).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Todas" }));
     expect(await screen.findByText("Recopilar inventario")).toBeInTheDocument();
     expectNoEnglish(container, STORED);

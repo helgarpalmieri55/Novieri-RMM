@@ -1,6 +1,6 @@
-# ITMS
+# Novieri RMM
 
-**ITMS** — the IT Management System. A modular, web-based IT management and
+**Novieri RMM** — remote monitoring and management. A modular, web-based IT management and
 endpoint control platform. Think
 ManageEngine Endpoint Central / NinjaOne / Datto RMM in category: unified
 inventory, patching, remote control, software deployment, imaging, backup, and

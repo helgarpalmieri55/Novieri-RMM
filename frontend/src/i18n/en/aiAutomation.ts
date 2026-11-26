@@ -71,6 +71,7 @@ export const aiAutomation = {
   list: {
     title: "Assistant actions",
     description: "Everything the assistant proposed, and what happened to it.",
+    all: "All",
     empty: "Nothing is awaiting a decision.",
     action: "Action",
     whatRuns: "What runs",
@@ -140,7 +141,7 @@ export const aiAutomation = {
     description: "How much the assistant may do on its own.",
     panelTitle: "Autonomy ceilings",
     panelSubtitle: "What each persona may prepare for each risk class",
-    emptyNote: "An empty cell means Off. Nothing is saved until you press Save changes.",
+    emptyNote: "An empty cell means Off. Nothing is saved until you press Save.",
     classNote:
       "Risk class comes from each approved action in your organization's catalogue, not from this page.",
     notChanged: "{persona} / {risk} risk was not changed.",
@@ -151,10 +152,7 @@ export const aiAutomation = {
     fixed: "Fixed",
     cellLabel: "{persona}, {risk} risk",
     unsaved: "Unsaved. Stored: {level}",
-    saving: "Saving…",
-    save: "Save changes",
     everyClientOnly: "Read-only: every client shares the autonomy dial, so changing it requires the ai.admin permission on every client.",
-    discard: "Discard changes",
     unsavedChanges: {
       one: "{count} unsaved change: {changes}",
       other: "{count} unsaved changes: {changes}",

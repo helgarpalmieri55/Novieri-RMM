@@ -51,7 +51,7 @@ import { useT } from "../../i18n/context";
 import { lazyLabels } from "../../i18n/lazy";
 import type { McpAppOut } from "../../lib/api";
 import { formatDateTime } from "../../lib/datetime";
-import { KIND_ICON, Panel, QueryState, Toggle } from "../../shell/components";
+import { KIND_ICON, ListEmpty, ListToolbar, Panel, ShowingCount, Toggle } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KV } from "../../shell/viz";
 import { useCurrentOrg, useMcpConnections, useMe, useRevokeMcpConnection, useUpdateCurrentOrgMutation, useGlobalWriteReason } from "./api";
@@ -182,14 +182,20 @@ export function AiConnectionsTab({
           subtitle={t("settings.aiConnections.apps.subtitle")}
           bare
         >
-          <QueryState
-            loading={false}
-            error={null}
-            empty={connections.data.apps.length === 0}
-            emptyLabel={t("settings.aiConnections.apps.empty")}
-            emptyIcon="sparkles"
-          >
-            <Table>
+          {/* THE LIST PATTERN (redesign, Receta L), for a list with no
+              filters: how many it shows, and an empty state that says why. */}
+          <ListToolbar
+            end={<ShowingCount shown={connections.data.apps.length} total={connections.data.apps.length} />}
+          />
+          {connections.data.apps.length === 0 ? (
+            <ListEmpty
+              filtered={false}
+              onClear={() => undefined}
+              nothingYet={t("settings.aiConnections.apps.empty")}
+              icon="sparkles"
+            />
+          ) : (
+            <Table label={t("settings.aiConnections.apps.title")}>
               <thead>
                 <tr>
                   <Th>{COLUMNS.app}</Th>
@@ -212,7 +218,7 @@ export function AiConnectionsTab({
                 ))}
               </tbody>
             </Table>
-          </QueryState>
+          )}
         </Panel>
       ) : null}
 

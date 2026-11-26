@@ -46,6 +46,13 @@ describe("SessionEnded", () => {
     expect(onSignIn).toHaveBeenCalledTimes(1);
   });
 
+  // A card in the sign-in frame: its action across the card (P3 adoption pass;
+  // the coordinator's answer to O8's Q3), the kit's `Btn wide`.
+  it("draws Sign in again across the card", () => {
+    render(<SessionEnded kept={[]} onSignIn={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Sign in again" })).toHaveClass("btn", "primary", "wide");
+  });
+
   it("shows what was typed read-only, under its own label, to copy", () => {
     render(<SessionEnded kept={KEPT} onSignIn={vi.fn()} />);
     expect(screen.getByRole("status")).toHaveTextContent(/copy what you want to keep/);

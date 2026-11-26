@@ -522,9 +522,10 @@ CATALOG: dict[str, str] = {
         "{item} abarca todas las direcciones, no es una red: indica las redes en las que están "
         "los equipos que vas a instalar"
     ),
-    "{item} overlaps {proxy}, the network ITMS's own proxy sits on (ITS_TRUSTED_PROXY_CIDRS). "
-    "Requests can appear to come from there, so listing it would let any computer in": (
-        "{item} se solapa con {proxy}, la red en la que está el proxy propio de ITMS "
+    "{item} overlaps {proxy}, the network Novieri RMM's own proxy sits on "
+    "(ITS_TRUSTED_PROXY_CIDRS). Requests can appear to come from there, so "
+    "listing it would let any computer in": (
+        "{item} se solapa con {proxy}, la red en la que está el proxy propio de Novieri RMM "
         "(ITS_TRUSTED_PROXY_CIDRS). Las solicitudes pueden parecer venir de ahí, así que "
         "indicarla dejaría entrar a cualquier equipo"
     ),
@@ -1262,7 +1263,7 @@ CATALOG: dict[str, str] = {
     "too many test messages for this organization; try again in a minute": (
         "demasiados mensajes de prueba para esta organización; inténtalo de nuevo en un minuto"
     ),
-    "ITMS test message": "Mensaje de prueba de ITMS",
+    "Novieri RMM test message": "Mensaje de prueba de Novieri RMM",
     "the relay password may only contain ASCII characters": (
         "la contraseña del servidor de correo solo puede contener caracteres ASCII"
     ),
@@ -1271,10 +1272,10 @@ CATALOG: dict[str, str] = {
         "Esta credencial pertenece al correo de cuentas de esta organización; cámbiala en "
         "Ajustes, Correo."
     ),
-    "This is a test message from ITMS. It reached you, so this organization's account email "
+    "This is a test message from Novieri RMM. It reached you, so this organization's account email "
     "(invitations and password resets) is working.": (
-        "Este es un mensaje de prueba de ITMS. Te ha llegado, así que el correo de cuentas de "
-        "esta organización (invitaciones y restablecimientos de contraseña) funciona."
+        "Este es un mensaje de prueba de Novieri RMM. Te ha llegado, así que el correo de "
+        "cuentas de esta organización (invitaciones y restablecimientos de contraseña) funciona."
     ),
     "This credential is used only to send this organization's account email and cannot be "
     "revealed.": (
@@ -2204,8 +2205,8 @@ CATALOG: dict[str, str] = {
     "the built MSI holds {files}, not the agent and its settings file": (
         "el MSI creado contiene {files}, y no el agente y su archivo de configuración"
     ),
-    "the built MSI does not stop the its-agent service on install and removal": (
-        "el MSI creado no detiene el servicio its-agent al instalar ni al desinstalar"
+    "the built MSI does not stop the novieri-agent service on install and removal": (
+        "el MSI creado no detiene el servicio novieri-agent al instalar ni al desinstalar"
     ),
     "the built MSI is not marked {template}": "el MSI creado no está marcado como {template}",
     "there is no MSI for the {arch} architecture": "no hay ningún MSI para la arquitectura {arch}",
@@ -2214,29 +2215,29 @@ CATALOG: dict[str, str] = {
     ),
     "ITS_PUBLIC_CONSOLE_URL is not set. The MSI takes the address computers join from it, "
     "never from the browser's request, because the file goes to every computer in the "
-    "domain. Set it to the console's https address, such as https://itms.example.com.": (
+    "domain. Set it to the console's https address, such as https://rmm.example.com.": (
         "ITS_PUBLIC_CONSOLE_URL no está definida. El MSI toma de ella la dirección a la que se "
         "unen los equipos, nunca de la solicitud del navegador, porque el archivo va a todos "
         "los equipos del dominio. Defínela con la dirección https de la consola, por ejemplo "
-        "https://itms.example.com."
+        "https://rmm.example.com."
     ),
-    "ITS_PUBLIC_CONSOLE_URL must be an https address, such as https://itms.example.com.": (
+    "ITS_PUBLIC_CONSOLE_URL must be an https address, such as https://rmm.example.com.": (
         "ITS_PUBLIC_CONSOLE_URL debe ser una dirección https, por ejemplo "
-        "https://itms.example.com."
+        "https://rmm.example.com."
     ),
     "ITS_PUBLIC_CONSOLE_URL must be the console's bare https address, with no path, query "
-    "or fragment, such as https://itms.example.com.": (
+    "or fragment, such as https://rmm.example.com.": (
         "ITS_PUBLIC_CONSOLE_URL debe ser la dirección https simple de la consola, sin ruta, "
-        "consulta ni fragmento, por ejemplo https://itms.example.com."
+        "consulta ni fragmento, por ejemplo https://rmm.example.com."
     ),
-    "ITS_PUBLIC_CONSOLE_URL must not carry a user name, such as https://itms.example.com.": (
+    "ITS_PUBLIC_CONSOLE_URL must not carry a user name, such as https://rmm.example.com.": (
         "ITS_PUBLIC_CONSOLE_URL no debe llevar un nombre de usuario, por ejemplo "
-        "https://itms.example.com."
+        "https://rmm.example.com."
     ),
-    "The MSI needs ITMS to be reached by a DNS name, such as itms.example.com, not an IP "
+    "The MSI needs Novieri RMM to be reached by a DNS name, such as rmm.example.com, not an IP "
     "address. Set ITS_PUBLIC_CONSOLE_URL to that name.": (
-        "El MSI necesita que se acceda a ITMS mediante un nombre DNS, como itms.example.com, y "
-        "no una dirección IP. Define ITS_PUBLIC_CONSOLE_URL con ese nombre."
+        "El MSI necesita que se acceda a Novieri RMM mediante un nombre DNS, como "
+        "rmm.example.com, y no una dirección IP. Define ITS_PUBLIC_CONSOLE_URL con ese nombre."
     ),
     "Other MSIs are being built right now. Try again in a minute.": (
         "Ahora mismo se están creando otros MSI. Inténtalo de nuevo en un minuto."
@@ -2359,11 +2360,11 @@ CATALOG: dict[str, str] = {
     ),
     "Stage it on a distribution point": "Colócalo en un punto de distribución",
     "A DFS or SYSVOL path every target machine account can read, and that only your "
-    "administrators can write. Copy install.ps1 and its-agent-enroll.ps1 from "
+    "administrators can write. Copy install.ps1 and novieri-agent-enroll.ps1 from "
     "agent/packaging/windows/ alongside it.": (
         "Una ruta DFS o SYSVOL que todas las cuentas de equipo de destino puedan leer y que "
         "solo tus administradores puedan escribir. Copia junto a él install.ps1 e "
-        "its-agent-enroll.ps1 desde agent/packaging/windows/."
+        "novieri-agent-enroll.ps1 desde agent/packaging/windows/."
     ),
     "Assign it as a computer startup script": "Asígnalo como script de inicio del equipo",
     "Computer Configuration > Policies > Windows Settings > Scripts (Startup). Startup "
@@ -2384,53 +2385,54 @@ CATALOG: dict[str, str] = {
     ),
     "Wrap it as a Win32 app": "Empaquétalo como una aplicación Win32",
     "IntuneWinAppUtil over a folder holding the binary, install.ps1 and "
-    "its-agent-enroll.ps1. Intune encrypts the payload at rest and delivers it to SYSTEM "
+    "novieri-agent-enroll.ps1. Intune encrypts the payload at rest and delivers it to SYSTEM "
     "on the assigned device.": (
         "IntuneWinAppUtil sobre una carpeta que contenga el binario, install.ps1 e "
-        "its-agent-enroll.ps1. Intune cifra la carga en reposo y la entrega como SYSTEM al "
+        "novieri-agent-enroll.ps1. Intune cifra la carga en reposo y la entrega como SYSTEM al "
         "dispositivo asignado."
     ),
     "Set the detection rule": "Define la regla de detección",
-    "File exists: %ProgramFiles%\\ITSuite\\its-agent.exe. Do not detect on the enrolled "
+    "File exists: %ProgramFiles%\\NovieriRMM\\novieri-agent.exe. Do not detect on the enrolled "
     "state — an installed-but-unenrolled agent is a normal intermediate state on this path.": (
-        "El archivo existe: %ProgramFiles%\\ITSuite\\its-agent.exe. No detectes por el estado de "
-        "inscripción: un agente instalado pero sin inscribir es un estado intermedio normal en "
-        "esta vía."
+        "El archivo existe: %ProgramFiles%\\NovieriRMM\\novieri-agent.exe. No detectes por el "
+        "estado de inscripción: un agente instalado pero sin inscribir es un estado intermedio "
+        "normal en esta vía."
     ),
     "Mint a deployment token below and put it in the app's own script content or a linked "
     "key vault. It must never be in the package.": (
         "Crea abajo un token de despliegue y ponlo en el contenido del script de la propia "
         "aplicación o en una bóveda de claves vinculada. Nunca debe ir en el paquete."
     ),
-    "Install the ITMS agent": "Instalar el agente de ITMS",
+    "Install the Novieri RMM agent": "Instalar el agente de Novieri RMM",
     "macOS and Linux": "macOS y Linux",
-    "This installs the agent on the computer you are using now. It appears in ITMS within "
+    "This installs the agent on the computer you are using now. It appears in Novieri RMM within "
     "a minute and waits there until a technician approves it.": (
-        "Esto instala el agente en el equipo que estás usando ahora. Aparece en ITMS en menos "
-        "de un minuto y espera allí hasta que un técnico lo apruebe."
+        "Esto instala el agente en el equipo que estás usando ahora. Aparece en Novieri RMM en "
+        "menos de un minuto y espera allí hasta que un técnico lo apruebe."
     ),
-    "The Windows installer needs ITMS to be reached by a DNS name, such as "
-    "itms.example.com, not an IP address: the installer learns where to join from the name "
-    "of the file it downloads. Ask whoever runs ITMS to set one up.": (
-        "El instalador de Windows necesita que se acceda a ITMS mediante un nombre DNS, como "
-        "itms.example.com, y no una dirección IP: el instalador sabe a dónde unirse por el "
-        "nombre del archivo que descarga. Pide a quien administra ITMS que configure uno."
+    "The Windows installer needs Novieri RMM to be reached by a DNS name, such as "
+    "rmm.example.com, not an IP address: the installer learns where to join from the name "
+    "of the file it downloads. Ask whoever runs Novieri RMM to set one up.": (
+        "El instalador de Windows necesita que se acceda a Novieri RMM mediante un nombre "
+        "DNS, como rmm.example.com, y no una dirección IP: el instalador sabe a dónde unirse "
+        "por el nombre del archivo que descarga. Pide a quien administra Novieri RMM que "
+        "configure uno."
     ),
     "Run this in a terminal on the computer:": "Ejecuta esto en una terminal del equipo:",
-    "No macOS or Linux installer is available yet. Ask whoever runs ITMS to mark an agent "
+    "No macOS or Linux installer is available yet. Ask whoever runs Novieri RMM to mark an agent "
     "release 1.6.0 or later as stable.": (
         "Todavía no hay ningún instalador de macOS ni de Linux disponible. Pide a quien "
-        "administra ITMS que marque como estable una versión del agente 1.6.0 o posterior."
+        "administra Novieri RMM que marque como estable una versión del agente 1.6.0 o posterior."
     ),
     "Open the downloaded file and approve the prompt. Keep the file's name as it is: it is "
     "how the installer knows where to join.": (
         "Abre el archivo descargado y acepta el aviso. No cambies el nombre del archivo: así "
         "es como el instalador sabe a dónde unirse."
     ),
-    "No Windows installer is available yet. Ask whoever runs ITMS to mark a signed agent "
+    "No Windows installer is available yet. Ask whoever runs Novieri RMM to mark a signed agent "
     "release 1.6.0 or later as stable.": (
-        "Todavía no hay ningún instalador de Windows disponible. Pide a quien administra ITMS "
-        "que marque como estable una versión firmada del agente 1.6.0 o posterior."
+        "Todavía no hay ningún instalador de Windows disponible. Pide a quien administra "
+        "Novieri RMM que marque como estable una versión firmada del agente 1.6.0 o posterior."
     ),
     "Download for Windows ({arch_label})": "Descargar para Windows ({arch_label})",
     "Download for Windows ({arch_label}) instead": (
@@ -2478,9 +2480,9 @@ CATALOG: dict[str, str] = {
     "ARM": "ARM",
     # --- agent_push ---
     "ITS_PUBLIC_CONSOLE_URL={raw} is not the console's bare https address (for example "
-    "https://itms.example.com, with no path). {console_url_unset}": (
+    "https://rmm.example.com, with no path). {console_url_unset}": (
         "ITS_PUBLIC_CONSOLE_URL={raw} no es la dirección https simple de la consola (por "
-        "ejemplo https://itms.example.com, sin ruta). {console_url_unset}"
+        "ejemplo https://rmm.example.com, sin ruta). {console_url_unset}"
     ),
     "a {credential_type} credential's secret must be a JSON object with \"username\" and "
     "\"secret\"": (
@@ -3506,44 +3508,44 @@ CATALOG: dict[str, str] = {
     "reason not recorded": "motivo sin registrar",
     "yes": "sí",
     "no": "no",
-    "[Toeshee] Ticket {line} assigned": "[Toeshee] Ticket {line} asignado",
+    "[Novieri RMM] Ticket {line} assigned": "[Novieri RMM] Ticket {line} asignado",
     "Ticket {line} has been assigned to a technician.": (
         "El ticket {line} se ha asignado a un técnico."
     ),
-    "[Toeshee] Ticket {line}: status changed to {to_status}": (
-        "[Toeshee] Ticket {line}: el estado cambió a {to_status}"
+    "[Novieri RMM] Ticket {line}: status changed to {to_status}": (
+        "[Novieri RMM] Ticket {line}: el estado cambió a {to_status}"
     ),
     "Ticket {line} changed status from {from_status} to {to_status}.": (
         "El ticket {line} cambió de estado: de {from_status} a {to_status}."
     ),
-    "[Toeshee] New comment on ticket #{ticket_number}": (
-        "[Toeshee] Comentario nuevo en el ticket #{ticket_number}"
+    "[Novieri RMM] New comment on ticket #{ticket_number}": (
+        "[Novieri RMM] Comentario nuevo en el ticket #{ticket_number}"
     ),
     "A new comment was added to ticket #{ticket_number}.": (
         "Se añadió un comentario nuevo al ticket #{ticket_number}."
     ),
-    "[Toeshee] Internal note added to ticket #{ticket_number}": (
-        "[Toeshee] Nota interna añadida al ticket #{ticket_number}"
+    "[Novieri RMM] Internal note added to ticket #{ticket_number}": (
+        "[Novieri RMM] Nota interna añadida al ticket #{ticket_number}"
     ),
-    "An internal note was added to ticket #{ticket_number}. Sign in to Toeshee to view it.": (
-        "Se añadió una nota interna al ticket #{ticket_number}. Inicia sesión en Toeshee para "
+    "An internal note was added to ticket #{ticket_number}. Sign in to Novieri RMM to view it.": (
+        "Se añadió una nota interna al ticket #{ticket_number}. Inicia sesión en Novieri RMM para "
         "verla."
     ),
-    "[Toeshee] Approval requested: ticket {line}": (
-        "[Toeshee] Aprobación solicitada: ticket {line}"
+    "[Novieri RMM] Approval requested: ticket {line}": (
+        "[Novieri RMM] Aprobación solicitada: ticket {line}"
     ),
     "Ticket {line} requires your approval.": "El ticket {line} necesita tu aprobación.",
-    "[Toeshee] Ticket {line}: approval {decision}": (
-        "[Toeshee] Ticket {line}: aprobación {decision}"
+    "[Novieri RMM] Ticket {line}: approval {decision}": (
+        "[Novieri RMM] Ticket {line}: aprobación {decision}"
     ),
     "Ticket {line} was {decision}.": "El ticket {line} fue {decision}.",
-    "[Toeshee] Ticket {line} resolved": "[Toeshee] Ticket {line} resuelto",
+    "[Novieri RMM] Ticket {line} resolved": "[Novieri RMM] Ticket {line} resuelto",
     "Your ticket {line} has been resolved. If you have further questions, sign in to the "
     "portal and add a comment to this ticket.": (
         "Tu ticket {line} se ha resuelto. Si tienes más preguntas, inicia sesión en el portal "
         "y añade un comentario a este ticket."
     ),
-    "[Toeshee] SLA breached: ticket {line}": "[Toeshee] SLA incumplido: ticket {line}",
+    "[Novieri RMM] SLA breached: ticket {line}": "[Novieri RMM] SLA incumplido: ticket {line}",
     "The {target} SLA for ticket {line} was due at {due_at} and has been breached.": (
         "El SLA de {target} del ticket {line} vencía el {due_at} y se ha incumplido."
     ),
@@ -3551,23 +3553,23 @@ CATALOG: dict[str, str] = {
     "Observed: {value}": "Valor observado: {value}",
     "Threshold: {comparator} {threshold}": "Umbral: {comparator} {threshold}",
     "Severity: {severity}": "Gravedad: {severity}",
-    "[Toeshee] Health alert ({severity}): {line}": (
-        "[Toeshee] Alerta de salud ({severity}): {line}"
+    "[Novieri RMM] Health alert ({severity}): {line}": (
+        "[Novieri RMM] Alerta de salud ({severity}): {line}"
     ),
     "This check is currently flapping.": "Esta comprobación se repite ahora mismo.",
     "A health alert opened for {line}.": "Se abrió una alerta de salud para {line}.",
     "Opened: {opened_at}": "Abierta: {opened_at}",
-    "[Toeshee] Health alert ESCALATED ({severity}): {line}": (
-        "[Toeshee] Alerta de salud ESCALADA ({severity}): {line}"
+    "[Novieri RMM] Health alert ESCALATED ({severity}): {line}": (
+        "[Novieri RMM] Alerta de salud ESCALADA ({severity}): {line}"
     ),
     "The health alert for {line} is still open and has been escalated.": (
         "La alerta de salud de {line} sigue abierta y se ha escalado."
     ),
-    "Nobody has acknowledged it. Sign in to Toeshee to review it.": (
-        "Nadie la ha reconocido. Inicia sesión en Toeshee para revisarla."
+    "Nobody has acknowledged it. Sign in to Novieri RMM to review it.": (
+        "Nadie la ha reconocido. Inicia sesión en Novieri RMM para revisarla."
     ),
-    "[Toeshee] Remediation awaiting approval: {action_key} on {hostname}": (
-        "[Toeshee] Corrección pendiente de aprobación: {action_key} en {hostname}"
+    "[Novieri RMM] Remediation awaiting approval: {action_key} on {hostname}": (
+        "[Novieri RMM] Corrección pendiente de aprobación: {action_key} en {hostname}"
     ),
     "A remediation is waiting for approval for {line}.": (
         "Hay una corrección pendiente de aprobación para {line}."
@@ -3577,12 +3579,12 @@ CATALOG: dict[str, str] = {
         "Script fijado: {script_name} (versión {script_version})"
     ),
     "It will NOT run until someone holding `health.remediate` approves it. Sign in to "
-    "Toeshee to approve or refuse it.": (
+    "Novieri RMM to approve or refuse it.": (
         "NO se ejecutará hasta que alguien con el permiso `health.remediate` la apruebe. "
-        "Inicia sesión en Toeshee para aprobarla o rechazarla."
+        "Inicia sesión en Novieri RMM para aprobarla o rechazarla."
     ),
-    "[Toeshee] IPAM drift ({severity}): {drift_class} at {address}": (
-        "[Toeshee] Deriva de IPAM ({severity}): {drift_class} en {address}"
+    "[Novieri RMM] IPAM drift ({severity}): {drift_class} at {address}": (
+        "[Novieri RMM] Deriva de IPAM ({severity}): {drift_class} en {address}"
     ),
     "The address plan and the fleet disagree about {address}.": (
         "El plan de direcciones y el parque no coinciden sobre {address}."
@@ -3591,13 +3593,13 @@ CATALOG: dict[str, str] = {
     "Confidence: {confidence}": "Confianza: {confidence}",
     "Subnet: {subnet}": "Subred: {subnet}",
     "Documented claimant: device {device_id}": "Titular documentado: dispositivo {device_id}",
-    "Seen on two consecutive reconciliation passes. Sign in to Toeshee to review, "
+    "Seen on two consecutive reconciliation passes. Sign in to Novieri RMM to review, "
     "document, or acknowledge it.": (
-        "Visto en dos pasadas de conciliación consecutivas. Inicia sesión en Toeshee para "
+        "Visto en dos pasadas de conciliación consecutivas. Inicia sesión en Novieri RMM para "
         "revisarlo, documentarlo o reconocerlo."
     ),
-    "[Toeshee] IPAM sweep result REJECTED from device {device}": (
-        "[Toeshee] Resultado de barrido de IPAM RECHAZADO del dispositivo {device}"
+    "[Novieri RMM] IPAM sweep result REJECTED from device {device}": (
+        "[Novieri RMM] Resultado de barrido de IPAM RECHAZADO del dispositivo {device}"
     ),
     "A network sweep result was rejected in full and no observations were recorded from it.": (
         "Un resultado de barrido de red se rechazó por completo y no se registró ninguna "
@@ -3608,15 +3610,15 @@ CATALOG: dict[str, str] = {
     "Sweep run: {sweep_run}": "Ejecución de barrido: {sweep_run}",
     "Addresses outside the signed scope: {count}": "Direcciones fuera del ámbito firmado: {count}",
     "Sample: {sample}": "Muestra: {sample}",
-    "[Toeshee] Platform problem: {name} is {status}": (
-        "[Toeshee] Problema de la plataforma: {name} está {status}"
+    "[Novieri RMM] Platform problem: {name} is {status}": (
+        "[Novieri RMM] Problema de la plataforma: {name} está {status}"
     ),
     "Check: {name} ({probe})": "Comprobación: {name} ({probe})",
     "Status: {status}": "Estado: {status}",
     "Since: {since}": "Desde: {since}",
-    "Sign in to Toeshee and open Platform status for detail. You will be told when it "
+    "Sign in to Novieri RMM and open Platform status for detail. You will be told when it "
     "recovers.": (
-        "Inicia sesión en Toeshee y abre Estado de la plataforma para ver el detalle. Se te "
+        "Inicia sesión en Novieri RMM y abre Estado de la plataforma para ver el detalle. Se te "
         "avisará cuando se recupere."
     ),
     "The platform's own check '{name}' is healthy again.": (
@@ -3628,26 +3630,26 @@ CATALOG: dict[str, str] = {
     "Renews: {renews_at} (in {days} days)": "Se renueva: {renews_at} (en {days} días)",
     "Notice deadline: {deadline} (in {days} days)": "Plazo de aviso: {deadline} (en {days} días)",
     "Auto-renews: {answer}": "Renovación automática: {answer}",
-    "[Toeshee] Cancellation notice deadline for {name}: {deadline}": (
-        "[Toeshee] Plazo de aviso de cancelación de {name}: {deadline}"
+    "[Novieri RMM] Cancellation notice deadline for {name}: {deadline}": (
+        "[Novieri RMM] Plazo de aviso de cancelación de {name}: {deadline}"
     ),
     "The last day to give notice before this subscription renews is coming up.": (
         "Se acerca el último día para dar aviso antes de que se renueve esta suscripción."
     ),
     "After the notice deadline the renewal can no longer be cancelled or renegotiated. "
-    "Sign in to Toeshee to review it.": (
+    "Sign in to Novieri RMM to review it.": (
         "Pasado el plazo de aviso, la renovación ya no se puede cancelar ni renegociar. Inicia "
-        "sesión en Toeshee para revisarla."
+        "sesión en Novieri RMM para revisarla."
     ),
-    "[Toeshee] Subscription renewal: {name} on {renews_at}": (
-        "[Toeshee] Renovación de suscripción: {name} el {renews_at}"
+    "[Novieri RMM] Subscription renewal: {name} on {renews_at}": (
+        "[Novieri RMM] Renovación de suscripción: {name} el {renews_at}"
     ),
     "This subscription renews soon.": "Esta suscripción se renueva pronto.",
-    "Sign in to Toeshee to review it or record the renewal.": (
-        "Inicia sesión en Toeshee para revisarla o registrar la renovación."
+    "Sign in to Novieri RMM to review it or record the renewal.": (
+        "Inicia sesión en Novieri RMM para revisarla o registrar la renovación."
     ),
-    "[Toeshee] New computer waiting for review: {name}": (
-        "[Toeshee] Equipo nuevo pendiente de revisión: {name}"
+    "[Novieri RMM] New computer waiting for review: {name}": (
+        "[Novieri RMM] Equipo nuevo pendiente de revisión: {name}"
     ),
     "A computer joined through the install link and is waiting for review.": (
         "Un equipo se unió mediante el enlace de instalación y está pendiente de revisión."
@@ -3661,8 +3663,8 @@ CATALOG: dict[str, str] = {
         "Hasta que alguien lo apruebe, solo recibe inventario, monitorización de salud y "
         "renovación de certificados. Apruébalo o recházalo en la página Dispositivos."
     ),
-    "[Toeshee] Rejected computer still has the agent: {name}": (
-        "[Toeshee] Un equipo rechazado sigue teniendo el agente: {name}"
+    "[Novieri RMM] Rejected computer still has the agent: {name}": (
+        "[Novieri RMM] Un equipo rechazado sigue teniendo el agente: {name}"
     ),
     "A computer that joined through the install link was rejected. {why}": (
         "Se rechazó un equipo que se unió mediante el enlace de instalación. {why}"
@@ -3681,8 +3683,8 @@ CATALOG: dict[str, str] = {
         "agente siga instalado. Desinstálalo a mano en el equipo y luego pulsa «Ya lo quité» "
         "junto a él, en Pendientes de revisión de la página Dispositivos."
     ),
-    "[Toeshee] Push install finished: {prefix}": (
-        "[Toeshee] Instalación remota terminada: {prefix}"
+    "[Novieri RMM] Push install finished: {prefix}": (
+        "[Novieri RMM] Instalación remota terminada: {prefix}"
     ),
     "A push install run someone confirmed has finished.": (
         "Ha terminado una ejecución de instalación remota que alguien confirmó."
@@ -3696,7 +3698,9 @@ CATALOG: dict[str, str] = {
         "Abre Dispositivos y luego Ejecuciones de instalación remota para ver qué pasó en cada "
         "equipo."
     ),
-    "[Toeshee] Push install stopped: {prefix}": "[Toeshee] Instalación remota detenida: {prefix}",
+    "[Novieri RMM] Push install stopped: {prefix}": (
+        "[Novieri RMM] Instalación remota detenida: {prefix}"
+    ),
     "A push install run was stopped to protect its credential from lockout.": (
         "Se detuvo una ejecución de instalación remota para proteger su credencial de un bloqueo."
     ),
@@ -3808,7 +3812,7 @@ CATALOG: dict[str, str] = {
     "{link_type} {link_id} belongs to another client": "{link_type} {link_id} es de otro cliente",
     "Their sign-in is turned off": "Su inicio de sesión está desactivado",
     "Every computer is in a group": "Todos los equipos están en un grupo",
-    "Nothing installed through ITMS yet": "Todavía no se ha instalado nada con ITMS",
+    "Nothing installed through Novieri RMM yet": "Todavía no se ha instalado nada con Novieri RMM",
     "Holds no subscriptions": "No tiene ninguna suscripción",
     "Holds no licences": "No tiene ninguna licencia",
     "No computer of theirs is in use": "Ningún equipo suyo está en uso",
@@ -3910,24 +3914,30 @@ CATALOG: dict[str, str] = {
     "Close their open tickets": "Cierra sus tickets abiertos",
     "Resolve or close anything they raised.": "Resuelve o cierra todo lo que crearon.",
     # --- review fixes (Task 16) ---
-    "[Toeshee] Ticket {line}: approval approved": "[Toeshee] Ticket {line}: aprobación aprobada",
+    "[Novieri RMM] Ticket {line}: approval approved": (
+        "[Novieri RMM] Ticket {line}: aprobación aprobada"
+    ),
     "Ticket {line} was approved.": "El ticket {line} fue aprobado.",
-    "[Toeshee] Ticket {line}: approval rejected": "[Toeshee] Ticket {line}: aprobación rechazada",
+    "[Novieri RMM] Ticket {line}: approval rejected": (
+        "[Novieri RMM] Ticket {line}: aprobación rechazada"
+    ),
     "Ticket {line} was rejected.": "El ticket {line} fue rechazado.",
-    "[Toeshee] Ticket {line}: approval decided": "[Toeshee] Ticket {line}: aprobación decidida",
+    "[Novieri RMM] Ticket {line}: approval decided": (
+        "[Novieri RMM] Ticket {line}: aprobación decidida"
+    ),
     "Ticket {line} was decided.": "El ticket {line} fue decidido.",
-    "[Toeshee] Health alert cleared: {line}": "[Toeshee] Alerta de salud cerrada: {line}",
+    "[Novieri RMM] Health alert cleared: {line}": "[Novieri RMM] Alerta de salud cerrada: {line}",
     "The health alert for {line} has cleared.": "La alerta de salud de {line} se ha cerrado.",
     "Cleared: {cleared_at} ({reason})": "Cerrada: {cleared_at} ({reason})",
     "(unknown probe)": "(sonda desconocida)",
-    "[Toeshee] Platform recovered: {name} is ok": (
-        "[Toeshee] Plataforma recuperada: {name} vuelve a estar en buen estado"
+    "[Novieri RMM] Platform recovered: {name} is ok": (
+        "[Novieri RMM] Plataforma recuperada: {name} vuelve a estar en buen estado"
     ),
-    "Sign in to Toeshee to review it.": "Inicia sesión en Toeshee para ver el detalle.",
+    "Sign in to Novieri RMM to review it.": "Inicia sesión en Novieri RMM para ver el detalle.",
     "An agent reporting outside the scope its job was signed for is either faulty or "
-    "controlled by someone else. Sign in to Toeshee to review it.": (
+    "controlled by someone else. Sign in to Novieri RMM to review it.": (
         "Un agente que informa fuera del ámbito para el que se firmó su tarea está averiado o "
-        "lo controla otra persona. Inicia sesión en Toeshee para ver el detalle."
+        "lo controla otra persona. Inicia sesión en Novieri RMM para ver el detalle."
     ),
     "The platform's own check '{name}' has reported {status} for {samples} consecutive "
     "samples.": (

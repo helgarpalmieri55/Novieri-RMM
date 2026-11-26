@@ -19,26 +19,33 @@
 // re-authenticated, verified flow this console does not offer, and the note
 // under the title says to ask an administrator.
 //
-// THE PAGE IS v3's `profile` SCREEN: the head, then one untitled panel of
-// fields with the primary Save under them, then the sign-in panel with its
-// one link -- a panel of its own, so the Save above it is unambiguously the
-// profile's.
+// THE PAGE IS THE KIT'S FORM PATTERN (redesign plan, Task 12, 7.2; Receta
+// FO; Atera's "My profile"): the head with no back link (it is reached from
+// the account menu, and the crumb says "Your account"), one section of
+// fields, the console's one save bar (decision D22: "Unsaved changes ·
+// Discard · Save", drawn only with a change), then the sign-in panel with its
+// one link. Leaving with a change asks first.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { describeSubmitError } from "../../components/form";
-import type { Problem } from "../../components/form";
+import { describeSubmitError, Form } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useLanguage, useT } from "../../i18n/context";
 import { resolveLanguage } from "../../i18n/resolve";
-import { KIND_ICON, PageHead, Panel } from "../../shell/components";
+import {
+  FormPage,
+  FormSection,
+  KIND_ICON,
+  SaveBar,
+  UnsavedGuard,
+  useDraft,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useMe, useUpdateMeMutation } from "../settings/api";
-import { SaveBar } from "../settings/SaveBar";
-import { isDirty } from "../settings/settingsState";
 import { FOLDING_FORM_GRID } from "../settings/formGrid";
 import type { MeProfileUpdate } from "../settings/types";
+import { useRecordTitle } from "../../shell/title";
 
 type ProfileForm = {
   display_name: string;
@@ -51,6 +58,10 @@ export function ProfilePage() {
   const me = useMe();
   const update = useUpdateMeMutation();
   const t = useT();
+  // Reached from the account menu, under no rail entry: the shell's half of
+  // the tab is the product alone, so the page names itself, as its h1 does
+  // (general ruling 1b): "<this page> · Novieri RMM".
+  useRecordTitle(t("profile.page.title"));
   const { language, setLanguage } = useLanguage();
   const [languagePicked, setLanguagePicked] = useState(false);
 
@@ -63,47 +74,23 @@ export function ProfilePage() {
     timezone: me.data?.timezone ?? "",
     locale: me.data?.locale ?? "",
   };
-  const [form, setForm] = useState<ProfileForm>(seed);
-
-  // Re-seed only when the SERVER'S values change — after a save, after a
-  // refetch. Typing is never overwritten by a background refetch of the same
-  // values. Same shape as the Organization tab, for the same reason.
-  const seedSignature = JSON.stringify(seed);
-  useEffect(() => {
-    setForm(JSON.parse(seedSignature) as ProfileForm);
-    setLanguagePicked(false);
-    setRefusal([]);
-  }, [seedSignature]);
+  // THE KIT'S DRAFT: what the server holds is the saved state; a background
+  // refetch never overwrites typing, and a save's answer becomes the new
+  // saved state (`markSent`).
+  const { draft, setDraft, dirty, discard, markSent } = useDraft<ProfileForm>(me.data ? seed : undefined);
+  const form = draft ?? seed;
+  const setForm = (change: (current: ProfileForm) => ProfileForm) => setDraft(change(form));
 
   // What the select shows: the account's saved language if it is one the
   // console supports, otherwise the language the console is showing now.
   const shownLanguage = resolveLanguage(form.locale, null, language);
 
-  const dirty = isDirty(form, seed);
   const editable = me.data != null;
 
-  /**
-   * A save this page refused, and the reason.
-   *
-   * **ONE CONTROL, ONE BEHAVIOUR, ACROSS THE GROUP.** This page and /settings
-   * draw the same `SaveBar`, and they behaved differently: /settings passes
-   * `requireDirty={false}`, so its "Save changes" is a live accent button that
-   * refuses out loud; here the default left a clean form showing a pale
-   * disabled chip carrying no on-screen reason it could not be pressed. This
-   * page now takes the click and says why, which is rule 1's own preference
-   * where the refusal is the console's rather than the server's.
-   */
-  const [refusal, setRefusal] = useState<Problem[]>([]);
-
   function submit() {
-    // A save with nothing to save writes an audit entry for a change that is
-    // not one, so it is still refused -- out loud, in the same words the
-    // Organization tab uses.
-    if (!dirty) {
-      setRefusal([{ name: "display_name", message: t("profile.page.noChanges") }]);
-      return;
-    }
-    setRefusal([]);
+    // Enter in an untouched form writes nothing (no change, no audit entry):
+    // with the kit's bar there is no Save to press until something changed.
+    if (!dirty) return;
     // `""` is a CLEARED field, not an empty string to store: the columns are
     // nullable and "no phone number" is null.
     const blankToNull = (value: string): string | null =>
@@ -120,34 +107,39 @@ export function ProfilePage() {
     // change the language. The picked one is applied to the console once the
     // server has accepted it, without a second save: this PATCH is the save.
     if (languagePicked) body.locale = shownLanguage;
+    const picked = languagePicked;
+    markSent(form);
     update.mutate(body, {
       onSuccess: () => {
-        if (languagePicked) setLanguage(shownLanguage, { persist: false });
+        if (picked) setLanguage(shownLanguage, { persist: false });
+        setLanguagePicked(false);
       },
+      onError: () => markSent(null),
     });
   }
 
   return (
-    <>
-      <PageHead
-        title={t("profile.page.title")}
-        description={t("profile.page.description")}
-      />
+    // The kit's form page with NO back link (batch 3, B3-2: `back` optional):
+    // this page is reached from the account menu, not from a list.
+    <FormPage title={t("profile.page.title")} description={t("profile.page.description")}>
+      <UnsavedGuard dirty={dirty} />
 
-      <Panel>
-        {me.isLoading ? (
-          <p className="note">{t("profile.page.loading")}</p>
-        ) : me.error ? (
-          // The server's own reason (cycle 4), announced: "That did not load"
-          // is the same sentence for a 403, a 404 on an API that predates
-          // `GET /me`, and a proxy 503 — three different things to do next.
-          <p role="alert" className="notice red">
-            <Icon name={KIND_ICON.crit} size={16} />
-            <span>{describeSubmitError(me.error)}</span>
-          </p>
-        ) : (
-          <>
-            <p className="note" style={{ marginBottom: 14 }}>
+      {me.isLoading ? (
+        <p className="note">{t("profile.page.loading")}</p>
+      ) : me.error ? (
+        // The server's own reason (cycle 4), announced: "That did not load"
+        // is the same sentence for a 403, a 404 on an API that predates
+        // `GET /me`, and a proxy 503 — three different things to do next.
+        <p role="alert" className="notice red">
+          <Icon name={KIND_ICON.crit} size={16} />
+          <span>{describeSubmitError(me.error)}</span>
+        </p>
+      ) : (
+        // A REAL `<form>`: Enter in a field saves, through the bar's Save.
+        <Form onSubmit={submit}>
+          <FormSection title={t("profile.page.details")} icon="user">
+            {/* Notes at the notices' measure (76ch), never the section's full width. */}
+            <p className="note" style={{ marginBottom: 14, maxWidth: "76ch" }}>
               {t("profile.page.signedInAs", { email: me.data?.email ?? "" })}
             </p>
 
@@ -157,9 +149,7 @@ export function ProfilePage() {
                   className={inputClass}
                   value={form.display_name}
                   disabled={!editable}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, display_name: event.target.value }))
-                  }
+                  onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
                 />
               </Field>
               <Field label={t("profile.page.phone")}>
@@ -167,9 +157,7 @@ export function ProfilePage() {
                   className={inputClass}
                   value={form.phone}
                   disabled={!editable}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, phone: event.target.value }))
-                  }
+                  onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
                 />
               </Field>
               <Field label={t("profile.page.timezone")}>
@@ -178,9 +166,7 @@ export function ProfilePage() {
                   value={form.timezone}
                   disabled={!editable}
                   placeholder={t("profile.page.timezonePlaceholder")}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, timezone: event.target.value }))
-                  }
+                  onChange={(event) => setForm((current) => ({ ...current, timezone: event.target.value }))}
                 />
               </Field>
               <Field label={t("common.language.label")}>
@@ -199,30 +185,37 @@ export function ProfilePage() {
               </Field>
             </div>
 
-            <p className="note" style={{ marginTop: 10 }}>
+            <p className="note" style={{ marginTop: 10, maxWidth: "76ch" }}>
               {t("profile.page.smsNote")}
             </p>
+          </FormSection>
 
-            <SaveBar
-              canEdit={editable}
-              dirty={dirty}
-              // The same bar, the same way round, as the sibling route in this
-              // group -- see `refusal` above.
-              requireDirty={false}
-              // Stale the moment anything is typed: the refusal says there is
-              // nothing to save, and there now is.
-              problems={dirty ? [] : refusal}
-              pending={update.isPending}
-              error={update.error}
-              saved={update.isSuccess && !dirty}
-              onSave={submit}
-            />
-          </>
-        )}
-      </Panel>
+          {/* THE ONE BAR: "Saved." only after the server's 2xx, never
+              optimistic; the language is applied with the save, not before. */}
+          <SaveBar
+            submit
+            dirty={dirty}
+            saving={update.isPending}
+            error={update.error}
+            saved={update.isSuccess && !dirty}
+            onDiscard={() => {
+              discard();
+              setLanguagePicked(false);
+              update.reset();
+            }}
+          />
+        </Form>
+      )}
 
-      <Panel title={t("profile.security.title")} subtitle={t("profile.security.subtitle")}>
-        <p className="note">{t("profile.security.note")}</p>
+      {/* The same frame as the details above (critique, P2): a section, not a
+          second card style on one page. */}
+      <FormSection title={t("profile.security.title")} icon="shield-lock">
+        <p className="note" style={{ marginBottom: 6, maxWidth: "76ch" }}>
+          {t("profile.security.subtitle")}
+        </p>
+        <p className="note" style={{ maxWidth: "76ch" }}>
+          {t("profile.security.note")}
+        </p>
         <div className="form-actions">
           {/* A LINK, BECAUSE IT GOES SOMEWHERE: it opens a page of this
               console and changes nothing by itself. Drawn as the kit's button
@@ -232,7 +225,7 @@ export function ProfilePage() {
             <span>{t("profile.security.open")}</span>
           </Link>
         </div>
-      </Panel>
-    </>
+      </FormSection>
+    </FormPage>
   );
 }

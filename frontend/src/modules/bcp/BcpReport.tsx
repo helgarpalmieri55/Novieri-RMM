@@ -18,8 +18,9 @@ import {
   testTypeLabel,
 } from "./bcpState";
 import { usePeriodReport, useTestReport, useUserTimezone } from "./api";
-import { PageHead, Panel, StatsGrid, StatusPill } from "../../shell/components";
+import { Btn, PageHead, Panel, StatsGrid, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useRecordTitle } from "../../shell/title";
 import { Facts, Tile } from "../../shell/viz";
 
 // Per-test SOC 2 evidence report (backend/app/modules/bcp/api.py's
@@ -28,10 +29,21 @@ import { Facts, Tile } from "../../shell/viz";
 // audit event server-side — this page is the explicit "export" action, never
 // auto-fetched from a passive list/detail view (see reporting.py's
 // module docstring).
+//
+// A PRINTABLE REPORT (redesign plan, Task 9, 4.5; Receta O): the head keeps
+// its way back and gains Print, which is the browser's own print of this page
+// -- what printing it did before, now one button away. Shown once there is a
+// report to print.
 export function BcpReport() {
   const { testId } = useParams<{ testId: string }>();
   if (testId) return <TestReportView testId={testId} />;
   return <PeriodReportView />;
+}
+
+/** The browser's print of the page, as Ctrl+P does it. */
+function PrintButton() {
+  const t = useT();
+  return <Btn label={t("bcp.report.print")} icon="printer" variant="primary" onClick={() => window.print()} />;
 }
 
 /** yes / no / n/a, as words: a recovery objective that was not measured is not a miss. */
@@ -42,6 +54,9 @@ function met(value: boolean | null): string {
 
 function TestReportView({ testId }: { testId: string }) {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("bcp.report.testTitle"));
   const report = useTestReport(testId);
   const zone = useUserTimezone();
   const test = report.data?.test ?? null;
@@ -52,10 +67,13 @@ function TestReportView({ testId }: { testId: string }) {
         title={t("bcp.report.testTitle")}
         description={t("bcp.report.testDescription")}
         actions={
-          <Link className="btn" to={`/bcp/tests/${testId}`}>
-            <Icon name="chevron-left" size={14} />
-            {t("bcp.report.back")}
-          </Link>
+          <>
+            <Link className="btn" to={`/bcp/tests/${testId}`}>
+              <Icon name="chevron-left" size={14} />
+              {t("bcp.report.back")}
+            </Link>
+            {report.data ? <PrintButton /> : null}
+          </>
         }
       />
 
@@ -181,6 +199,9 @@ function TestReportView({ testId }: { testId: string }) {
 
 function PeriodReportView() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("bcp.report.periodTitle"));
   const zone = useUserTimezone();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -203,10 +224,13 @@ function PeriodReportView() {
         title={t("bcp.report.periodTitle")}
         description={t("bcp.report.periodDescription")}
         actions={
-          <Link className="btn" to="/bcp">
-            <Icon name="shield-check" size={14} />
-            {t("bcp.report.allPlans")}
-          </Link>
+          <>
+            <Link className="btn" to="/bcp">
+              <Icon name="shield-check" size={14} />
+              {t("bcp.report.allPlans")}
+            </Link>
+            {report.data ? <PrintButton /> : null}
+          </>
         }
       />
 

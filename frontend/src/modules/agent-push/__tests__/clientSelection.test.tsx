@@ -47,11 +47,11 @@ function stubApi(overrides: Partial<Record<keyof ApiClient, unknown>> = {}) {
   return api;
 }
 
-function renderIt(node: React.ReactNode) {
+function renderIt(node: React.ReactNode, path = "/agent-push/authorizations") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/agent-push/authorizations"]}>{node}</MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -66,7 +66,8 @@ describe("a push authorization", () => {
     selectClient("c-acme");
     const api = stubApi();
     const user = userEvent.setup();
-    renderIt(<PushAuthorizationsPage />);
+    // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
+    renderIt(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     await user.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     expect(screen.queryByLabelText("Client")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Authorize" }));
@@ -80,7 +81,8 @@ describe("a push authorization", () => {
   it("with every client chosen, offers only the clients where the person may open a prefix", async () => {
     selectClient(null);
     stubApi();
-    renderIt(<PushAuthorizationsPage />);
+    // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
+    renderIt(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByLabelText("Client");
     // Beta holds `agent.push.run` but not `agent.push.scope.manage`; Unassigned is never offered.
     expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
@@ -94,7 +96,8 @@ describe("a push authorization", () => {
     selectClient(null);
     const api = stubApi();
     const user = userEvent.setup();
-    renderIt(<PushAuthorizationsPage />);
+    // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
+    renderIt(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     await user.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
     await user.click(screen.getByRole("button", { name: "Authorize" }));
@@ -168,7 +171,8 @@ describe("the grant form's client, through the shared hook", () => {
     selectClient(null);
     const api = stubApi();
     const user = userEvent.setup();
-    renderIt(<PushAuthorizationsPage />);
+    // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
+    renderIt(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     await user.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     await user.click(screen.getByRole("button", { name: "Authorize" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
@@ -178,7 +182,8 @@ describe("the grant form's client, through the shared hook", () => {
   it("with Unassigned chosen at the top, says so and offers no Authorize", async () => {
     selectClient(UNASSIGNED.id);
     stubApi();
-    renderIt(<PushAuthorizationsPage />);
+    // The grant form opens in a dialog from `?new=` (redesign Task 6, 1.9).
+    renderIt(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     expect(
       await screen.findByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first."),
     ).toBeInTheDocument();

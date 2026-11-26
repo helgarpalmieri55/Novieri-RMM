@@ -6,7 +6,6 @@ export const credentials: Shape<typeof en> = {
     title: "Credenciales",
     description: "Contraseñas y claves para sesiones remotas y aprovisionamiento, almacenadas cifradas.",
     newCredential: "Nueva credencial",
-    listHeading: "Lista de credenciales",
   },
   tabs: {
     all: "Todas las credenciales",
@@ -21,6 +20,10 @@ export const credentials: Shape<typeof en> = {
     neverUsedZeroEmpty: "Aún no hay ninguna credencial guardada",
     neverUsedZeroUsed: "Todas las credenciales se han usado",
     neverUsedFoot: "Guardadas y sin descifrar desde entonces",
+    // The fourth tile (redesign Task 11, 6.9): the other half of "Never checked out".
+    used: "Retiradas",
+    usedZero: "Aún no se ha retirado ninguna",
+    usedFoot: "Cada una, en el registro de auditoría",
     typesInUse: "Tipos en uso",
     typesInUseZero: "Aún no hay ninguna credencial guardada",
     typesAvailable: { one: "{count} tipo disponible", other: "{count} tipos disponibles" },
@@ -28,9 +31,10 @@ export const credentials: Shape<typeof en> = {
   list: {
     title: "Perfiles de credenciales",
     subtitle: "Solo nombres: en esta lista nunca se muestra ninguna contraseña ni clave.",
+    // The state chips over ?state= (redesign Task 11, 6.9).
+    stateLabel: "Estado",
     emptyNone: "No hay credenciales guardadas.",
     client: "Cliente",
-    emptyView: "Ninguna credencial coincide con esta vista.",
     name: "Nombre",
     state: "Estado",
     lastUsed: "Último uso",
@@ -103,11 +107,11 @@ export const credentials: Shape<typeof en> = {
       noun: "cuenta de unión a dominio",
     },
     push_install: {
-      description: "Una cuenta dedicada que se usa SOLO para instalar el agente en equipos que aún no están administrados, desde un servidor de sitio de su mismo segmento. Dale los permisos mínimos necesarios para instalar un servicio, no los de administrador de dominio. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
+      description: "Una cuenta dedicada a un único uso: instalar el agente en equipos que aún no están administrados, desde un servidor de sitio de su mismo segmento. Dale los permisos mínimos necesarios para instalar un servicio, no los de administrador de dominio. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
       noun: "cuenta de instalación remota",
     },
     windows_domain: {
-      description: "Una cuenta de dominio que se usa para instalar el agente en equipos Windows mediante WinRM, desde un servidor de sitio de su mismo segmento. La autenticación es solo Kerberos. Dale solo los permisos justos para instalar un servicio, NO los de administrador de dominio: un administrador de dominio aquí significa que un servidor de sitio comprometido durante una instalación remota es un dominio comprometido. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
+      description: "Una cuenta de dominio que se usa para instalar el agente en equipos Windows mediante WinRM, desde un servidor de sitio de su mismo segmento. La autenticación es solo Kerberos. Dale solo los permisos justos para instalar un servicio. Nunca le des los de administrador de dominio: un administrador de dominio aquí significa que un servidor de sitio comprometido durante una instalación remota es un dominio comprometido. No se puede usar para el control remoto ni para el aprovisionamiento, y se rechaza si no está vinculada a un prefijo en Instalación remota → Ámbitos de credenciales.",
       noun: "cuenta de dominio de Windows",
     },
   },

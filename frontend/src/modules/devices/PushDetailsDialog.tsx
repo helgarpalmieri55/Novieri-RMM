@@ -41,6 +41,12 @@ export function PushDetailsDialog({
   const queryClient = useQueryClient();
   const [details, setDetails] = useState<PushDetails>(() => initial(device));
 
+  // Whether the form differs from the device as it started: with no
+  // difference there is nothing to send (coordinator ruling 13).
+  const started = initial(device);
+  const changed =
+    details.fqdn.trim() !== started.fqdn || details.os !== started.os || details.arch !== started.arch;
+
   const save = useMutation({
     mutationFn: () => {
       const was = initial(device);
@@ -65,7 +71,17 @@ export function PushDetailsDialog({
 
   return (
     <Dialog open={open} onClose={close} title={t("devices.pushDetails.title")}>
-      <Form onSubmit={() => save.mutate()}>
+      <Form
+        onSubmit={() => {
+          // NO WRITE WITHOUT A CHANGE (coordinator ruling 13): Save on details
+          // nobody changed closes and sends nothing.
+          if (!changed) {
+            close();
+            return;
+          }
+          save.mutate();
+        }}
+      >
         <p className="note mb-3">
           {t("devices.pushDetails.note")}
         </p>

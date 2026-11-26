@@ -563,6 +563,8 @@ describe("notification — failures that reach a person", () => {
     // still measures what happens when that mutation is refused.
     const panel = channelsPanel(await screen.findAllByRole("row", { name: /Ops Mattermost/ }));
     await user.click(within(panel).getByRole("switch"));
+    // The switch is a setting saved by the page's one save bar now (Task 7, 2.8).
+    await user.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/The channel was not changed/);
@@ -1287,7 +1289,8 @@ describe("notification stat tiles", () => {
 
     await screen.findAllByText("Ops Mattermost");
     const allowlist = tile("Allowlist entries");
-    expect(allowlist.querySelector(".stat-value")?.textContent).toBe("—");
+    // The kit's absent mark (StatCard pending; ruling 10a), not an em dash.
+    expect(allowlist.querySelector(".stat-value")?.textContent).toBe("n/a");
     expect(allowlist).not.toHaveTextContent("nothing allowlisted");
   });
 });

@@ -9,20 +9,20 @@ import (
 )
 
 // The MSI path takes the same parent-first ownership path as the link
-// installer (2026-09-29): with %ProgramData%\ITSuite refused, nothing under it
+// installer (2026-09-29): with %ProgramData%\NovieriRMM refused, nothing under it
 // is created or touched and no token file is written. Runs in the
 // agent-windows CI job, which is elevated: applyInPlace connects to the real
-// Service Control Manager, finds no its-agent service on the runner, and
+// Service Control Manager, finds no novieri-agent service on the runner, and
 // stops at the faked directory refusal.
 func TestTheMsiPathSecuresTheDataDirectorysParentFirst(t *testing.T) {
-	calls, _ := fakeDirs(t, `C:\ProgramData\ITSuite`)
+	calls, _ := fakeDirs(t, `C:\ProgramData\NovieriRMM`)
 	if err := applyInPlace(dirsPlan, msiCode); err == nil {
 		t.Fatal("applyInPlace went on after the parent was refused")
 	}
 	want := []dirCall{
-		{"check", `C:\Program Files\ITSuite`, true},
-		{"mkdir", `C:\Program Files\ITSuite`, false},
-		{"secure", `C:\ProgramData\ITSuite`, true},
+		{"check", `C:\Program Files\NovieriRMM`, true},
+		{"mkdir", `C:\Program Files\NovieriRMM`, false},
+		{"secure", `C:\ProgramData\NovieriRMM`, true},
 	}
 	if !reflect.DeepEqual(*calls, want) {
 		t.Fatalf("directory operations = %+v\nwant %+v", *calls, want)

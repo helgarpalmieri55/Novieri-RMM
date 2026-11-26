@@ -34,7 +34,7 @@ const notFound = (what: string) => new ApiError(404, JSON.stringify({ detail: `$
 const channels: ChannelOut[] = [
   { id: "ch-mattermost", kind: "webhook", name: "Ops Mattermost", config: { url: "https://mattermost.lan:8065/hooks/noc-alerts" }, active: true, has_credential: true, created_at: ago(200 * DAY) },
   { id: "ch-smtp", kind: "email", name: "Helpdesk mail relay", config: { host: "smtp-relay.lan", port: 587, from_address: "helpdesk@toeshee.example", use_tls: true }, active: true, has_credential: true, created_at: ago(200 * DAY) },
-  { id: "ch-siem", kind: "webhook", name: "SIEM collector", config: { url: "https://siem.toeshee.example/ingest/itms" }, active: false, has_credential: false, created_at: ago(40 * DAY) },
+  { id: "ch-siem", kind: "webhook", name: "SIEM collector", config: { url: "https://siem.toeshee.example/ingest/novieri" }, active: false, has_credential: false, created_at: ago(40 * DAY) },
 ];
 
 const listNotificationChannels: FixtureMap["listNotificationChannels"] = () => [...channels];

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# HOST readiness for an ITMS deploy. Run this on the target server BEFORE
+# HOST readiness for a Novieri RMM deploy. Run this on the target server BEFORE
 # anything else, and send the whole output back.
 #
-# `preflight.sh` checks ITMS's own configuration. This checks the machine it is
+# `preflight.sh` checks Novieri RMM's own configuration. This checks the machine it is
 # landing on -- which matters far more when the host already runs something
 # else, because the thing most likely to stop this stack dead is a port another
 # platform already holds, and that is invisible from the repository.
@@ -20,7 +20,7 @@ set -uo pipefail
 say() { printf '\n=== %s ===\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-echo "ITMS host check -- $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+echo "Novieri RMM host check -- $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 echo "Run as: $(id -un)$([ "$(id -u)" -eq 0 ] || echo '  (not root -- socket owners may be hidden)')"
 
 say "1. What this machine is"
@@ -30,14 +30,14 @@ say "1. What this machine is"
 cat /etc/os-release 2>/dev/null | grep -E '^(NAME|VERSION|VERSION_ID|ID|ID_LIKE)=' || echo "no /etc/os-release"
 echo "kernel: $(uname -r)   arch: $(uname -m)"
 
-say "2. Ports ITMS needs: 443 and 8443"
+say "2. Ports Novieri RMM needs: 443 and 8443"
 # The ONLY published ports in docker-compose.yml, both on traefik. A conflict
 # here means `docker compose up` fails with "address already in use" and
 # nothing starts. 8443 is TCP passthrough for the agent gateway's mTLS, so it
 # cannot be shared with an HTTP reverse proxy -- it needs its own port or IP.
 # WHAT THE LISTENER IS BOUND TO IS THE WHOLE QUESTION, not merely whether the
 # port is busy. A container published as `443:443` binds 0.0.0.0:443 and holds
-# the port on EVERY interface, so giving ITMS its own IP does NOT free it --
+# the port on EVERY interface, so giving Novieri RMM its own IP does NOT free it --
 # the bind still fails with EADDRINUSE. Only a listener already constrained to
 # one address (`10.0.0.5:443`) leaves the port available on another.
 if have ss; then
@@ -45,10 +45,10 @@ if have ss; then
   ss -lntp 2>/dev/null | awk 'NR==1 || $4 ~ /:(443|8443)$/'
   echo
   echo "Read the Local Address column:"
-  echo "  0.0.0.0:443 or *:443  -> held on ALL interfaces. ITMS cannot bind 443"
+  echo "  0.0.0.0:443 or *:443  -> held on ALL interfaces. Novieri RMM cannot bind 443"
   echo "                           anywhere until that listener is constrained"
   echo "                           to its own IP."
-  echo "  1.2.3.4:443           -> held on ONE address. ITMS can use another."
+  echo "  1.2.3.4:443           -> held on ONE address. Novieri RMM can use another."
   echo
   echo "--- every listening address, for context ---"
   ss -lntp 2>/dev/null | awk 'NR>1 {print $4}' | sort -u | head -30
@@ -99,10 +99,10 @@ if have docker; then
   docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>/dev/null || echo "(cannot list)"
   echo "--- who else mounts the Docker socket (read this carefully) ---"
   # A container with the socket can read EVERY container's env on this host.
-  # ITMS's env holds the database passwords, the OpenBao token and the S3
-  # secret, and ITMS is domain-admin-equivalent over the fleet. If the other
+  # Novieri RMM's env holds the database passwords, the OpenBao token and the S3
+  # secret, and Novieri RMM is domain-admin-equivalent over the fleet. If the other
   # platform has a socket-mounting component, co-location makes that component
-  # equivalent to ITMS.
+  # equivalent to Novieri RMM.
   for c in $(docker ps -q 2>/dev/null); do
     if docker inspect "$c" --format '{{range .Mounts}}{{.Source}} {{end}}' 2>/dev/null | grep -q docker.sock; then
       docker inspect "$c" --format '  {{.Name}}  ({{.Config.Image}})' 2>/dev/null
@@ -117,7 +117,7 @@ else
 fi
 
 say "5. Resources"
-# ITMS brings up postgres, redis, minio, openbao, traefik, the console, the
+# Novieri RMM brings up postgres, redis, minio, openbao, traefik, the console, the
 # api, a worker and the gateway -- on top of whatever is already here.
 free -h 2>/dev/null | head -2
 echo "--- disk ---"
@@ -126,13 +126,13 @@ echo "--- cpu ---"
 nproc 2>/dev/null | sed 's/^/cores: /'
 
 say "6. Network interfaces"
-# Giving ITMS its own IP is the cleanest fix for a 443 conflict: both
+# Giving Novieri RMM its own IP is the cleanest fix for a 443 conflict: both
 # platforms keep standard ports and agents keep pointing at :8443.
 if have ip; then
   ip -brief address 2>/dev/null
   echo "--- routes (ALL of them, not just the default) ---"
   # ASYMMETRIC ROUTING is the failure that appears after everything looks
-  # correct. If ITMS answers on a second NIC whose subnet does not contain the
+  # correct. If Novieri RMM answers on a second NIC whose subnet does not contain the
   # managed endpoints, replies leave via the DEFAULT route on the other NIC
   # with the wrong source address, and a stateful firewall drops them. The
   # symptom is an agent that connects intermittently, or completes a TLS
@@ -141,7 +141,7 @@ if have ip; then
   echo "--- policy routing rules (non-default ones mean source routing is in use) ---"
   ip rule show 2>/dev/null
   echo
-  echo "If agents will reach ITMS on a NIC that is NOT the default route's, check"
+  echo "If agents will reach Novieri RMM on a NIC that is NOT the default route's, check"
   echo "their networks are on-link for that NIC or that a route/rule sends the"
   echo "replies back out of it."
 else

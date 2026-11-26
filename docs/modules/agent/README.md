@@ -26,7 +26,7 @@ only thing that crosses is `docs/kernel/wire-protocol/*.schema.json`.
 ## Build
 
 ```sh
-scripts/build_agent.sh          # -> agent/dist/its-agent, this platform
+scripts/build_agent.sh          # -> agent/dist/novieri-agent, this platform
 ```
 
 For release artifacts — six platforms, stamped, trimmed, statically linked:
@@ -63,18 +63,18 @@ install→enroll→remove→purge `.deb` lifecycle.
 On a development box, against a control plane you are running locally:
 
 ```sh
-ITS_AGENT_DATA_DIR=/tmp/its-agent-data \
+ITS_AGENT_DATA_DIR=/tmp/novieri-agent-data \
 ITS_AGENT_ENROLL_URL=https://localhost:8443 \
 ITS_AGENT_ENROLL_TOKEN=<token> \
-  agent/dist/its-agent
+  agent/dist/novieri-agent
 ```
 
 On a real endpoint, use the packaging — it is the path that handles the
 enrollment token correctly:
 
 ```sh
-sudo apt install ./its-agent_0.1.0_amd64.deb
-sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://its.example.com
+sudo apt install ./novieri-agent_0.1.0_amd64.deb
+sudo ITS_AGENT_ENROLL_TOKEN=<token> novieri-agent-enroll --url https://its.example.com
 ```
 
 **The token never goes in argv.** Every installer here refuses `--token` and

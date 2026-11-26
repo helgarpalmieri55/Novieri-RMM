@@ -140,7 +140,7 @@ class ClaimedOut(BaseModel):
     organization_slug: str = Field(
         description="Its slug -- the organization the sign-in page signs into."
     )
-    user_id: UUID = Field(description="The first administrator's ITMS user id.")
+    user_id: UUID = Field(description="The first administrator's Novieri RMM user id.")
     email: str = Field(description="The address the first administrator signs in with.")
 
 

@@ -42,6 +42,14 @@ function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTE
 
 beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
+/**
+ * The KPI tile whose label is `label`. Found among the tiles: the list's chips
+ * (redesign plan, Receta L) carry some of the same words.
+ */
+function tileLabelled(label: string): Element | null {
+  return [...document.querySelectorAll(".stat-card")].find((tile) => within(tile as HTMLElement).queryByText(label)) ?? null;
+}
+
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -130,8 +138,10 @@ describe("PlansPage", () => {
     renderWithProviders(<PlansPage />);
 
     expect(await screen.findByText("Core datacenter failover")).toBeInTheDocument();
-    // Read as a word, not as the wire's identifier (cycle 12).
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    // Read as a word, not as the wire's identifier (cycle 12). In the row: the
+    // state chips over the list say "Active" too (redesign plan, Receta L).
+    const row = screen.getByText("Core datacenter failover").closest("tr") as HTMLElement;
+    expect(within(row).getByText("Active")).toBeInTheDocument();
     expect(screen.queryByText("active")).not.toBeInTheDocument();
   });
 
@@ -608,7 +618,7 @@ describe("BCP instants are rendered in the reader's profile zone", () => {
     expect(screen.queryByText(/1\/1\/2026/)).not.toBeInTheDocument();
   });
 
-  it("renders an absent test date as an em dash, never Invalid Date", async () => {
+  it("renders an absent test date as the absent mark, never Invalid Date", async () => {
     api.getPlan = vi.fn().mockResolvedValue(PLANS[0]);
     api.listPlanTests = vi.fn().mockResolvedValue([TEST_FIXTURE]);
     mockUseApi.mockReturnValue(api as ApiClient);
@@ -622,7 +632,8 @@ describe("BCP instants are rendered in the reader's profile zone", () => {
 
     // scheduled_for is 19:00Z, which is 14:00 in New York; executed_at is null.
     expect(await screen.findByText("15 Jan 2026, 14:00")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    // NoValue's absent mark (kit requests batch 3, B3-9), no longer a dash.
+    expect(screen.getByText("n/a")).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 });
@@ -993,7 +1004,8 @@ describe("PlansPage review column", () => {
     renderWithProviders(<PlansPage />);
 
     await screen.findByText("Never reviewed");
-    const kpi = screen.getByText("Review overdue").closest(".stat-card");
+    // The tile's label (the review chip over the list says the same words).
+    const kpi = tileLabelled("Review overdue");
     expect(kpi).toHaveTextContent("1");
   });
 
@@ -1094,7 +1106,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
     renderWithProviders(<PlansPage />, ["/bcp"]);
     await screen.findByText("Core datacenter failover");
 
-    const card = (label: string) => screen.getByText(label).closest(".stat-card");
+    const card = (label: string) => tileLabelled(label);
     // One active plan of the two on record.
     expect(card("Active plans")).toHaveTextContent("of 2 on record");
     // plan1 has never been reviewed; nothing else is past its interval.
@@ -1105,7 +1117,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
   it("carries no breakdown for a figure that was never measured", async () => {
     // THE FALSIFIER for the test above: a breakdown printed unconditionally
-    // would put "across 0 plans" under a findings tile reading "—", which is
+    // would put "across 0 plans" under a findings tile reading "n/a", which is
     // the reassuring-zero defect this module already paid for once.
     mockUseApi.mockReturnValue({
       me: vi.fn().mockResolvedValue(ME),
@@ -1116,7 +1128,7 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
     await screen.findByText("Core datacenter failover");
     const findings = screen.getByText("Open findings").closest(".stat-card");
-    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("—"));
+    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("n/a"));
     expect(findings).not.toHaveTextContent("across");
   });
 
@@ -1125,7 +1137,11 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
     expect(await screen.findByText("Core datacenter failover")).toBeInTheDocument();
     expect(screen.queryByText("Retired mail failover")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Show all plans" })).toHaveAttribute("href", "/bcp");
+    // The way back to every plan is the list kit's now (redesign plan, Receta
+    // L): the pressed chip says which view this is, and All plans clears it.
+    const chips = screen.getByRole("group", { name: "Plan state" });
+    expect(within(chips).getByRole("button", { name: /^Active/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(chips).getByRole("button", { name: /All plans/ })).toBeInTheDocument();
   });
 
   it("opens the overdue tile on the overdue plans and nothing else", async () => {
@@ -1152,12 +1168,12 @@ describe("the KPI tiles are links to the rows behind them", () => {
 
     await screen.findByText("Core datacenter failover");
     const findings = screen.getByText("Open findings").closest(".stat-card");
-    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("—"));
+    await waitFor(() => expect(findings?.querySelector(".stat-value")?.textContent).toBe("n/a"));
     expect(findings).not.toHaveTextContent("No finding is open");
 
     // And the overdue tile names WHICH zero it would be showing: with no
     // status response the interval half of the question was never asked.
-    const overdue = screen.getByText("Review overdue").closest(".stat-card");
+    const overdue = tileLabelled("Review overdue");
     expect(overdue).toHaveTextContent("1");
   });
 
@@ -1715,8 +1731,8 @@ describe("PlanEditor scope and procedure references", () => {
   it("explains RTO and RPO on the form rather than assuming the reader knows", async () => {
     renderEditor();
 
-    expect(screen.getByText(/RTO — how long recovery may take/)).toBeInTheDocument();
-    expect(screen.getByText(/RPO — how much recent data may be lost/)).toBeInTheDocument();
+    expect(screen.getByText(/RTO: how long recovery may take/)).toBeInTheDocument();
+    expect(screen.getByText(/RPO: how much recent data may be lost/)).toBeInTheDocument();
   });
 
   it("warns when RTO is lower than RPO without refusing the save", async () => {

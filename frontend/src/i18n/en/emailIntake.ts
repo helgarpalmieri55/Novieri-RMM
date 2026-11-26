@@ -29,7 +29,6 @@ export const emailIntake = {
     senderCta: "Add these senders as users",
   },
   admin: {
-    title: "Email intake",
     description: "Mail to the support address becomes a ticket; replies thread back.",
     mailboxesLabel: "Mailboxes configured",
     mailboxesZero: "none configured, so no mail is polled",
@@ -176,6 +175,12 @@ export const emailIntake = {
     openTicketAria: "Open the ticket for {subject}",
     noTicket: "No ticket",
     empty: "No messages recorded.",
+  },
+  settings: {
+    title: "How {address} files tickets",
+    categoryMissing: "{address} needs a category for its tickets",
+    reopenHint: "A reply within this many days reopens the ticket it answers instead of opening a new one.",
+    unlisted: "A category not in the list ({id})",
   },
   oauth: {
     title: "Microsoft 365 sign-in",

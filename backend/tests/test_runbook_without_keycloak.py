@@ -409,7 +409,9 @@ def test_a_prompt_is_the_last_command_of_its_block() -> None:
     # Non-vacuity: the prompts exist, and a prompt followed by a command is
     # seen as two commands.
     prompts = re.findall(r"(?m)^\s*(?:stty -echo; )?read -r", README.read_text())
-    assert len(prompts) >= 7, len(prompts)
+    # Six since 2026-11-23: step 11d's device-id prompt went with the
+    # bearer-token curl it fed (the job is run from the console now).
+    assert len(prompts) >= 6, len(prompts)
     assert _logical_commands("read -rsp 'x: ' T && \\\n  use \"$T\"\n# c\nnext\n") == [
         "read -rsp 'x: ' T &&  use \"$T\"",
         "next",

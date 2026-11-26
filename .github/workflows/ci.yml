@@ -390,13 +390,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Throwaway .env
-        # Values are CI-only and generated per run; nothing here is a real
-        # credential and nothing is written back to the repo (.env is ignored).
+      - name: Throwaway .env, written by the script a new host uses
+        # scripts/new-env.sh (design 2026-11-23-vps-y-marca-novieri §3), as on
+        # a new VPS, with Pebble -- Let's Encrypt's test CA -- as the ACME
+        # directory: ci/acme-pebble.yml, which COMPOSE_FILE adds to every
+        # docker compose call from here on, and which needs the CA Pebble's
+        # own HTTPS is signed with, copied out of the image. Nothing here is
+        # a real credential and nothing is written back to the repo (.env is
+        # ignored); the last step fills the two OpenBao tokens.
         working-directory: deploy
         run: |
-          sed -E "s/^([A-Z_]+)=change-me$/\1=ci-$(openssl rand -hex 8)/" \
-            .env.example > .env
+          ./scripts/new-env.sh --host rmm.novieri.com --acme-email ci@novieri.example \
+            --acme-ca-server https://pebble:14000/dir
+          cid="$(docker create ghcr.io/letsencrypt/pebble:2.10.1)"
+          docker cp "$cid:/test/certs/pebble.minica.pem" "$RUNNER_TEMP/pebble-minica.pem"
+          docker rm "$cid" >/dev/null
+          echo "PEBBLE_MINICA=$RUNNER_TEMP/pebble-minica.pem" >> "$GITHUB_ENV"
+          echo "COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml" >> "$GITHUB_ENV"
 
       - name: postgres — first boot (init-app-user.sh)
         working-directory: deploy
@@ -624,7 +634,28 @@ jobs:
           fi
           echo "IT_SUITE_VERSION selects the image reference for all five services"
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: the Linux agent, built from this checkout
+        # The binary the OAuth step's 7c enrols (design 2026-11-23-vps-y-marca-
+        # novieri §4): static, as release-agent.yml builds it, so it runs in a
+        # bare busybox container.
+        working-directory: agent
+        run: CGO_ENABLED=0 go build -trimpath -o dist/novieri-agent ./cmd/agent
+
       - name: the platform's own OAuth server and MCP door, live, through Traefik
+        # SINCE 2026-11-23 (design 2026-11-23-vps-y-marca-novieri §4) THE
+        # CERTIFICATE ON :443 IS THE PRODUCTION PATH'S: Traefik's `le`
+        # resolver asks Pebble over ACME, TLS-ALPN-01 on :443, for
+        # rmm.novieri.com, and check-public-tls.sh accepts it only against
+        # Pebble's root -- nothing is copied into deploy/certs/ any more. The
+        # runner reaches the stack as rmm.novieri.com at 127.0.0.1 (curl's
+        # and mcp_flow.py's --resolve); Pebble's validator reaches traefik
+        # through pebble-challtestsrv. And while the api is stopped, its
+        # paths answer 503 rather than the console's page (design §6).
         # THE HALF NO UNIT TEST CAN REACH (own authentication phase 4, plan
         # 2026-11-15, Task 7). The backend suite proves what the OAuth server
         # DECIDES, and test_deploy_mcp_route.py what the Traefik rules SAY.
@@ -655,7 +686,7 @@ jobs:
           set -euo pipefail
           umask 077
           init_json="$RUNNER_TEMP/bao-init.json"
-          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code"' EXIT
+          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; docker rm -f ci-agent >/dev/null 2>&1 || true; rm -rf "$RUNNER_TEMP/agent-data"' EXIT
 
           # 1. Nothing of the old identity provider is defined, at all.
           defined="$(docker compose config --services) $(docker compose config --images)"
@@ -694,27 +725,25 @@ jobs:
           # step 1 makes it (`sed -i` keeps the mode it finds).
           chmod 600 .env
           sed -i -e '/^ITS_OPENBAO_TOKEN=/d' -e '/^OPENBAO_TOKEN=/d' \
-            -e '/^ITS_PUBLIC_CONSOLE_URL=/d' -e '/^ITS_MCP_REGISTRATION=/d' .env
+            -e '/^ITS_MCP_REGISTRATION=/d' .env
           {
             echo "ITS_OPENBAO_TOKEN=$app_token"
             echo "OPENBAO_TOKEN=$root"
-            echo "ITS_PUBLIC_CONSOLE_URL=https://localhost"
           } >> .env
           docker compose run --rm openbao-init
 
-          # 3. The audit HMAC key (step 5) and a certificate for :443 (step 7).
+          # 3. The audit HMAC key (step 5). The certificate for :443 is
+          #    Traefik's to obtain (step 7).
           docker compose run --rm --no-deps --entrypoint sh api -c \
             'head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && chmod 600 /var/lib/its/secrets/audit-hmac.key'
-          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
-            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-            -keyout certs/privkey.pem -out certs/fullchain.pem 2>/dev/null
 
           # 4. The api, the console and the edge. Both behind Traefik, which
           #    routes only a healthy container: the api's metadata, and the
           #    console's page for `/`. `--noproxy '*'`: the runner's proxy, if
           #    it has one, is not the way to localhost (the flow sets no proxy
           #    either).
-          get() { curl -sf --noproxy '*' --cacert certs/fullchain.pem "$@"; }
+          pebble_root="$RUNNER_TEMP/pebble-root.pem"
+          get() { curl -sf --noproxy '*' --cacert "$pebble_root" --resolve rmm.novieri.com:443:127.0.0.1 "$@"; }
           # The api's OWN answer, not just a 200: Traefik leaves out a
           # container whose health check has not passed yet, and meanwhile
           # the console's catch-all router answers the metadata path with
@@ -723,10 +752,10 @@ jobs:
           wait_for_api() {
             local meta page
             for _ in $(seq 1 60); do
-              meta="$(get -o /dev/null -w '%{content_type}' https://localhost/.well-known/oauth-authorization-server || true)"
+              meta="$(get -o /dev/null -w '%{content_type}' https://rmm.novieri.com/.well-known/oauth-authorization-server || true)"
               case "$meta" in
                 application/json*)
-                  page="$(get -o /dev/null -w '%{content_type}' https://localhost/ || true)"
+                  page="$(get -o /dev/null -w '%{content_type}' https://rmm.novieri.com/ || true)"
                   case "$page" in text/html*) return 0 ;; esac
                   ;;
               esac
@@ -737,8 +766,21 @@ jobs:
             return 1
           }
           docker compose up -d --build api web traefik
+          # Pebble makes a new root on every start: the one that signed this
+          # run's certificate is read from its management port (15000), which
+          # is published nowhere and answers on its address in the network.
+          for _ in $(seq 1 30); do
+            curl -sf --noproxy '*' --cacert "$PEBBLE_MINICA" --resolve pebble:15000:172.19.240.252 \
+              https://pebble:15000/roots/0 -o "$pebble_root" && break
+            sleep 2
+          done
+          test -s "$pebble_root" || { docker compose logs pebble; echo "::error::pebble never served its root"; exit 1; }
+          # THE CHECK THAT GOES RED WITHOUT ACME: Traefik's own default
+          # certificate, or one not for rmm.novieri.com, is refused.
+          ./scripts/check-public-tls.sh --connect 127.0.0.1 --cafile "$pebble_root" --wait 180 \
+            || { docker compose logs traefik pebble; exit 1; }
           wait_for_api
-          flow() { python3 ci/mcp_flow.py --base https://localhost --cafile certs/fullchain.pem "$@"; }
+          flow() { python3 ci/mcp_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" "$@"; }
           # A phase that fails leaves the stack's logs. Every secret this step
           # read is masked before the first phase that could print one.
 
@@ -753,12 +795,72 @@ jobs:
           # 7. Claimed with the install code the api writes on the first
           #    status request (deploy/README.md step 8), then the whole AI
           #    app's path.
-          get -o /dev/null https://localhost/api/v1/setup/status
+          get -o /dev/null https://rmm.novieri.com/api/v1/setup/status
           docker compose exec -T api cat /var/lib/its/secrets/setup-code > "$RUNNER_TEMP/setup-code"
           # The api logs this code once, when it creates it: masked before
           # anything could print it, read by the shell itself (`$(<file)`).
           echo "::add-mask::$(<"$RUNNER_TEMP/setup-code")"
-          flow --phase open --setup-code-file "$RUNNER_TEMP/setup-code" || { docker compose logs api web traefik; exit 1; }
+          flow --phase open --setup-code-file "$RUNNER_TEMP/setup-code" --state-file "$RUNNER_TEMP/ci-owner.json" || { docker compose logs api web traefik; exit 1; }
+
+          # 7b. While no api container is healthy, its paths answer 503 --
+          #     the file provider's api-unavailable -- and never the
+          #     console's index.html with a 200 (design 2026-11-23 §6).
+          docker compose stop api
+          answered=""
+          for _ in $(seq 1 30); do
+            answered="$(curl -s --noproxy '*' --cacert "$pebble_root" --resolve rmm.novieri.com:443:127.0.0.1 \
+              -o /dev/null -w '%{http_code}' https://rmm.novieri.com/api/v1/setup/status || true)"
+            [ "$answered" = 503 ] && break
+            sleep 2
+          done
+          [ "$answered" = 503 ] || { echo "::error::with the api stopped, /api answered $answered, not 503"; exit 1; }
+          echo "with the api stopped, /api/v1/setup/status answers 503"
+          docker compose start api
+          wait_for_api
+
+          # 7c. An endpoint (design 2026-11-23 §4, §5): the gateway's
+          #     certificate from the internal CA (deploy/README.md step 6,
+          #     its gateway-issuer token on stdin), the gateway, and the
+          #     Linux agent built from this checkout -- enrolled over :443
+          #     with a one-use token, connected over :8443 with mutual TLS,
+          #     running a hello the server signed and the agent verified.
+          #     The agent dials rmm.novieri.com as an endpoint does: the name
+          #     is traefik's address on the stack's network (--add-host), and
+          #     the root it trusts for :443 is Pebble's.
+          gw_token=$(docker compose exec -T openbao sh -c 'read -r BAO_TOKEN && export BAO_TOKEN &&
+            bao policy write gateway-issuer /bao/gateway-issuer.hcl >/dev/null &&
+            bao token create -orphan -policy=gateway-issuer -ttl=1h -field=token' <<<"$root")
+          echo "::add-mask::$gw_token"
+          docker compose run --rm --no-deps -T \
+            -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
+            --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"
+          # --wait: healthy before the agent dials, so a slow start cannot push
+          # its reconnect backoff past agent_flow's window.
+          docker compose up -d --wait --wait-timeout 180 gateway
+          agent_data="$RUNNER_TEMP/agent-data"
+          mkdir -m 700 "$agent_data"
+          agent_bin="$(cd ../agent && pwd)/dist/novieri-agent"
+          agents() { python3 ci/agent_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" --state-file "$RUNNER_TEMP/ci-owner.json" "$@"; }
+          agents --phase token --token-file "$agent_data/enroll-token" || { docker compose logs api traefik; exit 1; }
+          docker run -d --name ci-agent --hostname ci-agent --network it-suite_default \
+            --add-host rmm.novieri.com:172.19.240.250 --user "$(id -u):$(id -g)" \
+            -v "$agent_bin:/usr/local/bin/novieri-agent:ro" \
+            -v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro" \
+            -v "$agent_data:/var/lib/novieri-agent" \
+            -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \
+            busybox:1.36.1 /usr/local/bin/novieri-agent
+          agents --phase job --hostname ci-agent || { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }
+          test ! -e "$agent_data/enroll-token" || { echo "::error::the agent kept its enrollment token after enrolling"; exit 1; }
+          docker logs ci-agent 2>&1 | grep -E 'msg=enrolled|gateway connected'
+
+          # 7d. The Celery worker (beat runs inside it), healthy on the image
+          #     this job built: its health check reads its own heartbeat in
+          #     Redis. Until 2026-11-24 nothing here started it, and an image
+          #     without kombu's Redis transport's `packaging` (celery without
+          #     its `redis` extra) restart-looped it on a first boot while
+          #     every check above stayed green (rehearsal of plan 2026-11-23,
+          #     Task 12, finding F7).
+          docker compose up -d --wait --wait-timeout 180 worker || { docker compose logs worker; exit 1; }
 
           # 8. And nothing of the old identity provider ever ran in this
           #    project (not the host's: a shared runner may run anything).
@@ -1023,7 +1125,7 @@ jobs:
     #
     # Running it on a bare-metal self-hosted runner was considered and rejected:
     # the job `dpkg -i`s a real package with a systemd unit, runs the agent as
-    # root, and then ASSERTS THAT /var/lib/its-agent SURVIVES `dpkg -r`. That
+    # root, and then ASSERTS THAT /var/lib/novieri-agent SURVIVES `dpkg -r`. That
     # assertion only means what it says on a machine that is thrown away
     # afterwards. On a persistent runner each run would start dirty, and a Spot
     # eviction mid-job would leave the agent installed and running on the CI host.
@@ -1256,7 +1358,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck packaging/build.sh packaging/linux/*.sh packaging/darwin/*.sh \
-                     packaging/linux/its-agent-enroll
+                     packaging/linux/novieri-agent-enroll
           # dpkg maintainer scripts are POSIX sh, not bash.
           shellcheck -s sh packaging/linux/debian/postinst \
                            packaging/linux/debian/prerm \
@@ -1268,10 +1370,10 @@ jobs:
         # ExecStart is pointed at a real file first, because verify checks that
         # the binary exists and is executable.
         run: |
-          CGO_ENABLED=0 go build -o /tmp/its-agent ./cmd/agent
-          sed 's|^ExecStart=.*|ExecStart=/tmp/its-agent|' \
-            packaging/linux/its-agent.service > /tmp/its-agent.service
-          systemd-analyze verify /tmp/its-agent.service
+          CGO_ENABLED=0 go build -o /tmp/novieri-agent ./cmd/agent
+          sed 's|^ExecStart=.*|ExecStart=/tmp/novieri-agent|' \
+            packaging/linux/novieri-agent.service > /tmp/novieri-agent.service
+          systemd-analyze verify /tmp/novieri-agent.service
 
       - name: build and install the .deb, then purge it
         # The Ubuntu path is the one that must actually work: the control plane
@@ -1282,35 +1384,35 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=0.0.0-ci ./packaging/linux/build-deb.sh
-          sudo dpkg -i dist/its-agent_0.0.0-ci_amd64.deb
-          test "$(/usr/bin/its-agent --version)" = "0.0.0-ci"
+          sudo dpkg -i dist/novieri-agent_0.0.0-ci_amd64.deb
+          test "$(/usr/bin/novieri-agent --version)" = "0.0.0-ci"
           # The package must not have shipped a credential.
-          if dpkg -L its-agent | grep -q 'enroll-token'; then
+          if dpkg -L novieri-agent | grep -q 'enroll-token'; then
             echo "the package ships a token file"; exit 1
           fi
           # argv is refused...
-          if sudo its-agent-enroll --url https://example.invalid --token nope; then
-            echo "its-agent-enroll accepted a token in argv"; exit 1
+          if sudo novieri-agent-enroll --url https://example.invalid --token nope; then
+            echo "novieri-agent-enroll accepted a token in argv"; exit 1
           fi
           # ...the environment is not.
           sudo ITS_AGENT_ENROLL_TOKEN=ci.throwaway.token \
-            its-agent-enroll --url https://example.invalid --no-start
+            novieri-agent-enroll --url https://example.invalid --no-start
           # `sudo` goes INSIDE the substitution. Written the other way round,
           # the shell expands $(stat ...) as the unprivileged runner and only
-          # `test` runs as root -- and /var/lib/its-agent is root-only, so stat
+          # `test` runs as root -- and /var/lib/novieri-agent is root-only, so stat
           # is denied, the substitution is empty, and `test "" = "600"` fails.
           # That is what this step did the first time it was ever reached.
-          test "$(sudo stat -c %a /var/lib/its-agent/enroll-token)" = "600"
-          test "$(sudo stat -c %U /var/lib/its-agent/enroll-token)" = "root"
+          test "$(sudo stat -c %a /var/lib/novieri-agent/enroll-token)" = "600"
+          test "$(sudo stat -c %U /var/lib/novieri-agent/enroll-token)" = "root"
           # A token file others can read must stop the agent, not be tolerated.
-          sudo chmod 0644 /var/lib/its-agent/enroll-token
-          if sudo timeout 30 env ITS_AGENT_DATA_DIR=/var/lib/its-agent /usr/bin/its-agent; then
+          sudo chmod 0644 /var/lib/novieri-agent/enroll-token
+          if sudo timeout 30 env ITS_AGENT_DATA_DIR=/var/lib/novieri-agent /usr/bin/novieri-agent; then
             echo "the agent started with a world-readable enrollment token"; exit 1
           fi
-          sudo dpkg -r its-agent
-          sudo test -f /var/lib/its-agent/enroll-token   # remove keeps state
-          sudo dpkg -P its-agent
-          if sudo test -e /var/lib/its-agent; then echo "purge left the state dir"; exit 1; fi
+          sudo dpkg -r novieri-agent
+          sudo test -f /var/lib/novieri-agent/enroll-token   # remove keeps state
+          sudo dpkg -P novieri-agent
+          if sudo test -e /var/lib/novieri-agent; then echo "purge left the state dir"; exit 1; fi
 
   agent-windows:
     # The `agent` job above proves the module builds for six targets and RUNS

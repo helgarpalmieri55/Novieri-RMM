@@ -55,6 +55,11 @@ beforeEach(() => {
   installDefaults();
 });
 
+/** The kit's one save bar, drawn while the tab holds a change (redesign, decision D22). */
+function saveBar(): HTMLElement {
+  return screen.getByRole("region", { name: "Unsaved changes" });
+}
+
 async function openEmail() {
   const user = userEvent.setup();
   renderSettings();
@@ -259,7 +264,11 @@ describe("Settings — Email tab", () => {
     // Saving with no username CLEARS the stored credential server-side, so a
     // typed password would be discarded by a request that answered 200.
     expect(await screen.findByText(/needs a sign-in username/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22: the kit's `SaveBar`): input to
+    // correct keeps Save enabled and is said on submit, in the bar; a disabled
+    // Save is for a permission only. Nothing reaches the server either way.
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(within(saveBar()).getByRole("alert")).toHaveTextContent(/needs a sign-in username/i);
     expect(calls.updateEmailSettings).not.toHaveBeenCalled();
   });
 
@@ -273,9 +282,9 @@ describe("Settings — Email tab", () => {
     // → "mail server"): the panel's own field is labelled "Mail server", so
     // the outcome copy naming a "relay" was the system's word, not the
     // operator's. The claim under test — accepted is not delivered — is
-    // unchanged.
+    // unchanged. (No em dash in UI text, P3 adoption pass: a period now.)
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Sent to support@toeshee.com — check that mailbox. A mail server can accept a message and still drop it.",
+      "Sent to support@toeshee.com. Check that mailbox. A mail server can accept a message and still drop it.",
     );
   });
 
@@ -284,12 +293,12 @@ describe("Settings — Email tab", () => {
     // same inbox. Whatever the operator leaves in the box is what the request names.
     calls.getEmailSettings.mockResolvedValue({
       ...EMAIL_SETTINGS_FIXTURE,
-      suggested_test_recipient: "helgar+itms-test@toeshee.com",
+      suggested_test_recipient: "helgar+novieri-test@toeshee.com",
     });
     const user = await openEmail();
 
     const box = await screen.findByLabelText("Send the test to");
-    await waitFor(() => expect(box).toHaveValue("helgar+itms-test@toeshee.com"));
+    await waitFor(() => expect(box).toHaveValue("helgar+novieri-test@toeshee.com"));
     await user.clear(box);
     await user.type(box, "it-team@toeshee.com");
     await user.click(screen.getByRole("button", { name: "Send a test message" }));
@@ -338,8 +347,13 @@ describe("Settings — Email tab", () => {
 
     await user.clear(await screen.findByLabelText<HTMLInputElement>("Mail server"));
 
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(screen.getByText(/enter a mail server, a from address and a valid port/i)).toBeInTheDocument();
+    // RE-POINTED (decision D22): said in the bar on submit, not beside a
+    // disabled Save.
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(within(saveBar()).getByRole("alert")).toHaveTextContent(
+      /enter a mail server, a from address and a valid port/i,
+    );
+    expect(calls.updateEmailSettings).not.toHaveBeenCalled();
     expect(screen.queryByText(/relay host/i)).not.toBeInTheDocument();
   });
 
@@ -399,10 +413,12 @@ describe("Settings — the Users tab warns while email is unconfigured", () => {
  * the console was rebuilt to stop being: nothing on screen says the port
  * belongs to the host rather than to the sender.
  *
- * The heading is the assertion, and its LEVEL is part of it. A titled `Panel`
- * renders the `h2`; a group heading is the `h3` under it. `h4` here, or a
- * styled `div`, is the `heading-order` defect (axe, `moderate`) that the
- * harmony gate — which fails on `serious` only — would not catch.
+ * The heading is the assertion, and its LEVEL is part of it. RE-POINTED
+ * (redesign, Receta FO): each group is the kit's collapsible `FormSection`,
+ * whose heading is the `h2` under the page's `h1` (it was an `h3` under a
+ * titled `Panel`). A deeper level, or a styled `div`, is the `heading-order`
+ * defect (axe, `moderate`) that the harmony gate — which fails on `serious`
+ * only — would not catch.
  */
 describe("Settings — Email tab, grouped", () => {
   /**
@@ -424,7 +440,7 @@ describe("Settings — Email tab, grouped", () => {
       ["Sender identity", ["From address", "Sender name", "Reply-to address"]],
       ["Authentication", ["Username", "Password"]],
     ] as const) {
-      const heading = await screen.findByRole("heading", { name: group, level: 3 });
+      const heading = await screen.findByRole("heading", { name: group, level: 2 });
       const section = heading.closest("section") as HTMLElement;
       for (const field of fields) {
         expect(within(section).getByLabelText(field)).toBeInTheDocument();
@@ -442,7 +458,8 @@ describe("Settings — Email tab, grouped", () => {
    * labelled control the tab actually rendered (`getAllByLabelText(/.+/)` —
    * a `Field`'s wrapping `<label>`, or an explicit `aria-label` such as
    * `Chips`' `role="group"`) and asserts each one sits inside a
-   * `section.field-group`. It goes red on the next field nobody grouped,
+   * `section.form-section` (a `section.field-group` until the redesign's
+   * Receta FO made each group a `FormSection`). It goes red on the next field nobody grouped,
    * not on one of the eight above going missing.
    *
    * NAMED-CONTROL COVERAGE ISN'T EVERY CONTROL. `getAllByLabelText` derives
@@ -470,8 +487,8 @@ describe("Settings — Email tab, grouped", () => {
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) {
       expect(
-        control.closest("section.field-group"),
-        `${describeControl(control)} is not inside any field-group`,
+        control.closest("section.form-section"),
+        `${describeControl(control)} is not inside any form section`,
       ).not.toBeNull();
     }
 
@@ -479,8 +496,8 @@ describe("Settings — Email tab, grouped", () => {
     expect(wrapped.length).toBeGreaterThan(0);
     for (const el of wrapped) {
       expect(
-        el.closest("section.field-group"),
-        `${describeControl(el)} is not inside any field-group`,
+        el.closest("section.form-section"),
+        `${describeControl(el)} is not inside any form section`,
       ).not.toBeNull();
     }
   });
@@ -511,8 +528,8 @@ describe("Settings — Email tab, grouped", () => {
     expect(controls.length).toBeGreaterThan(0);
     for (const control of controls) {
       expect(
-        control.closest("section.field-group"),
-        `${describeControl(control)} is not inside any field-group`,
+        control.closest("section.form-section"),
+        `${describeControl(control)} is not inside any form section`,
       ).not.toBeNull();
     }
 
@@ -520,8 +537,8 @@ describe("Settings — Email tab, grouped", () => {
     expect(wrapped.length).toBeGreaterThan(0);
     for (const el of wrapped) {
       expect(
-        el.closest("section.field-group"),
-        `${describeControl(el)} is not inside any field-group`,
+        el.closest("section.form-section"),
+        `${describeControl(el)} is not inside any form section`,
       ).not.toBeNull();
     }
   });
@@ -678,7 +695,10 @@ describe("Settings — Email tab, signing in with Microsoft 365", () => {
     await user.type(screen.getByLabelText("Directory (tenant) ID"), "contoso.onmicrosoft.com");
     await user.type(screen.getByLabelText("Application (client) ID"), "app-id");
 
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    // RE-POINTED (decision D22): refused on submit and said in the bar.
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(within(saveBar()).getByRole("alert")).toHaveTextContent(/client secret too, the first time/i);
+    expect(calls.updateEmailSettings).not.toHaveBeenCalled();
   });
 
   it("loads a saved Microsoft sign-in and omits the untouched client secret", async () => {
@@ -759,16 +779,52 @@ describe("Settings — Email tab, signing in with Microsoft 365", () => {
     });
     const user = await openEmail();
     expect(await screen.findByLabelText("Directory (tenant) ID")).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    // A clean form is disabled anyway, so make it dirty with an unrelated edit:
-    // it is still refused, because the saved address names no Microsoft
-    // directory -- and the server would refuse it with 422.
+    // RE-POINTED (decision D22): a clean form has no bar at all, and a
+    // refused one says why in the bar on submit instead of disabling Save.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    // Make it dirty with an unrelated edit: it is still refused, because the
+    // saved address names no Microsoft directory -- and the server would
+    // refuse it with 422.
     const name = screen.getByLabelText("Sender name");
     await user.clear(name);
     await user.type(name, "IT desk");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(within(saveBar()).getByRole("alert")).toBeInTheDocument();
+    expect(calls.updateEmailSettings).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText("Directory (tenant) ID"), "contoso.onmicrosoft.com");
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(within(saveBar()).queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.updateEmailSettings).toHaveBeenCalledTimes(1));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The form pattern (redesign plan, Task 12, 7.1; Receta FO; decisions D16 and
+// D22): the Email tab saves through the kit's one bar, and switching tab with
+// an unsaved change asks first, a typed password included.
+// ---------------------------------------------------------------------------
+
+describe("Settings — Email on the form pattern", () => {
+  it("shows one save bar only while something changed, and Discard puts it back", async () => {
+    const user = await openEmail();
+    const host = await screen.findByLabelText<HTMLInputElement>("Mail server");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await user.type(host, "x");
+    expect(screen.getAllByRole("region", { name: "Unsaved changes" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(host).toHaveValue(EMAIL_SETTINGS_FIXTURE.host);
+  });
+
+  it("switching tab with an unsaved change asks first", async () => {
+    const user = await openEmail();
+    // A typed password is a change too, though it is never part of the draft.
+    await user.type(await screen.findByLabelText("Password"), "new-relay-secret");
+    await user.click(screen.getByRole("tab", { name: "Organization" }));
+    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Email/ })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Password")).toHaveValue("new-relay-secret");
   });
 });

@@ -38,7 +38,10 @@ B3-22): every end of a grant the person did not cause -- a reused code, a
 reused refresh token, the app's own RFC 7009 request, a person no longer
 active -- as "system", the person as the target, the app whose grant ended
 in `metadata.app`. A used code presented by ANOTHER app also names that one
-(`metadata.presented_by`): the likeliest trace of a stolen code. NOT a
+(`metadata.presented_by`): the likeliest trace of a stolen code. A reuse
+that ends nothing, because the grant had already ended (revoked, for whatever
+reason, or idle past its limit), is audited too, with `metadata.grant =
+"already_ended"`; a token never used is not a reuse. NOT a
 refresh, which continues a consent already audited
 (`mcp.app_authorized`, Task 8) every five to ten minutes while the app is in
 use, and NOT a registration (Task 6), a stranger's claim that grants nothing
@@ -552,10 +555,14 @@ async def _exchange(
     if row is None or row.user_id != seen.user_id or row.oauth_client_id != app.id:
         return BAD_CODE
     if row.used_at is not None:
-        if row.family_id is not None and await revoke_family(
-            session, row.family_id, "code_reused", now
-        ):
+        if row.family_id is not None:
+            # A reuse is audited whether or not it ends the grant: one that
+            # an earlier act had already ended is the same trace of a theft
+            # (design 2026-11-23 §6), with nothing left to revoke.
+            ended = await revoke_family(session, row.family_id, "code_reused", now)
             reused: dict[str, str] = {"app": app.client_id, "family": str(row.family_id)}
+            if not ended:
+                reused["grant"] = "already_ended"
             if client.id != app.id:
                 # Another app holds the code: the likeliest trace of a theft.
                 reused["presented_by"] = client.client_id
@@ -681,6 +688,23 @@ async def _refresh(
     if family.user_id != seen.user_id or family.oauth_client_id != app.id:
         return BAD_REFRESH
     if family.revoked_at is not None or family.expires_at <= now:
+        if token.used_at is not None:
+            # A used token of a grant that already ended: nothing to revoke,
+            # and still a reuse to audit (design 2026-11-23 §6).
+            await audit_service.record(  # 7. the chain, last
+                session,
+                org_id=org_id,
+                actor_type="system",
+                actor_id=None,
+                action="mcp.refresh_reused",
+                target_type="user",
+                target_id=str(family.user_id),
+                metadata={
+                    "app": app.client_id,
+                    "family": str(family.id),
+                    "grant": "already_ended",
+                },
+            )
         return BAD_REFRESH
     if token.used_at is not None:
         if await revoke_family(session, family.id, "refresh_reused", now):

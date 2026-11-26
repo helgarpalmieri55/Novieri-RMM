@@ -173,7 +173,7 @@ func TestReplyBindersAttachAndDetachBothRegistries(t *testing.T) {
 
 func TestOnlyAnInstallerFileNameWithNoArgumentsIsInstallerMode(t *testing.T) {
 	const code = "e2eLINKcode_0123456789-ABCDEFGHI"
-	dl := `C:\Users\ana\Downloads\ITMS-Agent-Setup_itms.toeshee.com_` + code + ` (1).exe`
+	dl := `C:\Users\ana\Downloads\NovieriRMM-Agent-Setup_rmm.novieri.com_` + code + ` (1).exe`
 	for _, tc := range []struct {
 		args []string
 		exe  string
@@ -183,8 +183,8 @@ func TestOnlyAnInstallerFileNameWithNoArgumentsIsInstallerMode(t *testing.T) {
 		{[]string{"--elevated-install"}, dl, true},
 		// The installed service: no arguments, its own name. The service path
 		// never reaches internal/install.
-		{nil, `C:\Program Files\ITSuite\its-agent.exe`, false},
-		{nil, "/usr/local/bin/its-agent", false},
+		{nil, `C:\Program Files\NovieriRMM\novieri-agent.exe`, false},
+		{nil, "/usr/local/bin/novieri-agent", false},
 		// THE CODE IS NEVER AN ARGUMENT: anything else on the command line is
 		// not installer mode, whatever the file is called.
 		{[]string{code}, dl, false},
@@ -198,7 +198,7 @@ func TestOnlyAnInstallerFileNameWithNoArgumentsIsInstallerMode(t *testing.T) {
 }
 
 // The Linux and macOS install mode the SSH push runs against the binary it
-// placed: `its-agent install --token-file ... --enroll-url ...`. Decided here
+// placed: `novieri-agent install --token-file ... --enroll-url ...`. Decided here
 // from a constant, like installerRequested, so the service -- started with no
 // arguments -- never calls into internal/install.
 func TestPushInstallRequested(t *testing.T) {
@@ -206,7 +206,7 @@ func TestPushInstallRequested(t *testing.T) {
 		args []string
 		want bool
 	}{
-		{[]string{"install", "--token-file", "/opt/toeshee/enroll.token", "--enroll-url", "https://x"}, true},
+		{[]string{"install", "--token-file", "/opt/novieri/enroll.token", "--enroll-url", "https://x"}, true},
 		{[]string{"install"}, true},
 		{nil, false},
 		{[]string{}, false},

@@ -201,12 +201,12 @@ gets copied and cached.
 Therefore:
 
 - **Artefacts are token-free and byte-identical for every tenant.** One
-  `its-agent-windows-amd64.exe` serves every org. This also means they can be
+  `novieri-agent-windows-amd64.exe` serves every org. This also means they can be
   cached and mirrored freely, which is a distribution advantage, not just a
   security one.
 - **The token travels separately**, per install, and reaches the endpoint by the
   mechanism `packaging/README.md` already specifies: one file,
-  `/var/lib/its-agent/enroll-token`, mode `0600`, root-owned, which the agent
+  `/var/lib/novieri-agent/enroll-token`, mode `0600`, root-owned, which the agent
   reads once and **deletes** on successful enrolment.
 
 The console's job is to hand the operator both halves and a command that keeps
@@ -216,7 +216,7 @@ them apart.
 "Artefacts are token-free and byte-identical for every tenant" still holds for
 the BYTES. The install link puts a link code, and the console's address, in
 the downloaded file's NAME
-(`ITMS-Agent-Setup_<host>[@<port>]_<code>.exe`) and the code in the page's
+(`NovieriRMM-Agent-Setup_<host>[@<port>]_<code>.exe`) and the code in the page's
 one-line `install.sh`, where it stays in the Downloads folder of every machine
 installed that way. A link code is not an enrollment token — it enrols only
 while the link is on, only from a listed network, under an hourly limit, and
@@ -243,7 +243,7 @@ residuals are recorded in `agent/packaging/README.md`, "The Group Policy MSI".
 |---|---|
 | `agent/packaging/build.sh` | Cross-compiles **six static binaries** (`linux/amd64,arm64`, `windows/amd64,arm64`, `darwin/amd64,arm64`) into `agent/dist/`. Works. |
 | `agent/packaging/linux/` | `build-deb.sh`, systemd unit, `install.sh`, `uninstall.sh`. **The tested path.** |
-| `agent/packaging/windows/` | `install.ps1`, `its-agent-enroll.ps1`, `uninstall.ps1`. **No MSI.** **Never executed by anyone** — reviewed line by line on 2026-08-26 and eleven defects fixed by reading (`agent/packaging/README.md`, "Found by reading"), which is not the same thing as having run it. |
+| `agent/packaging/windows/` | `install.ps1`, `novieri-agent-enroll.ps1`, `uninstall.ps1`. **No MSI.** **Never executed by anyone** — reviewed line by line on 2026-08-26 and eleven defects fixed by reading (`agent/packaging/README.md`, "Found by reading"), which is not the same thing as having run it. |
 | `agent/packaging/darwin/` | launchd plist, `install.sh`, `uninstall.sh`. **Never executed by anyone**, same review, same caveat. |
 | A release or artefact endpoint | **Did not exist when this was written; built by this cycle.** `/api/v1/agent/releases` and the Platform → Agent Packages page now serve it, and `EnrollmentPage.tsx`'s header — which used to document the gap — points at them. The rest of this table is unchanged, and still describes the packaging as it stands. |
 | Enrollment tokens | Exist, with an API and a console page. |
@@ -265,7 +265,7 @@ until one has been used the honest word is still "never executed".
 practice: GPO's Software Installation policy takes an MSI and nothing else, so
 managed deployment there is a computer startup script — a different supported
 mechanism with different diagnostics. Two things WERE added to
-`agent/packaging/windows/`: `its-agent-enroll.ps1`, so installing and enrolling
+`agent/packaging/windows/`: `novieri-agent-enroll.ps1`, so installing and enrolling
 can be separate steps at all, and a fix to `install.ps1`, which started an
 unenrolled agent into a restart loop.)* An MSI needs WiX or
 equivalent in CI, and Windows code signing needs the operator's certificate.
@@ -375,13 +375,13 @@ Linux (schematically — the base64 blobs are elided):
 
 ```sh
 set -e; d=$(mktemp -d)
-curl -fsSL '<presigned-url>' -o "$d/its-agent"
-printf '%s  %s' '<sha256>' "$d/its-agent" | sha256sum -c -
+curl -fsSL '<presigned-url>' -o "$d/novieri-agent"
+printf '%s  %s' '<sha256>' "$d/novieri-agent" | sha256sum -c -
 printf %s '<base64 install.sh>'        | base64 -d > "$d/install.sh"
-printf %s '<base64 its-agent.service>' | base64 -d > "$d/its-agent.service"
+printf %s '<base64 novieri-agent.service>' | base64 -d > "$d/novieri-agent.service"
 chmod +x "$d/install.sh"
 printf '%s' '<token>' | sudo bash "$d/install.sh" \
-  --token-stdin --url '<control-plane-url>' --binary "$d/its-agent"
+  --token-stdin --url '<control-plane-url>' --binary "$d/novieri-agent"
 ```
 
 Windows spawns `install.ps1` the same way, with the token in

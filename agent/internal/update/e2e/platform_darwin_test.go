@@ -16,8 +16,8 @@ type darwinPlatform struct{}
 
 func newPlatform() platform { return darwinPlatform{} }
 
-func (darwinPlatform) dataDir() string { return "/var/lib/its-agent" }
-func (darwinPlatform) target() string  { return "/usr/local/libexec/its-agent" }
+func (darwinPlatform) dataDir() string { return "/var/lib/novieri-agent" }
+func (darwinPlatform) target() string  { return "/usr/local/libexec/novieri-agent" }
 
 func (darwinPlatform) install(t *testing.T, repoRoot, binary string) {
 	run(t, "bash", filepath.Join(repoRoot, "agent/packaging/darwin/install.sh"), "--binary", binary)
@@ -62,7 +62,7 @@ func (darwinPlatform) untrustCA(*testing.T) {
 }
 
 func (darwinPlatform) configuredBinary(t *testing.T) string {
-	out := run(t, "launchctl", "print", "system/com.toeshee.itsagent")
+	out := run(t, "launchctl", "print", "system/com.novieri.rmm.agent")
 	for _, line := range strings.Split(out, "\n") {
 		if k, v, ok := strings.Cut(strings.TrimSpace(line), " = "); ok && k == "program" {
 			return v
@@ -77,7 +77,7 @@ func (darwinPlatform) killHelper(t *testing.T) {
 }
 
 func (darwinPlatform) helperGone() (bool, string) {
-	out, err := runQuiet("launchctl", "print", "system/com.toeshee.itsagent.update")
+	out, err := runQuiet("launchctl", "print", "system/com.novieri.rmm.agent.update")
 	if err != nil {
 		return true, ""
 	}

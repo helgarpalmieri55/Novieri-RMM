@@ -1,6 +1,6 @@
 # Build output
 /agent
-/its-agent
+/novieri-agent
 /dist/
 
 # Go fuzzing corpus additions are committed deliberately (testdata/fuzz/), but

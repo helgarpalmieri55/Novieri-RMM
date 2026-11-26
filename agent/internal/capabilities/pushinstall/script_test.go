@@ -9,7 +9,7 @@ import (
 )
 
 func testRelease() release {
-	return release{Version: "1.6.0", SHA256: strings.Repeat("a", 64), URL: "https://console.example/its-agent/1.6.0/windows/amd64?X-Amz-Signature=abc&X-Amz-Expires=300"}
+	return release{Version: "1.6.0", SHA256: strings.Repeat("a", 64), URL: "https://console.example/novieri-agent/1.6.0/windows/amd64?X-Amz-Signature=abc&X-Amz-Expires=300"}
 }
 
 // The PowerShell is built from layout.Plan (the SAME layout PR 1's
@@ -28,14 +28,14 @@ func TestBuildInstallScriptUsesTheSharedLayoutAndNoCommand(t *testing.T) {
 	// path, and are resolved on the TARGET from its own %ProgramFiles% and
 	// %ProgramData% (review C1 / Minor 7), never a literal C:\.
 	for _, want := range []string{
-		`$install   = Join-Path $env:ProgramFiles 'ITSuite'`,
-		`$target    = Join-Path $env:ProgramFiles 'ITSuite\its-agent.exe'`,
-		`$root      = Join-Path $env:ProgramData 'ITSuite'`,
-		`$data      = Join-Path $env:ProgramData 'ITSuite\agent'`,
-		`$tokenFile = Join-Path $env:ProgramData 'ITSuite\agent\enroll-token'`,
+		`$install   = Join-Path $env:ProgramFiles 'NovieriRMM'`,
+		`$target    = Join-Path $env:ProgramFiles 'NovieriRMM\novieri-agent.exe'`,
+		`$root      = Join-Path $env:ProgramData 'NovieriRMM'`,
+		`$data      = Join-Path $env:ProgramData 'NovieriRMM\agent'`,
+		`$tokenFile = Join-Path $env:ProgramData 'NovieriRMM\agent\enroll-token'`,
 		// The staging dir is W1's D5-consistent path, not "ITS Agent".
-		`$staging   = Join-Path $env:ProgramData 'ITSuite\push'`,
-		`'its-agent'`, `'ITMS Agent'`,
+		`$staging   = Join-Path $env:ProgramData 'NovieriRMM\push'`,
+		`'novieri-agent'`, `'Novieri RMM Agent'`,
 		// Recovery from the plan, not re-typed.
 		`reset= 300 actions= restart/5000/restart/15000/restart/60000`,
 		// The service environment: data dir and enroll URL, never the token.
@@ -137,8 +137,8 @@ func TestPSQuoteDoublesEverySingleQuoteForm(t *testing.T) {
 
 func TestConsoleOrigin(t *testing.T) {
 	for in, want := range map[string]string{
-		"https://itms.example.com/its-agent/x?sig=1":      "https://itms.example.com",
-		"https://itms.example.com:8443/its-agent/x?sig=1": "https://itms.example.com:8443",
+		"https://itms.example.com/novieri-agent/x?sig=1":      "https://itms.example.com",
+		"https://itms.example.com:8443/novieri-agent/x?sig=1": "https://itms.example.com:8443",
 	} {
 		got, err := consoleOrigin(in)
 		if err != nil || got != want {
@@ -152,8 +152,8 @@ func TestConsoleOrigin(t *testing.T) {
 	}
 }
 
-// REVIEW C1. A standard user who pre-created %ProgramData%\ITSuite owned it,
-// and could swap push\its-agent.exe between the hash and the copy, or the
+// REVIEW C1. A standard user who pre-created %ProgramData%\NovieriRMM owned it,
+// and could swap push\novieri-agent.exe between the hash and the copy, or the
 // data directory, and have their binary run as SYSTEM. These assertions are
 // about ORDER in a fixed script, so they are made on the script text; the
 // agent-winrm job and the operator's one-PC trial run it for real.

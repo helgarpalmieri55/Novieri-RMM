@@ -13,8 +13,8 @@ type linuxPlatform struct{}
 
 func newPlatform() platform { return linuxPlatform{} }
 
-func (linuxPlatform) dataDir() string { return "/var/lib/its-agent" }
-func (linuxPlatform) target() string  { return "/usr/local/bin/its-agent" }
+func (linuxPlatform) dataDir() string { return "/var/lib/novieri-agent" }
+func (linuxPlatform) target() string  { return "/usr/local/bin/novieri-agent" }
 
 func (linuxPlatform) install(t *testing.T, repoRoot, binary string) {
 	run(t, "bash", filepath.Join(repoRoot, "agent/packaging/linux/install.sh"), "--binary", binary)
@@ -24,7 +24,7 @@ func (linuxPlatform) uninstall(t *testing.T, repoRoot string) {
 	_, _ = runQuiet("bash", filepath.Join(repoRoot, "agent/packaging/linux/uninstall.sh"))
 }
 
-const linuxCA = "/usr/local/share/ca-certificates/its-agent-e2e.crt"
+const linuxCA = "/usr/local/share/ca-certificates/novieri-agent-e2e.crt"
 
 func (linuxPlatform) trustCA(t *testing.T, pemPath string) {
 	b, err := os.ReadFile(pemPath)
@@ -43,18 +43,18 @@ func (linuxPlatform) untrustCA(*testing.T) {
 }
 
 func (linuxPlatform) configuredBinary(t *testing.T) string {
-	out := run(t, "systemctl", "show", "its-agent", "-p", "ExecStart")
+	out := run(t, "systemctl", "show", "novieri-agent", "-p", "ExecStart")
 	_, rest, _ := strings.Cut(out, "path=")
 	path, _, _ := strings.Cut(rest, " ;")
 	return strings.TrimSpace(path)
 }
 
 func (linuxPlatform) killHelper(t *testing.T) {
-	run(t, "systemctl", "kill", "-s", "SIGKILL", "its-agent-update.service")
+	run(t, "systemctl", "kill", "-s", "SIGKILL", "novieri-agent-update.service")
 }
 
 func (linuxPlatform) helperGone() (bool, string) {
-	out, _ := runQuiet("systemctl", "show", "its-agent-update.service", "-p", "LoadState", "-p", "ActiveState")
+	out, _ := runQuiet("systemctl", "show", "novieri-agent-update.service", "-p", "LoadState", "-p", "ActiveState")
 	active := strings.Contains(out, "ActiveState=active") || strings.Contains(out, "ActiveState=activating") ||
 		strings.Contains(out, "ActiveState=deactivating")
 	return !active, strings.TrimSpace(out)

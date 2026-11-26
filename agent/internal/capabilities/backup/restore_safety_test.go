@@ -38,7 +38,7 @@ func leftovers(t *testing.T, dir string) []string {
 	t.Helper()
 	var out []string
 	for _, p := range listAll(t, dir) {
-		if strings.Contains(filepath.Base(p), ".itms-restore-") {
+		if strings.Contains(filepath.Base(p), ".novieri-restore-") {
 			out = append(out, p)
 		}
 	}

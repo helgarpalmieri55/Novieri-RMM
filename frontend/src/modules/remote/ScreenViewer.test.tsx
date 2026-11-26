@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import type { ApiClient, Device, Page, RemoteSession } from "../../lib/api";
 import { T, decode, encode, encodeKey, jsonBody, type Frame } from "./rsp";
 import { personActive, watchPersonInput } from "../../lib/personInput";
 import { watchTyping } from "../../lib/unsavedText";
+import { renderPage } from "../../test/renderPage";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -366,5 +367,31 @@ describe("ScreenViewer", () => {
     await act(async () => ws.deliver(encodeKey(1, true, "KeyA")));
     expect(ws.types()).toEqual([T.REFRESH]);
     expect(jsonBody<{ version: number }>(decode(encode(T.HELLO, 1, new TextEncoder().encode("{\"version\":1}")))).version).toBe(1);
+  });
+});
+
+// THE RECORD HEAD (redesign plan, Receta F; O3 3.6): the viewer names the
+// machine in the browser tab, and leads back to the sessions.
+describe("the viewer's record head", () => {
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", FakeSocket);
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as unknown as HTMLCanvasElement["getContext"];
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("names the record in the browser tab", async () => {
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue({ user_id: "u1", org_id: "o1", email: "t@example.com", display_name: "T", permissions: ["remote.control"], timezone: null }),
+      getRemoteSession: vi.fn().mockResolvedValue(SESSION),
+      listDevices: vi.fn().mockResolvedValue({ items: [DEVICE], total: 1 } satisfies Page<Device>),
+      stopRemoteSession: vi.fn(),
+    } as unknown as ApiClient);
+    renderPage("/remote/s1", <ScreenViewer />, "/remote/:sessionId", { page: "shell.nav.item.remoteSessions" });
+    await screen.findByRole("heading", { level: 1, name: "laptop-7" });
+    await waitFor(() => expect(document.title).toBe("laptop-7 · Remote sessions · Novieri RMM"));
+    expect(screen.getByRole("link", { name: "Remote sessions" })).toHaveAttribute("href", "/remote");
+    // The session's state, in words beside its glyph, and End session as the action.
+    expect(screen.getByText("Awaiting consent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "End session" })).toBeInTheDocument();
   });
 });

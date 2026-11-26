@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
+from tests.redis_support import TEST_REDIS_URL
 
 
 def _api_settings(tmp_path: Path) -> Settings:
@@ -25,7 +26,7 @@ def _api_settings(tmp_path: Path) -> Settings:
         database_admin_url="postgresql+asyncpg://its_admin:its_admin_test@127.0.0.1:5432/postgres",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
     )
 
 

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { EmptyState, NoValue } from "../../components/emptystate";
@@ -18,7 +19,18 @@ import { formatBytes } from "../../lib/format";
 import { humaniseEnum, humaniseStatus } from "../../lib/labels";
 import { patchStateLabel } from "../patch/patchState";
 import { initialsOf, personIndex } from "../../lib/people";
-import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  ClientContext,
+  DetailGrid,
+  DetailHead,
+  Panel,
+  QueryState,
+  SaveBar,
+  UnsavedGuard,
+} from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
+import { BADGE_KIND } from "./badgeKind";
 import { Icon } from "../../shell/icons";
 import { Facts, KV, Person } from "../../shell/viz";
 import type { DeviceStatus } from "../patch/types";
@@ -83,6 +95,12 @@ import type {
  * The ticket page: a compact header (state, deadlines, requester, device and
  * the quick actions), then the conversation with its reply box on the left
  * and one edit form plus the SLA, device and copilot panels on the right.
+ *
+ * ATERA'S TWO PANELS ON THE RECORD KIT (redesign plan, Task 7, 2.3; Receta F):
+ * `DetailHead` (back to the queue, "<number> <subject>" (the number carries its own prefix, INC- or REQ-), the state, the
+ * client and the requester, today's actions), then `DetailGrid` with the
+ * conversation on the left and the properties on the right. The properties
+ * save through the kit's one `SaveBar`, at the foot of the page.
  */
 export function TicketDetailPage() {
   const t = useT();
@@ -115,6 +133,12 @@ export function TicketDetailPage() {
     replyBox.current?.scrollIntoView?.({ block: "center" });
   }
 
+  // The tab: "<number> · Tickets · Novieri RMM" ("INC-4127 · Tickets · Novieri RMM").
+  useRecordTitle(ticket.data?.number);
+  // Where the properties' save bar is drawn: the page's own foot, so it sticks
+  // to the bottom of the window over the whole page, not over one column.
+  const [barHost, setBarHost] = useState<HTMLDivElement | null>(null);
+
   if (!ticketId) return null;
 
   const data = ticket.data;
@@ -144,45 +168,54 @@ export function TicketDetailPage() {
               onReply={openReply}
             />
 
-            <div className="grid grid-2">
-              <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-                <ConversationPanel
-                  ticket={data}
-                  requester={requester}
-                  userOptions={userOptions}
-                  canWrite={canWrite}
-                  canReadDocs={canReadDocs}
-                  isTerminal={isTerminal}
-                  zone={zone}
-                  visibility={replyVisibility ?? defaultReplyVisibility(data)}
-                  onVisibilityChange={setReplyVisibility}
-                  replyBox={replyBox}
-                />
-                <AttachmentsPanel ticketId={ticketId} canWrite={canWrite} isTerminal={isTerminal} zone={zone} />
-                <StatusHistoryPanel ticketId={ticketId} zone={zone} />
-              </div>
-              <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-                {data.type === "request" && data.status === "pending_approval" && (
-                  <ApprovalPanel ticketId={ticketId} canApprove={canApprove} />
-                )}
-                {(canWrite || canAssign) && (
-                  <EditTicketPanel
-                    // Remount on every server change so the form starts from
-                    // what was saved, not from what was typed before.
-                    key={`${data.updated_at}|${data.status}|${data.assigned_to}|${data.queue_id}`}
+            <DetailGrid
+              main={
+                <>
+                  <ConversationPanel
                     ticket={data}
+                    requester={requester}
+                    userOptions={userOptions}
                     canWrite={canWrite}
-                    canAssign={canAssign}
+                    canReadDocs={canReadDocs}
+                    isTerminal={isTerminal}
+                    zone={zone}
+                    visibility={replyVisibility ?? defaultReplyVisibility(data)}
+                    onVisibilityChange={setReplyVisibility}
+                    replyBox={replyBox}
                   />
-                )}
-                {canWrite && canReadClients && (
-                  <ClientPanel key={`${data.id}|${data.client_id}`} ticket={data} />
-                )}
-                <TicketSlaPanel ticketId={ticketId} />
-                {data.device_id && <DeviceSummaryPanel deviceId={data.device_id} />}
-                <TicketCopilotPanel ticketId={ticketId} />
-              </div>
-            </div>
+                  <AttachmentsPanel ticketId={ticketId} canWrite={canWrite} isTerminal={isTerminal} zone={zone} />
+                  <StatusHistoryPanel ticketId={ticketId} zone={zone} />
+                </>
+              }
+              aside={
+                <>
+                  {data.type === "request" && data.status === "pending_approval" && (
+                    <ApprovalPanel ticketId={ticketId} canApprove={canApprove} />
+                  )}
+                  {(canWrite || canAssign) && (
+                    <EditTicketPanel
+                      // Remount on every server change so the form starts from
+                      // what was saved, not from what was typed before.
+                      key={`${data.updated_at}|${data.status}|${data.assigned_to}|${data.queue_id}`}
+                      ticket={data}
+                      canWrite={canWrite}
+                      canAssign={canAssign}
+                      barHost={barHost}
+                    />
+                  )}
+                  {canWrite && canReadClients && (
+                    <ClientPanel key={`${data.id}|${data.client_id}`} ticket={data} />
+                  )}
+                  <TicketSlaPanel ticketId={ticketId} />
+                  {data.device_id && <DeviceSummaryPanel deviceId={data.device_id} />}
+                  <TicketCopilotPanel ticketId={ticketId} />
+                </>
+              }
+            />
+            {/* `display: contents`: the bar drawn here is laid out as a child
+                of the page itself, so `position: sticky` holds it to the
+                window's foot while the page scrolls. */}
+            <div ref={setBarHost} className="contents" />
           </>
         )}
       </QueryState>
@@ -282,31 +315,32 @@ function TicketHeader({
 
   return (
     <>
-      <PageHead
-        title={`${ticket.number}: ${ticket.subject}`}
-        description={
-          requester
-            ? t("serviceDesk.detail.openedBy", {
-                when: formatDateTime(ticket.created_at, zone),
-                requester,
-                queue: queueName(ticket.queue_id),
-              })
-            : t("serviceDesk.detail.opened", {
-                when: formatDateTime(ticket.created_at, zone),
-                queue: queueName(ticket.queue_id),
-              })
+      <DetailHead
+        back={{ to: "/service-desk", label: t("serviceDesk.nav.tickets") }}
+        title={`${ticket.number} ${ticket.subject}`}
+        status={{ kind: BADGE_KIND[ticketStatusVariant(ticket.status)], label: ticketStatusLabel(ticket.status) }}
+        context={
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <ClientContext clientId={ticket.client_id} />
+            <Badge variant={ticketPriorityVariant(ticket.priority)}>{ticketPriorityLabel(ticket.priority)}</Badge>
+            {/* Type and queue are not states: plain words, not pills. */}
+            <span>{ticketTypeLabel(ticket.type)}</span>
+            <span>
+              {requester
+                ? t("serviceDesk.detail.openedBy", {
+                    when: formatDateTime(ticket.created_at, zone),
+                    requester,
+                    queue: queueName(ticket.queue_id),
+                  })
+                : t("serviceDesk.detail.opened", {
+                    when: formatDateTime(ticket.created_at, zone),
+                    queue: queueName(ticket.queue_id),
+                  })}
+            </span>
+          </span>
         }
         actions={actions}
       />
-      <div className="flex flex-wrap items-center gap-2" style={{ margin: "-8px 0 14px" }}>
-        <Badge variant={ticketStatusVariant(ticket.status)}>{ticketStatusLabel(ticket.status)}</Badge>
-        <Badge variant={ticketPriorityVariant(ticket.priority)}>
-          {ticketPriorityLabel(ticket.priority)}
-        </Badge>
-        {/* Type and queue are not states, so they are plain chips. */}
-        <span className="chip">{ticketTypeLabel(ticket.type)}</span>
-        <span className="chip">{queueName(ticket.queue_id)}</span>
-      </div>
       {(assign.isError || resolve.isError) && (
         <p role="alert" className="notice red" style={{ marginBottom: 12 }}>
           {describeSubmitError(assign.error ?? resolve.error)}
@@ -741,10 +775,13 @@ function EditTicketPanel({
   ticket,
   canWrite,
   canAssign,
+  barHost,
 }: {
   ticket: TicketOut;
   canWrite: boolean;
   canAssign: boolean;
+  /** The page's foot, where the save bar is drawn; `null` draws it under the panel. */
+  barHost: HTMLElement | null;
 }) {
   const t = useT();
   const update = useUpdateTicketMutation();
@@ -778,6 +815,9 @@ function EditTicketPanel({
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // Save pressed with the subject empty: nothing is sent, and the bar says why
+  // until a subject is typed (it used to disable the button without a word).
+  const [subjectAsked, setSubjectAsked] = useState(false);
 
   // A closed ticket's fields are frozen; its status can still reopen it.
   const frozen = TERMINAL_STATUSES.has(ticket.status);
@@ -832,7 +872,29 @@ function EditTicketPanel({
     }
   }
 
+  /** Discard: every field back to what the ticket says. */
+  function discard() {
+    setCategoryId(ticket.category_id);
+    setPriority(ticket.priority);
+    setSubject(ticket.subject);
+    setDescription(ticket.description);
+    setDeviceId(ticket.device_id ?? "");
+    setStatus(ticket.status);
+    setReason("");
+    setQueueId(ticket.queue_id);
+    setAssigneeId(ticket.assigned_to ?? "");
+    setError(null);
+    setSubjectAsked(false);
+  }
+
   function submit() {
+    if (!subject.trim()) {
+      // The bar says one thing at a time: a refusal from the last Save would
+      // hide "Write a subject…" behind it (fix round 1).
+      setError(null);
+      setSubjectAsked(true);
+      return;
+    }
     if (statusChanged && statusChangeWarning(status)) {
       setConfirming(true);
       return;
@@ -954,15 +1016,32 @@ function EditTicketPanel({
           />
         </>
       )}
-      {error != null && (
-        <p role="alert" className="notice red" style={{ marginBottom: 12 }}>
-          {describeSubmitError(error)}
-        </p>
-      )}
-      <Button onClick={submit} disabled={saving || !dirty || !subject.trim()}>
-        {saving ? t("serviceDesk.common.saving") : t("serviceDesk.detail.saveChanges")}
-      </Button>
-
+      {/* THE ONE SAVE BAR (redesign plan, Task 7, 2.3; Receta FO): what the
+          "Save changes" button did, unchanged -- the same `dirty`, the same
+          `submit` (the confirmation when a status needs one, then the save in
+          its order), the failure announced -- with Discard beside it. One
+          guard on the page holds changes: this one, and leaving with a
+          property changed asks first. */}
+      {(() => {
+        const bar = (
+          <>
+            <UnsavedGuard dirty={dirty} />
+            <SaveBar
+              dirty={dirty}
+              saving={saving}
+              error={error ?? undefined}
+              onDiscard={discard}
+              onSave={submit}
+              problems={
+                subjectAsked && !subject.trim()
+                  ? [{ name: "subject", message: t("serviceDesk.detail.subjectRequired") }]
+                  : []
+              }
+            />
+          </>
+        );
+        return barHost ? createPortal(bar, barHost) : bar;
+      })()}
       <ConfirmDialog
         open={warning != null}
         title={warning?.title ?? ""}

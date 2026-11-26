@@ -25,7 +25,7 @@ import (
 // Service Control Manager.
 //
 // The console comes from the FILE NAME (the operator's decision of 2026-09-28,
-// replacing plan D6's Mark of the Web): `ITMS-Agent-Setup_<host>@<port>_<code>`.
+// replacing plan D6's Mark of the Web): `NovieriRMM-Agent-Setup_<host>@<port>_<code>`.
 // The file here carries NO Zone.Identifier stream, which is the "copied from a
 // share or a USB stick" case that decision exists for.
 func TestInstallLinkWindows(t *testing.T) {
@@ -74,7 +74,7 @@ func TestInstallLinkWindows(t *testing.T) {
 	// NEGATIVE 1: a name whose host is not a DNS name is not an installer. The
 	// binary starts as a plain agent with nothing to enroll with, exits
 	// non-zero, and installs nothing.
-	bogus := filepath.Join(downloads, "ITMS-Agent-Setup_10.0.0.1_"+code+".exe")
+	bogus := filepath.Join(downloads, "NovieriRMM-Agent-Setup_10.0.0.1_"+code+".exe")
 	copyFileT(t, filepath.Join(binDir, "A"+exe()), bogus)
 	out, exitErr := runInstaller(t, bogus, "ITS_AGENT_DATA_DIR="+t.TempDir(), "ITS_AGENT_ENROLL_URL=", "ITS_AGENT_ENROLL_TOKEN=")
 	if exitErr == nil || strings.Contains(out, "Installed") {
@@ -85,7 +85,7 @@ func TestInstallLinkWindows(t *testing.T) {
 	// NEGATIVE 2 (review I1): the right name on the wrong bytes -- binary B,
 	// validly signed, but not the release the link offers. The installer
 	// refuses before the token is written or the service touched.
-	wrong := filepath.Join(downloads, "ITMS-Agent-Setup_"+authority+"_"+code+".exe")
+	wrong := filepath.Join(downloads, "NovieriRMM-Agent-Setup_"+authority+"_"+code+".exe")
 	copyFileT(t, filepath.Join(binDir, "B"+exe()), wrong)
 	out, exitErr = runInstaller(t, wrong)
 	if exitErr == nil || !strings.Contains(out, "could not be confirmed") {
@@ -96,10 +96,10 @@ func TestInstallLinkWindows(t *testing.T) {
 		t.Fatalf("a refused install left a token file: %v", err)
 	}
 
-	setup := filepath.Join(downloads, "ITMS-Agent-Setup_"+authority+"_"+code+" (1).exe")
+	setup := filepath.Join(downloads, "NovieriRMM-Agent-Setup_"+authority+"_"+code+" (1).exe")
 	copyFileT(t, filepath.Join(binDir, "A"+exe()), setup)
 
-	// NEGATIVE 3 (2026-09-29): %ProgramData%\ITSuite, the data directory's
+	// NEGATIVE 3 (2026-09-29): %ProgramData%\NovieriRMM, the data directory's
 	// PARENT, pre-created by a standard user. Owning it is FILE_DELETE_CHILD:
 	// after the install they could rename the protected `agent` directory
 	// away and put their own identity in its place. The right file, the right
@@ -119,11 +119,11 @@ func TestInstallLinkWindows(t *testing.T) {
 	if got := plat.configuredBinary(t); !strings.EqualFold(got, plat.target()) {
 		t.Fatalf("service binary = %q, want %q", got, plat.target())
 	}
-	pathName := ps(t, "(Get-CimInstance Win32_Service -Filter \"Name='its-agent'\").PathName")
+	pathName := ps(t, "(Get-CimInstance Win32_Service -Filter \"Name='novieri-agent'\").PathName")
 	if strings.TrimSpace(pathName) != `"`+plat.target()+`"` {
 		t.Fatalf("service command line = %q; it must be the quoted path and nothing else", pathName)
 	}
-	env := ps(t, "(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\its-agent').Environment -join '|'")
+	env := ps(t, "(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\novieri-agent').Environment -join '|'")
 	if !strings.Contains(env, "ITS_AGENT_ENROLL_URL="+enroll.url) || strings.Contains(env, code) {
 		t.Fatalf("service environment = %q", env)
 	}
@@ -150,7 +150,7 @@ func TestInstallLinkWindows(t *testing.T) {
 	// (secdir.MkdirOwned), "D:PAI" when it applied one to a directory that
 	// already existed; the same protected pair either way.
 	assertOwnedSDDL(t, "data directory", plat.dataDir())
-	// Its PARENT, %ProgramData%\ITSuite, identically: owned by Administrators,
+	// Its PARENT, %ProgramData%\NovieriRMM, identically: owned by Administrators,
 	// SYSTEM and Administrators only, nothing inherited from ProgramData
 	// (whose BUILTIN\Users may create folders).
 	assertOwnedSDDL(t, "data directory's parent", filepath.Dir(plat.dataDir()))
@@ -162,7 +162,7 @@ func TestInstallLinkWindows(t *testing.T) {
 		t.Fatalf("agent.key is accessible to %v; want SYSTEM and Administrators only", who)
 	}
 	// Recovery: install.ps1's `reset= 300 actions= restart/5000/restart/15000/restart/60000`.
-	qf := run(t, "sc.exe", "qfailure", "its-agent")
+	qf := run(t, "sc.exe", "qfailure", "novieri-agent")
 	if !regexp.MustCompile(`RESET_PERIOD[^:]*:\s*300\b`).MatchString(qf) {
 		t.Fatalf("sc.exe qfailure: no RESET_PERIOD 300\n%s", qf)
 	}
@@ -174,8 +174,8 @@ func TestInstallLinkWindows(t *testing.T) {
 		t.Fatalf("sc.exe qfailure delays = %v, want [5000 15000 60000]\n%s", delays, qf)
 	}
 
-	// No running its-agent process carries the code on its command line.
-	lines := ps(t, "Get-CimInstance Win32_Process -Filter \"Name='its-agent.exe'\" | ForEach-Object { $_.CommandLine }")
+	// No running novieri-agent process carries the code on its command line.
+	lines := ps(t, "Get-CimInstance Win32_Process -Filter \"Name='novieri-agent.exe'\" | ForEach-Object { $_.CommandLine }")
 	if strings.Contains(lines, code) {
 		t.Fatalf("a running agent carries the code in its command line: %s", lines)
 	}
@@ -188,7 +188,7 @@ func TestInstallLinkWindows(t *testing.T) {
 	}
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
-		svc := strings.TrimSpace(ps(t, "(Get-Service -Name its-agent -ErrorAction SilentlyContinue).Name"))
+		svc := strings.TrimSpace(ps(t, "(Get-Service -Name novieri-agent -ErrorAction SilentlyContinue).Name"))
 		_, binErr := os.Stat(plat.target())
 		_, dataErr := os.Stat(plat.dataDir())
 		if svc == "" && os.IsNotExist(binErr) && os.IsNotExist(dataErr) {
@@ -216,9 +216,9 @@ func assertOwnedSDDL(t *testing.T, what, dir string) {
 // refuseForeignOwnedParent is NEGATIVE 3. The runner is elevated and cannot
 // cheaply run the mkdir as a standard user, so the standard user's ownership
 // is given directly: a local non-administrator account is created for the
-// test and made ITSuite's owner with `icacls /setowner` (which uses the
+// test and made NovieriRMM's owner with `icacls /setowner` (which uses the
 // SeRestorePrivilege an elevated token holds). What the installer sees is
-// what `mkdir C:\ProgramData\ITSuite` by that user leaves behind: a directory
+// what `mkdir C:\ProgramData\NovieriRMM` by that user leaves behind: a directory
 // the user owns.
 func refuseForeignOwnedParent(t *testing.T, setup string, plat platform) {
 	t.Helper()
@@ -265,11 +265,11 @@ func refuseForeignOwnedParent(t *testing.T, setup string, plat platform) {
 
 	out, exitErr := runInstaller(t, setup)
 	if exitErr == nil || !strings.Contains(out, "not to an administrator") || strings.Contains(out, "Installed") {
-		t.Fatalf("a fresh install under an ITSuite owned by %s: err=%v\n%s", user, exitErr, out)
+		t.Fatalf("a fresh install under a NovieriRMM owned by %s: err=%v\n%s", user, exitErr, out)
 	}
 	assertNoService(t)
 	if o := ownerOf(); !strings.HasSuffix(strings.ToLower(o), `\`+user) {
-		t.Fatalf("the refused ITSuite was taken over (owner now %q); it must be left for an administrator", o)
+		t.Fatalf("the refused NovieriRMM was taken over (owner now %q); it must be left for an administrator", o)
 	}
 	if created {
 		if _, err := os.Stat(plat.dataDir()); !os.IsNotExist(err) {
@@ -300,8 +300,8 @@ func runInstaller(t *testing.T, path string, env ...string) (string, error) {
 
 func assertNoService(t *testing.T) {
 	t.Helper()
-	if svc := strings.TrimSpace(ps(t, "(Get-Service -Name its-agent -ErrorAction SilentlyContinue).Name")); svc != "" {
-		t.Fatalf("an its-agent service exists: %q", svc)
+	if svc := strings.TrimSpace(ps(t, "(Get-Service -Name novieri-agent -ErrorAction SilentlyContinue).Name")); svc != "" {
+		t.Fatalf("a novieri-agent service exists: %q", svc)
 	}
 }
 

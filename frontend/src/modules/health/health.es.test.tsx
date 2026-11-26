@@ -354,14 +354,24 @@ describe("the alert console, in Spanish", () => {
     for (const header of ["Dispositivo", "Estado", "Gravedad", "Comprobación", "Cierre", "Observado", "Visto"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
-    const state = screen.getByRole("combobox", { name: "Filtrar por estado" });
-    for (const option of ["Cualquier estado", "Abiertas (cualquier estado)", "Activa", "Reconocida", "Silenciada", "Cerrada"]) {
-      expect(within(state).getByRole("option", { name: option })).toBeInTheDocument();
-    }
-    const severity = screen.getByRole("combobox", { name: "Filtrar por gravedad" });
-    for (const option of ["Cualquier gravedad", "Crítica", "Advertencia", "Información"]) {
-      expect(within(severity).getByRole("option", { name: option })).toBeInTheDocument();
-    }
+    // The state and severity selects are chips now (redesign plan, Receta L;
+    // O3 3.1): one chip per option of the old select, each in words.
+    const state = screen.getByRole("group", { name: "Estado" });
+    expect(within(state).getAllByRole("button").map((chip) => chip.textContent)).toEqual([
+      "Cualquier estado",
+      "Abiertas",
+      "Activa",
+      "Reconocida",
+      "Silenciada",
+      "Cerrada",
+    ]);
+    const severity = screen.getByRole("group", { name: "Gravedad" });
+    expect(within(severity).getAllByRole("button").map((chip) => chip.textContent)).toEqual([
+      "Cualquier gravedad",
+      "Crítica",
+      "Advertencia",
+      "Información",
+    ]);
     const resolution = screen.getByRole("combobox", { name: "Filtrar por resolución" });
     for (const option of ["Cualquier resolución", "Contadas como resueltas", "Resueltas por la máquina", "Cerradas por una persona", "Cerradas, pero sin corrección"]) {
       expect(within(resolution).getByRole("option", { name: option })).toBeInTheDocument();
@@ -372,8 +382,8 @@ describe("the alert console, in Spanish", () => {
     expect(within(row("MUT-HOST")).getByText("Silenciada")).toBeInTheDocument();
     expect(within(row("MUT-HOST")).getByText(/^hasta/)).toBeInTheDocument();
     expect(within(row("MUT-HOST")).getByText("se repite ×4")).toBeInTheDocument();
-    expect(within(row("REC-HOST")).getByText("Cerrada — Recuperada")).toBeInTheDocument();
-    expect(within(row("GONE-HOST")).getByText("Cerrada — El sensor desapareció")).toBeInTheDocument();
+    expect(within(row("REC-HOST")).getByText("Cerrada · Recuperada")).toBeInTheDocument();
+    expect(within(row("GONE-HOST")).getByText("Cerrada · El sensor desapareció")).toBeInTheDocument();
     expect(within(row("GONE-HOST")).getByText("Estado del antivirus")).toBeInTheDocument();
     expect(within(row("GONE-HOST")).getByText("No se observó nada, se esperaba true")).toBeInTheDocument();
     expect(within(row("ACT-HOST")).getByText("CPU ocupada")).toBeInTheDocument();
@@ -387,8 +397,9 @@ describe("the alert console, in Spanish", () => {
     const user = userEvent.setup();
     stubApi({ listHealthAlerts: vi.fn().mockResolvedValue([]) });
     const { container } = renderUi(<AlertConsole onSelect={() => {}} />, "/health?device=d1&state=open");
-    expect(await screen.findByText("Ninguna alerta coincide con este filtro.")).toBeInTheDocument();
-    expect(screen.getByText("Amplía los filtros de estado, gravedad o resolución de arriba.")).toBeInTheDocument();
+    // The kit's empty list (redesign plan, Receta L): with filters on, it says so and offers the way out.
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expect(screen.getByText(/Un dispositivo:/)).toBeInTheDocument();
     expect(screen.getByText("este dispositivo")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mostrar todos los dispositivos" })).toBeInTheDocument();
@@ -419,9 +430,9 @@ describe("the alert console, in Spanish", () => {
     act(() => setActiveLanguage("en"));
     expect(screen.getByText("3 open of 5 shown")).toBeInTheDocument();
     const row = screen.getByText("REC-HOST").closest("tr") as HTMLElement;
-    expect(within(row).getByText("Cleared — Recovered")).toBeInTheDocument();
+    expect(within(row).getByText("Cleared · Recovered")).toBeInTheDocument();
     expect(within(screen.getByText("ACT-HOST").closest("tr") as HTMLElement).getByText("CPU busy")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Filter by state" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "State" })).toBeInTheDocument();
   });
 });
 
@@ -505,7 +516,7 @@ describe("the alert detail, in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Aprobar y enviar" }));
     const dialog = await screen.findByRole("dialog", { name: "Aprobar una corrección destructiva" });
     expect(dialog).toHaveTextContent("Esta acción está marcada como destructiva");
-    expect(dialog).toHaveTextContent("restart-spooler — Reiniciar la cola — Restart Spooler v4");
+    expect(dialog).toHaveTextContent("restart-spooler · Reiniciar la cola · Restart Spooler v4");
     expectNoEnglish(dialog, STORED);
   });
 
@@ -576,7 +587,8 @@ describe("the health page, in Spanish", () => {
       listApprovedActions: vi.fn().mockResolvedValue([approved({ autonomy: "autonomous" })]),
     });
     const { container } = renderUi(<HealthPage />);
-    expect(await screen.findByRole("heading", { name: "Salud y alertas" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label («Alertas», shell.nav.item.alerts).
+    expect(await screen.findByRole("heading", { name: "Alertas", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Las alertas que ha generado el parque y lo que puede ejecutarse para cerrarlas.")).toBeInTheDocument();
     expect(await screen.findByText("Disco libre en WS-01")).toBeInTheDocument();
     expect(screen.getByText("Críticas")).toBeInTheDocument();
@@ -585,11 +597,26 @@ describe("the health page, in Spanish", () => {
     expect(screen.getByText("Por 2 personas")).toBeInTheDocument();
     expect(screen.getByText(/^Hasta el /)).toBeInTheDocument();
     expect(screen.getByText("Antes de que las alertas lleguen a alguien")).toBeInTheDocument();
-    expect(await screen.findByText("Perfiles de estado")).toBeInTheDocument();
-    expect(await screen.findByText("Acciones aprobadas")).toBeInTheDocument();
-    expect(await screen.findByText("Configuración de salud")).toBeInTheDocument();
     expect(screen.getByText("Informes de alertas")).toBeInTheDocument();
-    expectNoEnglish(container, [...STORED, "Base de oficina", "Para los puestos", "Reiniciar la cola", "script.run", "ops"]);
+    // Redesign decision D21: the configuration panels live in their own views, each a tab of the page.
+    // The views are named apart from the heading they sit under (same ruling).
+    const views = screen.getByRole("tablist", { name: "Vistas de alertas" });
+    expect(within(views).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Alertas",
+      "Perfiles",
+      "Acciones aprobadas",
+      "Configuración",
+    ]);
+    expectNoEnglish(container, [...STORED, "script.run", "ops"]);
+    await userEvent.click(within(views).getByRole("tab", { name: "Perfiles" }));
+    expect(await screen.findByText("Perfiles de estado")).toBeInTheDocument();
+    expectNoEnglish(container, [...STORED, "Base de oficina", "Para los puestos", "script.run", "ops"]);
+    await userEvent.click(within(views).getByRole("tab", { name: "Acciones aprobadas" }));
+    expect(await screen.findByRole("heading", { name: "Acciones aprobadas" })).toBeInTheDocument();
+    expectNoEnglish(container, [...STORED, "Reiniciar la cola", "script.run", "ops"]);
+    await userEvent.click(within(views).getByRole("tab", { name: "Configuración" }));
+    expect(await screen.findByText("Configuración de salud")).toBeInTheDocument();
+    expectNoEnglish(container, [...STORED, "script.run", "ops"]);
   });
 
   it("says what it cannot show without permission", async () => {
@@ -608,7 +635,8 @@ describe("the health page, in Spanish", () => {
     renderUi(<HealthPage />);
     expect(await screen.findByText("Por 1 persona")).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Health & alerts" })).toBeInTheDocument();
+    // Coordinator ruling, wave O3 fix round 1: the page heading is the rail's label.
+    expect(screen.getByRole("heading", { name: "Alerts", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("By 1 person")).toBeInTheDocument();
   });
 });
@@ -873,7 +901,7 @@ describe("the approved-action registry, in Spanish", () => {
     expect(within(loud).getByRole("button", { name: "Activar" })).toBeInTheDocument();
     // Exemptions.
     expect(screen.getByText("Scripts marcados como seguros")).toBeInTheDocument();
-    expect(screen.getByText("— (sin motivo registrado)")).toBeInTheDocument();
+    expect(screen.getByText("Sin motivo registrado")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revocar" })).toBeInTheDocument();
     expect(screen.getByLabelText("Eximir restart-spooler (Restart Spooler v4)")).toHaveAttribute("placeholder", "¿Por qué es segura esta versión exacta?");
     expectNoEnglish(container, [...STORED, "clean-temp", "Clean Temp", "ops", "script.run", "Reiniciar la cola", "Limpiar temporales"]);
@@ -887,7 +915,7 @@ describe("the approved-action registry, in Spanish", () => {
     // Activating an autonomous action.
     await user.click(screen.getByRole("button", { name: "Activar" }));
     let dialog = await screen.findByRole("dialog", { name: "Activar esta acción aprobada" });
-    expect(dialog).toHaveTextContent("Esta acción se ejecuta AUTOMÁTICAMENTE, sin ninguna persona en el circuito");
+    expect(dialog).toHaveTextContent("Esta acción se ejecuta automáticamente, sin ninguna persona en el circuito");
     expect(dialog).toHaveTextContent("hasta 3 por dispositivo y día y 20 por hora en toda la organización");
     expectNoEnglish(dialog, [...STORED, "clean-temp", "Clean Temp"]);
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
@@ -966,7 +994,7 @@ describe("the settings panel, in Spanish", () => {
     await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Todavía no ha cambiado nada: edita un valor antes de guardar");
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("alert")).toHaveTextContent("Nothing has changed yet — edit a value before saving");
+    expect(screen.getByRole("alert")).toHaveTextContent("Nothing has changed yet: edit a value before saving");
   });
 
   it("quotes the bound in the field's own unit", async () => {
@@ -1100,7 +1128,7 @@ describe("the health sentences built outside React, in Spanish", () => {
     expect(ACTION_STATE_PRESENTATION.awaiting_approval.label).toBe("Esperando aprobación");
     expect(AUTONOMY_PRESENTATION.autonomous.label).toBe("Se ejecuta automáticamente");
     expect(ACTION_KIND_LABEL.open_ticket).toBe("Abrir un ticket");
-    expect(describeAlertStatus({ state: "cleared", cleared_reason: "manual" })).toBe("Cerrada — Cerrada por una persona");
+    expect(describeAlertStatus({ state: "cleared", cleared_reason: "manual" })).toBe("Cerrada · Cerrada por una persona");
     // The variants and flags are data, not words.
     expect(ALERT_STATE_PRESENTATION.acknowledged.open).toBe(true);
     expect(CLEARED_REASON_PRESENTATION.manual.countsAsResolution).toBe(true);
@@ -1151,12 +1179,12 @@ describe("the health sentences built outside React, in Spanish", () => {
       "No está asignado a nada, así que ningún dispositivo deja de comprobarse, pero se va con él su comprobación (1).",
     );
     expect(describeDeleteImpact({ assignment_count: 0, check_count: 3 })).toContain("se van con él sus comprobaciones (3)");
-    expect(describeApprovalSubject({ kind: "remediate", approved_action_key: "k", approved_action_name: "Nombre", script_name: "S", script_version: 2 })).toBe("k — Nombre — S v2");
+    expect(describeApprovalSubject({ kind: "remediate", approved_action_key: "k", approved_action_name: "Nombre", script_name: "S", script_version: 2 })).toBe("k · Nombre · S v2");
     const a = approved({ autonomy: "autonomous", active: true });
     expect(decisionTitle({ kind: "active", action: a })).toBe("Desactivar esta acción aprobada");
     expect(decisionConfirmLabel({ kind: "active", action: a })).toBe("Desactivar");
-    expect(decisionSubject({ kind: "active", action: a })).toBe("restart-spooler — Reiniciar la cola");
-    expect(decisionBody({ kind: "active", action: { ...a, active: false } })).toContain("AUTOMÁTICAMENTE");
+    expect(decisionSubject({ kind: "active", action: a })).toBe("restart-spooler · Reiniciar la cola");
+    expect(decisionBody({ kind: "active", action: { ...a, active: false } })).toContain("se ejecuta automáticamente");
     expect(decisionBody({ kind: "active", action: { ...a, active: false, autonomy: "suggest" } })).toContain("sigue esperando la aprobación de una persona");
   });
 

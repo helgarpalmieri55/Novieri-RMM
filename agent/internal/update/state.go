@@ -61,9 +61,9 @@ const MaxStarts = 3
 // BinaryName is the agent's file name on this OS.
 func BinaryName() string {
 	if runtime.GOOS == "windows" {
-		return "its-agent.exe"
+		return "novieri-agent.exe"
 	}
-	return "its-agent"
+	return "novieri-agent"
 }
 
 // Layout names every path under <data>/update.

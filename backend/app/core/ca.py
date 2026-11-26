@@ -129,7 +129,7 @@ class LocalCA:
         key = ec.generate_private_key(ec.SECP256R1())
         name = x509.Name(
             [
-                x509.NameAttribute(NameOID.COMMON_NAME, "it-suite internal CA"),
+                x509.NameAttribute(NameOID.COMMON_NAME, "Novieri RMM internal CA"),
                 x509.NameAttribute(NameOID.ORGANIZATION_NAME, "it-suite"),
             ]
         )

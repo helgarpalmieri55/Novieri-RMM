@@ -405,7 +405,7 @@ export function decisionTitle(pending: PendingDecision): string {
 
 export function decisionSubject(pending: PendingDecision): string {
   const action = pending.action;
-  if (pending.kind === "active") return `${action.key} — ${action.name}`;
+  if (pending.kind === "active") return `${action.key} · ${action.name}`;
   return `${action.script_name ?? action.script_id ?? action.key} v${
     action.script_exemption?.script_version ?? action.script_version
   }`;

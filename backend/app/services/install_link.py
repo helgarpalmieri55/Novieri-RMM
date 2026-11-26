@@ -149,7 +149,7 @@ def normalise_networks(
             if proxy.version == network.version and network.overlaps(proxy):
                 raise InstallLinkError(
                     tr(
-                        "{item} overlaps {proxy}, the network ITMS's own proxy sits on "
+                        "{item} overlaps {proxy}, the network Novieri RMM's own proxy sits on "
                         "(ITS_TRUSTED_PROXY_CIDRS). Requests can appear to come from there, so "
                         "listing it would let any computer in",
                         item=item,

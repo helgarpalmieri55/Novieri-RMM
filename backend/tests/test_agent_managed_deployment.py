@@ -49,7 +49,7 @@ class _StubStore(ObjectStore):
     def presign_agent_release_get(
         self, version: str, os_name: str, arch: str, *, expires_in: int
     ) -> str:
-        return f"https://minio.test/agent-releases/{version}/its-agent-{os_name}-{arch}?sig=x"
+        return f"https://minio.test/agent-releases/{version}/novieri-agent-{os_name}-{arch}?sig=x"
 
 
 async def _published(

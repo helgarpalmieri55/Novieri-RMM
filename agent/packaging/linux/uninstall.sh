@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove the Toeshee agent from this endpoint.
+# Remove the Novieri RMM agent from this endpoint.
 #
 # What it removes: the service, the binary, the config, and -- unless you pass
 # --keep-state -- the state directory, which holds the device identity, its
@@ -28,16 +28,16 @@ set -euo pipefail
 DESTDIR=""
 BINDIR="/usr/local/bin"
 UNITDIR="/etc/systemd/system"
-CONFDIR="/etc/its-agent"
-STATEDIR="/var/lib/its-agent"
-SERVICE="its-agent"
+CONFDIR="/etc/novieri-agent"
+STATEDIR="/var/lib/novieri-agent"
+SERVICE="novieri-agent"
 KEEP_STATE=0
 
 usage() {
   cat <<'USAGE'
 Usage: uninstall.sh [--keep-state] [--destdir DIR] [--bindir DIR]
 
-  --keep-state   Leave /var/lib/its-agent (identity, key, pins) in place.
+  --keep-state   Leave /var/lib/novieri-agent (identity, key, pins) in place.
                  Without it the enrolled identity is destroyed and a fresh
                  install needs a new enrollment token and creates a new device
                  record in the control plane.
@@ -74,7 +74,7 @@ if [ -z "$DESTDIR" ] && command -v systemctl >/dev/null 2>&1; then
 fi
 
 rm -f "${DESTDIR}${UNITDIR}/${SERVICE}.service"
-rm -f "${DESTDIR}${BINDIR}/its-agent"
+rm -f "${DESTDIR}${BINDIR}/novieri-agent"
 rm -rf "${DESTDIR}${CONFDIR}"
 
 if [ "$KEEP_STATE" -eq 1 ]; then
@@ -92,7 +92,7 @@ if [ -z "$DESTDIR" ] && command -v systemctl >/dev/null 2>&1; then
 fi
 
 cat <<'EOF'
-its-agent removed from this endpoint.
+novieri-agent removed from this endpoint.
 
 Still present, on purpose:
   * the device record in the control plane (retire it in the console)

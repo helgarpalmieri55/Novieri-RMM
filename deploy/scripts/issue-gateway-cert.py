@@ -20,13 +20,13 @@ token, with echo off:
     cd deploy
     docker compose run --rm --no-deps \
       -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-      --entrypoint python gateway /tmp/issue-gateway-cert.py itms.toeshee.com
+      --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
     docker compose restart gateway
 
 Unattended (the GO-LIVE.md §5 timer), feed it on STDIN from a 0600 file:
 
     docker compose run --rm --no-deps -T ... \
-      /tmp/issue-gateway-cert.py itms.toeshee.com < /etc/it-suite/gateway-issuer.token
+      /tmp/issue-gateway-cert.py rmm.novieri.com < /etc/it-suite/gateway-issuer.token
 
 THE TOKEN IS NEVER AN ARGUMENT AND NEVER INTERPOLATED INTO A COMMAND LINE, AND
 THAT IS WHAT THIS PARAGRAPH IS ABOUT. The documented invocation used to be
@@ -82,7 +82,7 @@ overwrites both files), so put it on a timer well inside the window -- see
 "Renewing the gateway certificate" in deploy/README.md, which installs a
 monthly systemd timer. Verify what is actually being served with:
 
-    openssl s_client -connect itms.toeshee.com:8443 2>/dev/null \
+    openssl s_client -connect rmm.novieri.com:8443 2>/dev/null \
       | openssl x509 -noout -subject -dates
 """
 

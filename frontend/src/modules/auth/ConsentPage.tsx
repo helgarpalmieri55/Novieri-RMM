@@ -42,6 +42,11 @@
  * NOTHING HERE DECIDES ANYTHING (invariant 6): a request the page shows is a
  * request the server accepted a moment ago, and the server accepts it again,
  * or not, at the decision.
+ *
+ * IN THE NOVIERI FRAME (redesign design §4, plan Task 13, 8.11): the lockup
+ * above the card, and the tab named "Connect the app at <host> · Novieri RMM"
+ * from the headline. Every fact the card showed it still shows; what changed
+ * is where what approving allows is said: in a warning beside "Approve".
  */
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -167,7 +172,7 @@ function ConsentRequest() {
         <AuthAlert text={describeSubmitError(details.error)} />
         {passing ? (
           <div className="form-actions">
-            <Btn label={t("auth.consent.retry")} onClick={askAgain} />
+            <Btn wide label={t("auth.consent.retry")} onClick={askAgain} />
           </div>
         ) : null}
       </AuthCard>
@@ -188,7 +193,7 @@ function ConsentRequest() {
         <AuthAlert text={shown.detail} />
         {passing ? (
           <div className="form-actions">
-            <Btn label={t("auth.consent.retry")} onClick={askAgain} />
+            <Btn wide label={t("auth.consent.retry")} onClick={askAgain} />
           </div>
         ) : null}
       </AuthCard>
@@ -200,6 +205,7 @@ function ConsentRequest() {
         <AuthAlert text={shown.detail} />
         <div className="form-actions">
           <Btn
+            wide
             label={t("auth.consent.backTo", { host: shown.redirect_host })}
             onClick={() => navigation.assign(shown.redirect_to)}
           />
@@ -221,12 +227,6 @@ function ConsentRequest() {
           </>
         ) : null}
       </p>
-      <p className="note" style={{ margin: 0 }}>
-        {t("auth.consent.grants")}
-      </p>
-      <p className="note" style={{ margin: 0 }}>
-        {t("auth.consent.lasts")}
-      </p>
       {client.loopback_only ? (
         <p role="note" className="notice gold" style={{ margin: 0 }}>
           <Icon name={KIND_ICON.warn} size={16} />
@@ -241,15 +241,29 @@ function ConsentRequest() {
         </li>
         <li>{t("auth.consent.account", { email: account })}</li>
       </ul>
+      <p className="note" style={{ margin: 0 }}>
+        {t("auth.consent.lasts")}
+      </p>
       <AuthAlert text={failure} />
-      <div className="form-actions">
+      {/* WHAT APPROVING HANDS OVER, ON THE CONTROL THAT HANDS IT OVER
+          (invariant 1c; redesign plan Task 13, 8.11): the app acts with the
+          person's whole authority, so the sentence is a warning, whole, in
+          the card and directly above "Approve" -- not a grey line among the
+          facts above it. */}
+      <p role="note" className="notice gold" style={{ margin: 0 }}>
+        <Icon name={KIND_ICON.warn} size={16} />
+        <span>{t("auth.consent.grants")}</span>
+      </p>
+      <div className="form-actions" style={{ marginTop: 0 }}>
         <Btn
+          wide
           variant="primary"
           label={sending === "approve" && !stepUp.open ? t("auth.common.working") : t("auth.consent.approve")}
           disabled={sending !== null}
           onClick={() => void answer(true)}
         />
         <Btn
+          wide
           label={sending === "decline" && !stepUp.open ? t("auth.common.working") : t("auth.consent.deny")}
           disabled={sending !== null}
           onClick={() => void answer(false)}

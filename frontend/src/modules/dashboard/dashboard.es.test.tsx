@@ -196,7 +196,8 @@ beforeEach(() => {
 describe("the dashboard in Spanish", () => {
   it("shows the needs-you list, the tiles and every panel in Spanish", async () => {
     const { container } = renderPage();
-    expect(screen.getByRole("heading", { name: "Panel" })).toBeInTheDocument();
+    // «Inicio», the rail's own word for the page (decision D13; Task 7, 2.1).
+    expect(screen.getByRole("heading", { name: "Inicio" })).toBeInTheDocument();
     await screen.findByText("ws-alpha");
 
     // Needs you.
@@ -261,7 +262,7 @@ describe("the dashboard in Spanish", () => {
     const user = userEvent.setup();
     const { container } = renderPage();
     await screen.findByText("ws-alpha");
-    await user.click(screen.getByRole("button", { name: "Personalizar" }));
+    await user.click(screen.getByRole("button", { name: "Editar" }));
     expect(screen.getByText(/Mueve, redimensiona y oculta los mosaicos\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Restablecer los valores predeterminados" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Listo" })).toBeInTheDocument();
@@ -285,8 +286,10 @@ describe("the dashboard in Spanish", () => {
     renderPage();
     await screen.findByText("ws-alpha");
     saveDashboardLayout.mockRejectedValue(new Error("sin red"));
-    await user.click(screen.getByRole("button", { name: "Personalizar" }));
+    await user.click(screen.getByRole("button", { name: "Editar" }));
     await user.click(screen.getByRole("button", { name: "Ocultar Alertas abiertas" }));
+    // A draft until Guardar (Task 7, 2.1).
+    await user.click(within(screen.getByRole("region", { name: "Cambios sin guardar" })).getByRole("button", { name: "Guardar" }));
     const alert = await screen.findByText(/Tu disposición está en pantalla pero no se guardó/);
     expect(alert).toBeInTheDocument();
   });

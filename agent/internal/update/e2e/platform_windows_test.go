@@ -14,11 +14,11 @@ type windowsPlatform struct{}
 func newPlatform() platform { return windowsPlatform{} }
 
 func (windowsPlatform) dataDir() string {
-	return filepath.Join(os.Getenv("ProgramData"), "ITSuite", "agent")
+	return filepath.Join(os.Getenv("ProgramData"), "NovieriRMM", "agent")
 }
 
 func (windowsPlatform) target() string {
-	return filepath.Join(os.Getenv("ProgramFiles"), "ITSuite", "its-agent.exe")
+	return filepath.Join(os.Getenv("ProgramFiles"), "NovieriRMM", "novieri-agent.exe")
 }
 
 func ps(t *testing.T, script string) string {
@@ -61,11 +61,11 @@ func (windowsPlatform) untrustCA(*testing.T) {
 }
 
 func (windowsPlatform) configuredBinary(t *testing.T) string {
-	out := ps(t, "(Get-CimInstance Win32_Service -Filter \"Name='its-agent'\").PathName")
+	out := ps(t, "(Get-CimInstance Win32_Service -Filter \"Name='novieri-agent'\").PathName")
 	return strings.Trim(strings.TrimSpace(out), `"`)
 }
 
-const helperQuery = "Get-CimInstance Win32_Process -Filter \"Name='its-agent.exe'\" | " +
+const helperQuery = "Get-CimInstance Win32_Process -Filter \"Name='novieri-agent.exe'\" | " +
 	"Where-Object { $_.CommandLine -like '*--update-helper*' }"
 
 func (windowsPlatform) killHelper(t *testing.T) {

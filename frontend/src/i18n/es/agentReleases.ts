@@ -3,7 +3,6 @@ import type { agentReleases as en } from "../en/agentReleases";
 
 export const agentReleases: Shape<typeof en> = {
   page: {
-    title: "Paquetes del agente",
     description: "Instaladores para cada plataforma y los comandos que los instalan.",
     publish: "Publicar una versión…",
     releases: "Versiones",
@@ -14,16 +13,17 @@ export const agentReleases: Shape<typeof en> = {
     platformsZero: "No se cubre ninguna plataforma",
     catalogue: "Versiones publicadas",
     newestSubtitle: {
-      one: "Versión {version}, {count} paquete. Las versiones anteriores están plegadas más abajo.",
-      other: "Versión {version}, {count} paquetes. Las versiones anteriores están plegadas más abajo.",
+      one: "Versión {version}, {count} paquete. Las versiones anteriores se ven con su filtro.",
+      other: "Versión {version}, {count} paquetes. Las versiones anteriores se ven con su filtro.",
     },
     allSubtitle: {
       one: "{count} paquete en {platforms}",
       other: "{count} paquetes en {platforms}",
     },
     platformCount: { one: "{count} plataforma", other: "{count} plataformas" },
-    showOlder: "Mostrar las versiones anteriores ({versions})",
-    hideOlder: "Ocultar las versiones anteriores",
+    versionsShown: "Versiones que se muestran",
+    chipNewest: "La versión más reciente",
+    chipOlder: "Con las versiones anteriores ({versions})",
   },
   where: { title: "Dónde van las máquinas nuevas", subtitle: "La sede en la que inscriben máquinas una instrucción de instalación, el enlace de instalación y un despliegue gestionado." },
   empty: {
@@ -54,7 +54,7 @@ export const agentReleases: Shape<typeof en> = {
     title: "Comando de instalación",
     forOne: "Para <strong>un solo equipo</strong>. El token de inscripción de abajo es de <strong>un solo uso</strong> y caduca {date}.",
     shellHistory: "El token es un literal de este comando, así que quedará en el historial de tu shell; por eso es de un solo uso y de vida corta. Para una flota, usa en su lugar <strong>Despliegue administrado</strong>.",
-    digest: "SHA-256: <mono>{sha}</mono> — el instalador verifica este resumen.",
+    digest: "SHA-256: <mono>{sha}</mono>. El instalador verifica este resumen.",
     download: "Descargar el binario del agente",
     downloadNote: {
       one: "(el mismo archivo que descarga el comando; el enlace caduca en {count} minuto)",
@@ -192,11 +192,11 @@ export const agentReleases: Shape<typeof en> = {
   },
   msi: {
     title: "MSI para la directiva de grupo",
-    intro: "Para la instalación de software por directiva de grupo: Configuración del equipo → Directivas → Configuración de software → Instalación de software → Nuevo → Paquete, y luego Asignado. Cada equipo instala el agente en su próximo arranque y espera en Dispositivos → Pendientes de revisión.",
+    intro: "Para la instalación de software por directiva de grupo: Configuración del equipo → Directivas → Configuración de software → Instalación de software → Nuevo → Paquete, y luego Asignado. Cada equipo instala el agente en su próximo arranque y espera en Equipos → Pendientes de revisión.",
     switchOn: "Activa el enlace para descargar el MSI: los equipos se unen a través de él.",
     linkLabel: "Enlace de instalación",
-    linkHelp: "El MSI lleva el enlace. Pega el que se mostró al generarlo; ITMS solo guarda una huella de él.",
-    notALink: "Eso no es un enlace de instalación. Debería parecerse a https://itms.example.com/i/ seguido de 32 letras y dígitos.",
+    linkHelp: "El MSI lleva el enlace. Pega el que se mostró al generarlo; Novieri RMM solo guarda una huella de él.",
+    notALink: "Eso no es un enlace de instalación. Debería parecerse a https://rmm.example.com/i/ seguido de 32 letras y dígitos.",
     downloadAmd64: "Descargar el MSI para la directiva de grupo (Intel o AMD de 64 bits)",
     downloadArm64: "Descargar el MSI para la directiva de grupo (ARM)",
     noMsi: "No se compiló ningún MSI. {detail}",
@@ -225,6 +225,7 @@ export const agentReleases: Shape<typeof en> = {
     perHour: "Máximo de equipos por hora",
     perHourHelp: "Entre 1 y 500. Por encima, el enlace pide al siguiente equipo que lo intente más tarde.",
     noNetwork: "Indica al menos una red antes de activar el enlace.",
+    unchanged: "No ha cambiado nada, así que no se ha guardado nada.",
     notChanged: "No se cambió el enlace de instalación. {detail}",
     save: "Guardar el enlace de instalación",
     regenerate: "Generar un enlace nuevo…",

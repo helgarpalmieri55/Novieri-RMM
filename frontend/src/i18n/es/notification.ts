@@ -64,7 +64,6 @@ export const notification: Shape<typeof en> = {
     queuesCta: "Configurar colas",
   },
   admin: {
-    title: "Notificaciones",
     description: "A quién se avisa cuando ocurre algo, y dónde.",
     channelsLabel: "Canales",
     channelsZero: "ninguno configurado, así que no se puede entregar nada",

@@ -1,11 +1,11 @@
 # Host networking for a shared, multi-homed deploy
 
-**What this is.** The host-level network configuration ITMS needs when it does
+**What this is.** The host-level network configuration Novieri RMM needs when it does
 **not** own the machine or the default route. `README.md` covers the stack;
 this covers the three things underneath it that no container can fix, because
 each one is a property of the host kernel or the host firewall.
 
-**Who needs it.** Anyone whose ITMS answers on an address that is not the
+**Who needs it.** Anyone whose Novieri RMM answers on an address that is not the
 default route's, or whose host already publishes `:443` for something else. On
 a dedicated single-NIC host, skip this file entirely: `ITMS_BIND_IP=0.0.0.0` and
 the defaults are correct.
@@ -38,7 +38,7 @@ the other platform, with a valid certificate, and nothing looks broken.
 
 ---
 
-## 2. The return path, when ITMS is not on the default route's NIC
+## 2. The return path, when Novieri RMM is not on the default route's NIC
 
 ### The failure
 
@@ -150,7 +150,7 @@ Verify from a client on a network on-link for neither NIC, and verify the host
 can still reach its own published port:
 
 ```sh
-curl -k -m5 -o /dev/null -w '%{http_code}\n' https://itms.example.com/   # from a client
+curl -k -m5 -o /dev/null -w '%{http_code}\n' https://rmm.example.com/   # from a client
 curl -k -m5 -o /dev/null -w '%{http_code}\n' https://172.22.104.28/      # on the host
 ```
 
@@ -160,7 +160,7 @@ captured more than it should — the failure this section exists to document.
 ### Pin cloud-init, or a reboot undoes this
 
 On a cloud-init host, `/etc/netplan/50-cloud-init.yaml` is **regenerated**, and
-a regeneration that drops `eno2`'s address takes ITMS's whole listening address
+a regeneration that drops `eno2`'s address takes Novieri RMM's whole listening address
 with it. If the interface was configured by hand after install, freeze it:
 
 ```sh
@@ -177,7 +177,7 @@ sign this has already happened once.
 Separately from the reply path, the kernel may refuse the *request*.
 `rp_filter=1` (strict) drops a packet arriving on an interface that the kernel
 would not route its source address back out of. The policy rule above is keyed
-on `from <ITMS address>` — a source match — so it does not participate in the
+on `from <Novieri RMM address>` — a source match — so it does not participate in the
 reverse lookup for a client address, and strict mode drops the inbound packet
 before anything sees it.
 
@@ -200,7 +200,7 @@ machine never meets the router that drops it. Only a round trip from a client on
 a network on-link for neither NIC proves the path.
 
 ```sh
-curl -k -m5 -o /dev/null -w '%{http_code}\n' https://itms.example.com/
+curl -k -m5 -o /dev/null -w '%{http_code}\n' https://rmm.example.com/
 ```
 
 **A previous version of this document offered
@@ -234,7 +234,7 @@ as **forwarded** traffic through `DOCKER-USER` and `FORWARD`. It never traverses
 - **A ufw `deny` does not protect a published container port.** If ufw shows
   `443/tcp ALLOW IN 10.1.0.0/24` and a container publishes 443, that port is in
   practice reachable from everywhere the network can reach it. This applies to
-  every container on the host, including ones that are not ITMS.
+  every container on the host, including ones that are not Novieri RMM.
 - **Conversely, you do not need a ufw rule for agents to reach `:8443`.** It
   will already work. An operator who adds one and sees traffic flow will
   reasonably but wrongly conclude ufw is the control.
@@ -266,7 +266,7 @@ to exactly that assumption.
 
 Put the rules in `DOCKER-USER`, which is traversed before Docker's own accept
 rules and is not flushed when Docker restarts. Allow first, then deny, matching
-the interface ITMS is published on:
+the interface Novieri RMM is published on:
 
 ```sh
 # Allow the endpoint networks to the gateway.

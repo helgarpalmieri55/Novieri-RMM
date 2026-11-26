@@ -2,7 +2,7 @@ export const enrollment = {
   // The token form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
   page: {
     title: "Enrollment",
-    description: "Tokens that let a new computer join, and the certificates computers hold.",
+    description: "The tokens that enroll computers, and the certificates they get.",
     createToken: "Create token",
     permissionsUnread: "Your permissions could not be read, so the tabs that need them are hidden. This is not a statement that you lack them.",
   },
@@ -12,6 +12,7 @@ export const enrollment = {
     missing: "A token lets a computer join once the agent is installed on it, and no agent package is published yet, so there is nothing to install.",
   },
   tabs: {
+    label: "Enrollment sections",
     tokens: "Enrollment tokens",
     certificates: "Certificates",
     flow: "Enrollment flow",
@@ -54,7 +55,9 @@ export const enrollment = {
     notIssued: "No token was issued.",
   },
   tokens: {
-    notRevoked: "The token was NOT revoked and can still enroll a device.",
+    filterLabel: "Filter tokens by revocation",
+    limitLabel: "Filter tokens by use limit",
+    notRevoked: "The token was not revoked: it can still enroll a device.",
     unlimited: {
       one: "{count} enrollment token has no use limit.",
       other: "{count} enrollment tokens have no use limit.",
@@ -65,8 +68,7 @@ export const enrollment = {
     showRevokedShown: { one: "Show revoked tokens ({count} shown)", other: "Show revoked tokens ({count} shown)" },
     showRevokedHidden: { one: "Show revoked tokens ({count} hidden)", other: "Show revoked tokens ({count} hidden)" },
     onlyUnlimited: { one: "Only tokens with no use limit ({count})", other: "Only tokens with no use limit ({count})" },
-    emptyUnlimited: "No token in this organization is missing a use limit.",
-    emptyAllRevoked: "Every enrollment token this organization has issued is revoked. Tick “Show revoked tokens” to see them.",
+    emptyAllRevoked: "Every enrollment token this organization has issued is revoked. Turn on “Show revoked tokens” to see them.",
     emptyNone: "No enrollment tokens have been issued.",
     token: "Token",
     // Where the token enrols (design §3.4): the Client column with every client chosen.
@@ -90,15 +92,15 @@ export const enrollment = {
     },
   },
   certs: {
-    notRevoked: "The agent certificate was NOT revoked and the device can still connect.",
+    filterLabel: "Filter certificates by revocation",
+    notRevoked: "The agent certificate was not revoked: the device can still connect.",
     searchPlaceholder: "Search device, FQDN or certificate state",
     searchAria: "Search certificates",
     showRevokedNone: "Show revoked certificates (none have been revoked)",
     showRevokedShown: { one: "Show revoked certificates ({count} shown)", other: "Show revoked certificates ({count} shown)" },
     showRevokedHidden: { one: "Show revoked certificates ({count} hidden)", other: "Show revoked certificates ({count} hidden)" },
     emptyNone: "No devices are enrolled, so no certificates have been issued.",
-    emptyAllRevoked: "Every issued certificate has been revoked. Tick “Show revoked certificates” to see them.",
-    emptyFiltered: "No certificate matches that filter.",
+    emptyAllRevoked: "Every issued certificate has been revoked. Turn on “Show revoked certificates” to see them.",
     device: "Device",
     certificate: "Certificate",
     expires: "Expires",

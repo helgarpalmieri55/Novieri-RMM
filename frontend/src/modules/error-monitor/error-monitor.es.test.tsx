@@ -122,10 +122,11 @@ describe("the error monitor in Spanish", () => {
       "placeholder",
       "Busca por tipo, módulo, función o punto de origen",
     );
-    expect(screen.getByRole("combobox", { name: "Filtrar por estado de triaje" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Todos los puntos" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Pasarela" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Visto en los últimos 7 días" })).toBeInTheDocument();
+    // The filters are chips now (redesign plan, Receta L; O3 3.8); the order stays a choice.
+    expect(screen.getByRole("group", { name: "Filtrar por estado de triaje" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Todos los puntos" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pasarela" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "7 días" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Más eventos" })).toBeInTheDocument();
 
     expect(within(openRow).getByText("Proceso de trabajo")).toBeInTheDocument();
@@ -143,7 +144,8 @@ describe("the error monitor in Spanish", () => {
     setList({ groups: [OPEN_GROUP, RESOLVED_GROUP], dropped: 0 });
     const { container } = renderPage();
     await user.click(await screen.findByRole("button", { name: "Eventos de ValueError" }));
-    expect(await screen.findByRole("heading", { name: "Eventos recientes" })).toBeInTheDocument();
+    // The panel names the group it is the events of (O3 polish: it said only "Recent events").
+    expect(await screen.findByRole("heading", { name: "Eventos recientes de ValueError" })).toBeInTheDocument();
     expect(screen.getByText("req-abc-999")).toBeInTheDocument();
     expect(
       screen.getByText("No había ninguna organización en curso cuando se capturó esta ocurrencia"),
@@ -193,8 +195,9 @@ describe("the error monitor in Spanish", () => {
 
     setList({ groups: [OPEN_GROUP], dropped: 0 });
     const filtered = renderPage("/error-monitor?q=zzz");
-    expect(await screen.findByText(/Ningún grupo de errores coincide con estos filtros/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Borrar filtros" })).toBeInTheDocument();
+    // The kit's filtered empty list (redesign plan, Receta L).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(filtered.container);
     filtered.unmount();
 

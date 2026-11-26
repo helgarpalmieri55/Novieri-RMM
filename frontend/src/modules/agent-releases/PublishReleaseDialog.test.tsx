@@ -47,8 +47,8 @@ const SIG_LINUX = `${"L".repeat(86)}==`;
 const SIG_WINDOWS = `${"W".repeat(86)}==`;
 
 const SIGNATURES =
-  `${SHA_LINUX}  its-agent-linux-amd64  linux/amd64  ${SIG_LINUX}\n` +
-  `${SHA_WINDOWS}  its-agent-windows-amd64.exe  windows/amd64  ${SIG_WINDOWS}\n`;
+  `${SHA_LINUX}  novieri-agent-linux-amd64  linux/amd64  ${SIG_LINUX}\n` +
+  `${SHA_WINDOWS}  novieri-agent-windows-amd64.exe  windows/amd64  ${SIG_WINDOWS}\n`;
 
 function row(body: AgentReleaseCreate, sha256 = ""): AgentRelease {
   return {
@@ -133,28 +133,28 @@ beforeEach(() => {
 describe("PublishReleaseDialog", () => {
   it("names each binary's platform from its file name, in words", async () => {
     setup();
-    await chooseBinaries("its-agent-linux-amd64", "its-agent-windows-amd64.exe", "its-agent-darwin-arm64");
+    await chooseBinaries("novieri-agent-linux-amd64", "novieri-agent-windows-amd64.exe", "novieri-agent-darwin-arm64");
 
-    expect(within(fileRow("its-agent-linux-amd64")).getByText("Linux (64-bit Intel/AMD)")).toBeInTheDocument();
-    expect(within(fileRow("its-agent-windows-amd64.exe")).getByText("Windows (64-bit Intel/AMD)")).toBeInTheDocument();
-    expect(within(fileRow("its-agent-darwin-arm64")).getByText("macOS (Apple silicon)")).toBeInTheDocument();
+    expect(within(fileRow("novieri-agent-linux-amd64")).getByText("Linux (64-bit Intel/AMD)")).toBeInTheDocument();
+    expect(within(fileRow("novieri-agent-windows-amd64.exe")).getByText("Windows (64-bit Intel/AMD)")).toBeInTheDocument();
+    expect(within(fileRow("novieri-agent-darwin-arm64")).getByText("macOS (Apple silicon)")).toBeInTheDocument();
   });
 
   it("asks for the platform of a file it cannot name, and publishes nothing until it has one", async () => {
     const { api } = setup({ digests: {} });
-    await chooseBinaries("its-agent-linux-amd64 (1)");
+    await chooseBinaries("novieri-agent-linux-amd64 (1)");
     await typeVersion();
     await submit();
 
-    expect(await screen.findByText("Choose the platform for its-agent-linux-amd64 (1).")).toBeInTheDocument();
+    expect(await screen.findByText("Choose the platform for novieri-agent-linux-amd64 (1).")).toBeInTheDocument();
     expect(api.createAgentRelease).not.toHaveBeenCalled();
 
     await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Operating system for its-agent-linux-amd64 (1)" }),
+      screen.getByRole("combobox", { name: "Operating system for novieri-agent-linux-amd64 (1)" }),
       "linux",
     );
     await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Processor for its-agent-linux-amd64 (1)" }),
+      screen.getByRole("combobox", { name: "Processor for novieri-agent-linux-amd64 (1)" }),
       "arm64",
     );
     await submit();
@@ -171,7 +171,7 @@ describe("PublishReleaseDialog", () => {
 
   it("refuses a version the release workflow would refuse", async () => {
     const { api } = setup();
-    await chooseBinaries("its-agent-linux-amd64");
+    await chooseBinaries("novieri-agent-linux-amd64");
     await typeVersion("v1.4.0");
     await submit();
 
@@ -182,7 +182,7 @@ describe("PublishReleaseDialog", () => {
   it("creates, uploads and records the release signature that matches the upload", async () => {
     const { api, invalidate } = setup();
     await typeVersion();
-    await chooseBinaries("its-agent-linux-amd64", "its-agent-windows-amd64.exe");
+    await chooseBinaries("novieri-agent-linux-amd64", "novieri-agent-windows-amd64.exe");
     await chooseSignatures();
     expect(screen.getByText(/2 signatures read\./)).toBeInTheDocument();
     await submit();
@@ -204,7 +204,7 @@ describe("PublishReleaseDialog", () => {
       digests: { "linux/amd64": "9".repeat(64), "windows/amd64": SHA_WINDOWS },
     });
     await typeVersion();
-    await chooseBinaries("its-agent-linux-amd64", "its-agent-windows-amd64.exe");
+    await chooseBinaries("novieri-agent-linux-amd64", "novieri-agent-windows-amd64.exe");
     await chooseSignatures();
     await submit();
 
@@ -213,7 +213,7 @@ describe("PublishReleaseDialog", () => {
     expect(api.setAgentReleaseSignature).toHaveBeenCalledWith("id-windows-amd64", SIG_WINDOWS);
     expect(api.setAgentReleaseSignature).not.toHaveBeenCalledWith("id-linux-amd64", expect.anything());
 
-    const linux = fileRow("its-agent-linux-amd64");
+    const linux = fileRow("novieri-agent-linux-amd64");
     expect(within(linux).getByText("Failed")).toBeInTheDocument();
     expect(within(linux).getByText(/checksums differ/)).toBeInTheDocument();
     expect(within(linux).getByText(/entry was removed, so you can publish this file again/)).toBeInTheDocument();
@@ -223,9 +223,9 @@ describe("PublishReleaseDialog", () => {
   it("says when the signatures file has no line for a platform, and publishes it unsigned", async () => {
     const { api } = setup({ digests: { "linux/arm64": SHA_LINUX } });
     await typeVersion();
-    await chooseBinaries("its-agent-linux-arm64");
+    await chooseBinaries("novieri-agent-linux-arm64");
     await chooseSignatures();
-    expect(within(fileRow("its-agent-linux-arm64")).getByText("No line for this platform")).toBeInTheDocument();
+    expect(within(fileRow("novieri-agent-linux-arm64")).getByText("No line for this platform")).toBeInTheDocument();
     await submit();
 
     await screen.findByText(/1 of 1 file published/);
@@ -254,17 +254,17 @@ describe("PublishReleaseDialog", () => {
           : Promise.resolve(row(body)),
     });
     await typeVersion();
-    await chooseBinaries("its-agent-linux-amd64", "its-agent-windows-amd64.exe");
+    await chooseBinaries("novieri-agent-linux-amd64", "novieri-agent-windows-amd64.exe");
     await chooseSignatures();
     await submit();
 
     await screen.findByText(/1 of 2 files published/);
-    const linux = fileRow("its-agent-linux-amd64");
+    const linux = fileRow("novieri-agent-linux-amd64");
     expect(within(linux).getByText("Failed")).toBeInTheDocument();
     expect(
       within(linux).getByText("a release already exists for this version, OS and architecture"),
     ).toBeInTheDocument();
-    expect(within(fileRow("its-agent-windows-amd64.exe")).getByText("Published, release signature recorded")).toBeInTheDocument();
+    expect(within(fileRow("novieri-agent-windows-amd64.exe")).getByText("Published, release signature recorded")).toBeInTheDocument();
     expect(api.uploadAgentReleaseArtifact).toHaveBeenCalledTimes(1);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agent-releases"] });
   });
@@ -273,7 +273,7 @@ describe("PublishReleaseDialog", () => {
     const { api } = setup();
     await typeVersion();
     await userEvent.upload(screen.getByLabelText("Agent binaries"), [
-      bin("its-agent-linux-amd64"),
+      bin("novieri-agent-linux-amd64"),
       new File([SIGNATURES], "SIGNATURES"),
       bin("SHA256SUMS"),
       bin("release-signing-key.pub"),

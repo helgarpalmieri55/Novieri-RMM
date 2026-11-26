@@ -71,7 +71,7 @@ function invalidPort(value: string): string | null {
 // `ge=1, le=3650` (schema.py). Zero is the interesting one: it reads as
 // "never reopen", but the server refuses it, so the honest answer is the
 // bound rather than a silent 422.
-function invalidReopenWindow(value: string): string | null {
+export function invalidReopenWindow(value: string): string | null {
   if (!/^\d+$/.test(value)) {
     return translate("emailIntake.form.badReopen", { value });
   }
@@ -175,6 +175,24 @@ export function MailboxForm({
   }));
 
   function submit() {
+    // NO WRITE WITHOUT A CHANGE (general ruling 13): a PATCH that changes nothing writes a false audit entry, so an untouched Save closes the dialog and sends nothing.
+    if (
+      editing &&
+      mailbox &&
+      !switching &&
+      password === "" &&
+      address === mailbox.address &&
+      host === mailbox.host &&
+      port === String(mailbox.port) &&
+      useSsl === mailbox.use_ssl &&
+      folder === mailbox.folder &&
+      username === mailbox.username &&
+      categoryId === mailbox.default_category_id &&
+      reopenWindowDays === String(mailbox.reopen_window_days)
+    ) {
+      onClose();
+      return;
+    }
     const next: Attempt = {
       rules: mailboxRules(needsPassword),
       values: {

@@ -1,34 +1,40 @@
 ---
-name: ITMS
-description: One control plane for a managed fleet, a dark instrument rail carrying a bright, dense workspace.
+name: Novieri RMM
+description: One console for a managed fleet, a night-blue rail beside a cool, exact workspace.
 colors:
-  rail: "#0f1a20"
-  rail-lifted: "#182730"
-  rail-ink: "#9db0b8"
-  rail-dim: "#7f939c"
-  rail-hot: "#ff8d9a"
-  page: "#f5f6f9"
+  bg: "#f3f5f8"
   surface: "#ffffff"
-  surface-tinted: "#f9fafc"
-  ink: "#141619"
-  ink-secondary: "#3b4048"
-  muted: "#606a7a"
-  hairline: "#e5e8ee"
-  hairline-strong: "#cfd4dc"
-  control-grey: "#828895"
-  accent: "#1f5fd1"
-  accent-wash: "#e8effd"
+  surface-2: "#f7f9fc"
+  ink: "#111a2b"
+  muted: "#536077"
+  line: "#e1e6ee"
+  line-control: "#7b8599"
+  rail: "#101b30"
+  rail-2: "#1b2945"
+  rail-ink: "#a9b6cc"
+  rail-dim: "#8592ab"
+  rail-mark: "#8fa6ff"
+  accent: "#2747c9"
+  accent-2: "#203cac"
+  accent-3: "#1a3190"
+  accent-s: "#e9edfc"
   accent-ink: "#ffffff"
-  sev-crit: "#c1182f"
-  sev-crit-wash: "#fdecee"
-  sev-warn: "#9a6100"
-  sev-warn-wash: "#fdf3e2"
+  sev-crit: "#b8172c"
+  sev-crit-s: "#fcebed"
+  sev-warn: "#8d5a00"
+  sev-warn-s: "#fcf1dc"
   sev-ok: "#17703f"
-  sev-ok-wash: "#e6f6ed"
-  sev-run: "#0f5f95"
-  sev-run-wash: "#e7f1fa"
-  sev-mut: "#606a7a"
-  sev-mut-wash: "#eef0f4"
+  sev-ok-s: "#e5f4ea"
+  sev-mut: "#586274"
+  sev-mut-s: "#edf0f4"
+  av-1: "#5b3fb0"
+  av-2: "#0f5f95"
+  av-3: "#17703f"
+  av-4: "#9a6100"
+  av-5: "#b03a5b"
+  av-6: "#0f7a80"
+  scrim: "rgba(16,27,48,.38)"
+  hatch-ink: "rgba(255,255,255,.55)"
 typography:
   h1:
     fontFamily: Inter
@@ -51,7 +57,7 @@ typography:
   caption:
     fontFamily: Inter
     fontSize: 10.5px
-    fontWeight: 400
+    fontWeight: 500
     letterSpacing: "0.1em"
   kpi:
     fontFamily: Inter
@@ -63,11 +69,13 @@ typography:
     fontSize: 12px
     fontWeight: 400
 rounded:
-  control: 6px
-  panel: 10px
-  pill: 999px
+  r-badge: 4px
+  r-ctl: 6px
+  r-panel: 10px
+  r-pill: 999px
 spacing:
   rail: 232px
+  rail-collapsed: 76px
   topbar: 60px
   content: 22px 24px 40px
   content-max: 1440px
@@ -75,347 +83,337 @@ components:
   button-primary:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.accent-ink}"
-    borderRadius: "{rounded.control}"
+    rounded: "{rounded.r-ctl}"
+    height: 36px
+  button-primary-hover:
+    backgroundColor: "{colors.accent-2}"
+  button-primary-pressed:
+    backgroundColor: "{colors.accent-3}"
   button-secondary:
     backgroundColor: "{colors.surface}"
-    borderColor: "{colors.control-grey}"
     textColor: "{colors.ink}"
-    borderRadius: "{rounded.control}"
+    rounded: "{rounded.r-ctl}"
+    height: 36px
   input-field:
     backgroundColor: "{colors.surface}"
-    borderColor: "{colors.control-grey}"
-    borderRadius: "{rounded.control}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.r-ctl}"
+    height: 36px
+  chip:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.r-ctl}"
+    height: 32px
+  chip-selected:
+    backgroundColor: "{colors.accent-s}"
+    textColor: "{colors.accent}"
+  badge:
+    rounded: "{rounded.r-badge}"
+    height: 24px
   panel:
     backgroundColor: "{colors.surface}"
-    borderColor: "{colors.hairline}"
-    borderRadius: "{rounded.panel}"
+    rounded: "{rounded.r-panel}"
   nav-item-active:
-    backgroundColor: "{colors.rail-lifted}"
-    textColor: "#ffffff"
-    borderColor: "{colors.accent}"
+    backgroundColor: "{colors.rail-2}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.r-ctl}"
+  save-bar:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
 ---
 
-# Design System: ITMS
+# Design System: Novieri RMM
 
-> **The tokens, ratios and rules below are extracted from the approved design
-> and the shipped code, and are facts.** The design authority is
-> `docs/design/itms-prototype-v3.html` (operator approved 2026-09-07). The
-> earlier prototype and the palette this document used to describe are retired;
-> `index.css` keeps their names as aliases so nothing paints an undefined
-> variable while the modules migrate, and nothing tests against them.
+> **Version 4, "Novieri" (2026-11-23).** The tokens in the frontmatter are
+> normative and named after the CSS custom properties that carry them
+> (`accent` is `--accent`). `frontend/src/index.css`'s first `:root` is their
+> transcription and `frontend/src/test/tokens.test.ts` fails on any
+> difference, in either direction, and on any brand value from
+> `docs/design/marca/novieri-tokens.json` that does not reach the console
+> exactly. A rule the brand forces to change is changed here first, with its
+> reason, and then in the tokens and the tests. The v3 prototype
+> (`docs/design/itms-prototype-v3.html`, 2026-09-07) is history.
 
 ## Overview
 
-**Creative North Star: "The Instrument Rail"**
+**Creative North Star: "The Survey Plan"**
 
-A dark spine runs down the left of every screen and never changes. Everything
-to its right is bright, white, and dense with fact. The rail is the instrument;
-the workspace is the readout. That division is the whole idea: an operator
-glances left to know *where* they are and looks right to read *what is true*,
-and the two never compete for attention.
+The brand the operator chose is "Cordillera": the sobriety of a topographic
+plan. A night-blue rail runs down the left of every screen and carries the
+legend, the places you can go, in the order a technician walks them. Everything
+to its right is the plan itself: a cool white workspace, exact and dense, where
+lines are thin and colour appears only where it means something. The symbol
+is an N drawn as two peaks that also read as a monitoring pulse, and the
+wordmark is built from straight strokes and arcs, flat ends, no serifs.
 
-The workspace is deliberately busy. This is a console for people who manage
-hundreds of endpoints, and the density is a feature: list rows, tiles, severity
-pills and bars packed onto a cool white page. What keeps density from becoming
-noise is that colour is rationed. Most of a screen is near-black text on white
-with hairline rules. Colour appears only where it carries meaning: a severity,
-or the one accent.
+The organisation is borrowed on purpose. The rail, the per-client pages, the
+filtered lists, the tabbed records and the "New" menu follow Atera, the
+category's leader, so a technician who has used one console knows where things
+are in this one. What is not borrowed is the look, and what this system
+competes on is consistency, which is where the reference is weakest: one way to
+save, every view addressable by URL, a unique tab title on every page, and an
+empty state that says its real cause.
 
-v3 simplified the previous language rather than replacing its idea. There is
-now **one accent** where there were two, **five severities** where there were
-nine hues, **five type sizes** where there were three ramps, and **three radii**
-where there were six. Every page is composed from one kit, and a browser-side
-harmony gate measures every routed page against the token allowlist so a page
-cannot have a stray style because it cannot write one.
+Density is a feature. This is a console for people who manage hundreds of
+endpoints and keep it open all day; rows, chips and badges are packed onto the
+page, and what keeps that from becoming noise is that colour is rationed.
 
 **Key Characteristics:**
-- A permanent dark rail (232px) against a cool-white workspace
-- One accent, which is the only thing on the page that is not a severity or a grey
-- Five severities, each with a wash, and an icon on every pill so colour is never the only carrier
-- Hairline-and-wash depth; one soft shadow
-- Every ratio computed in CI, never asserted in prose; every page measured in a browser
+- A night-blue rail (232px, 76px folded) against a cool white workspace.
+- One cobalt accent, which is the only colour that is not a severity or a grey.
+- Five severities, each with a wash and an icon; information shares the accent.
+- Badges at 4px, chips and controls at 6px, panels at 10px: nothing is a pill
+  except the switch and the progress bar.
+- Every ratio computed in CI and every page measured in a browser.
 
 ## Colors
 
-Cool and high-contrast: a near-black rail, a paper-white working surface, and one
-saturated accent.
+Cool and exact: a night-blue rail, a white working surface on a pale blue-grey
+ground, and one cobalt accent.
 
-### The accent
-- **Accent** (`#1f5fd1`): The only non-severity colour on the page. Links, the
-  primary button, focus rings, the active tab's underline, the active rail
-  item's edge, the checked state of a checkbox, the info pill. Its wash
-  (`#e8effd`) carries the same meaning at lower volume; its ink on a fill is
-  white (`#ffffff`, 5.81:1). On white it measures 5.81:1 as text.
+### Primary
+- **Cobalt** (`#2747c9`, `--accent`): the primary button, links, the focus ring,
+  the active tab's underline, the selected chip, the checked checkbox, the info
+  badge, the symbol. 7.42:1 on white, 6.79:1 on the page.
+- **Cobalt deep** (`#203cac`, `--accent-2`): a primary button on hover.
+  **Cobalt pressed** (`#1a3190`, `--accent-3`): pressed.
+- **Cobalt wash** (`#e9edfc`, `--accent-s`): the selected chip, the info badge.
+  The accent on it is 6.35:1.
 
-### The rail
-- **Rail** (`#0f1a20`) / **Rail lifted** (`#182730`): The rail's ground, and the
-  ground a rail item lifts to on hover and when active. Both are grounds; text
-  on the rail owes its ratio to both.
-- **Rail ink** (`#9db0b8`): Rail items. 7.85:1 on the rail, 6.81:1 lifted.
-- **Rail dim** (`#7f939c`): The 10.5px uppercase group captions and the mono
-  counts. 5.51:1 on the rail, 4.78:1 lifted. It arrived in v3 as `#6d838c`
-  (4.44:1) and was lightened in the design file first.
-- **Rail hot** (`#ff8d9a`): The alert count in the rail. 8.01:1.
+### Rail
+- **Night blue** (`#101b30`, `--rail`) and **Night blue lifted** (`#1b2945`,
+  `--rail-2`): the rail's ground, and the ground an item lifts to on hover and
+  when it is the current page.
+- **Rail text** (`#a9b6cc`, `--rail-ink`): items, 8.39:1 and 7.07:1 lifted.
+- **Rail dim** (`#8592ab`, `--rail-dim`): counts, 5.48:1 and 4.62:1 lifted.
+- **Rail mark** (`#8fa6ff`, `--rail-mark`): the current item's icon and dot,
+  6.25:1 on the lifted ground.
 
-### Neutrals
-- **Ink** (`#141619`): Primary text. 18.13:1 on white.
-- **Ink secondary** (`#3b4048`): Cell values, chips, icon buttons. 10.43:1.
-- **Muted** (`#606a7a`): Captions, sub-lines, placeholders, breadcrumbs. It is
-  graded on every wash it can land on: 5.47:1 on white, 5.06:1 on the page,
-  4.79:1 on the crit wash (a tile's sub-line), 4.74:1 on the accent wash. v3
-  shipped it at `#667080`, which measured 4.39:1 on the crit and mut washes,
-  and it was darkened in the design file first.
-- **Page** (`#f5f6f9`): The ground behind the panels.
-- **Surface** (`#ffffff`): Every panel, tile, row and field.
-- **Surface tinted** (`#f9fafc`): A hovered row.
-- **Hairline** (`#e5e8ee`) / **Hairline strong** (`#cfd4dc`): Decorative
-  separation only: row rules, panel edges, the tab strip's underline, the list
-  header's rule. 1.23:1 and 1.49:1 on white, which is fine, because they
-  identify nothing.
-- **Control grey** (`#828895`): The boundary of anything you can operate: every
-  button, input, select, chip, and the toggle's track. 3.56:1 on white, 3.41:1
-  tinted, 3.29:1 on the page. v3 drew those in hairline strong (1.49:1) and
-  gained this token in the design file first.
+### Neutral
+- **Ink** (`#111a2b`, `--ink`): primary text, 17.41:1 on white.
+- **Muted** (`#536077`, `--muted`): secondary text, captions, placeholders,
+  breadcrumbs; 6.35:1 on white, 5.81:1 on the page, at least 5.44:1 on every
+  wash.
+- **Page** (`#f3f5f8`, `--bg`), **Surface** (`#ffffff`, `--surface`),
+  **Surface hover** (`#f7f9fc`, `--surface-2`).
+- **Line** (`#e1e6ee`, `--line`): decorative separation only, 1.25:1.
+- **Control line** (`#7b8599`, `--line-control`): the boundary of anything you
+  can operate, 3.71:1 on white and 3.40:1 on the page.
 
 ### Severities
-Five, each an ink with a wash, and each with an icon. A hue is applied only
-when it *means* something.
 
 | Kind | Icon | Ink | Wash | Ink on wash | Ink on white |
 | --- | --- | --- | --- | --- | --- |
-| crit | circle-x | `#c1182f` | `#fdecee` | 5.35:1 | 6.11:1 |
-| warn | alert-triangle | `#9a6100` | `#fdf3e2` | 4.68:1 | 5.14:1 |
-| ok | circle-check | `#17703f` | `#e6f6ed` | 5.48:1 | 6.13:1 |
-| run | progress | `#0f5f95` | `#e7f1fa` | 5.94:1 | 6.79:1 |
-| mut | minus | `#606a7a` | `#eef0f4` | 4.79:1 | 5.47:1 |
-| info | info-circle | the accent | the accent wash | 5.03:1 | 5.81:1 |
+| crit | circle-x | `#b8172c` | `#fcebed` | 5.71:1 | 6.57:1 |
+| warn | alert-triangle | `#8d5a00` | `#fcf1dc` | 5.22:1 | 5.84:1 |
+| ok | circle-check | `#17703f` | `#e5f4ea` | 5.39:1 | 6.13:1 |
+| mut (unknown) | minus | `#586274` | `#edf0f4` | 5.38:1 | 6.15:1 |
+| info | info-circle | the accent | the accent wash | 6.35:1 | 7.42:1 |
+| run | progress | the accent | the accent wash | 6.35:1 | 7.42:1 |
 
-The avatar palette (`--av-1..6`) is six saturated fills carrying white initials
-at 5.10:1 or better; it is a palette for telling people apart, not a status.
+"Running" is not a sixth colour: it is information's hue with its own icon,
+because the brand has one blue (the operator confirmed the merge on
+2026-11-24). `--sev-run` is an alias of `--accent` for the code that still
+names it. Where the two are drawn without a badge, the difference is carried
+by something else, and `frontend/src/test/second-carrier.test.tsx` holds it:
+a chart's second series is the unknown grey, not a second cobalt; a heat cell
+for information is a ring (a cobalt core in a band of the surface), running a
+solid cell; a donut's label carries its kind's icon; a timeline row carries
+its kind's icon already.
+
+The avatar palette (`--av-1..6`) tells people apart; it is not a status, and
+white initials clear 5.10:1 on every fill.
 
 ### Named Rules
 
-**The One Accent Rule.** There is one accent and it is the only colour on the
-page that does not mean a severity. A control that navigates, reveals or
-commits is the accent; nothing else is. The previous "azure informs, magenta
-commits" rule is retired with the magenta: v3 has no second accent, and the
-`--action*` aliases resolve to the one accent.
+**The One Accent Rule.** Cobalt is the only colour on the page that does not
+mean a severity. A control that navigates, reveals or commits is cobalt;
+nothing else is.
 
-**The Rationed Hue Rule.** A colour on this page must be carrying information.
-If a hue could be swapped for grey without losing meaning, it should be grey.
+**The Rationed Hue Rule.** If a hue could be swapped for grey without losing
+meaning, it is grey.
 
-**The Second Carrier Rule.** Colour is never the only carrier. Every severity
-pill carries its icon; a tile's kind is carried by its wash *and* its label; the
-active rail item is carried by white text and the lifted ground, not only by its
-accent edge (which is 2.64:1 on the lifted ground and would fail alone).
+**The Second Carrier Rule.** Colour is never the only carrier: every badge
+carries its icon, the current rail item its lifted ground and white text.
 
-**The Two Grounds Rule.** No accent is safe on both the rail and the page. The
-accent is 5.81:1 on white and 3.04:1 on the rail; the rail tones are the mirror
-image. On the rail the accent is an edge, never text.
+**The Two Grounds Rule.** Cobalt measures 2.32:1 on the rail and is never drawn
+there; the rail has its own mark, `--rail-mark`.
 
-**The Absent Zero Rule.** Unmeasured is drawn as absent: `n/a`, no arc, no bar,
-a hollow pip. Never as a measured `0`, and never in the ok colour.
+**The Absent Zero Rule.** Unmeasured is drawn as absent: `n/a`, no bar, a
+hollow pip, a chip with no count. Never as `0`.
 
 ## Typography
 
-**One family, Inter, self-hosted, at two weights.** v3 draws everything at 400,
-500 or 600; there is no 700 or heavier anywhere in the design, and the Tailwind
-weight utilities above `medium` resolve to 600. Inter is self-hosted in the
-bundle (`frontend/src/fonts.css`), never fetched from a CDN: this platform runs
-on networks with no egress and `docs/product.md` §5 commits that it does not
-phone home.
+**Inter, self-hosted, at 400, 500 and 600.** Nothing is fetched from a CDN:
+the platform does not phone home and many deployments have no egress.
 
-### The ramp
+### Hierarchy
+- **H1** (`--t-h1`, 22px, 600, -0.015em): the page title, one per page.
+- **H2** (`--t-h2`, 15px, 600): a panel or section heading.
+- **Body** (`--t-body`, 13.5px, 400, 1.5): everything read, the rail's items,
+  buttons, fields, cells.
+- **Small** (`--t-sm`, 12px): sub-lines, badges, counts, breadcrumbs, code.
+- **Caption** (`--t-cap`, 10.5px, 500, uppercase by CSS, 0.1em): table headers,
+  tile labels, fact labels. The only uppercase text, never typed.
+- **KPI** (`--t-kpi`, 26px, 600, -0.03em): the figure on a tile.
 
-Five sizes, and one named exception.
-
-- **H1** (`--t-h1`, 22px, 600, -0.015em): The page title. One per page.
-- **H2** (`--t-h2`, 15px, 600): A panel's heading, the brand, a donut's figure.
-- **Body** (`--t-body`, 13.5px): Everything read: rows, cells, buttons, fields,
-  the page subtitle, the rail's items.
-- **Small** (`--t-sm`, 12px): Sub-lines, pills, breadcrumbs, mono values in a
-  cell, the rail's counts, code.
-- **Caption** (`--t-cap`, 10.5px, uppercase, 0.1em): Tile labels (`.k`), list
-  headers (`.lhead`), the rail's group captions (`.grp`), fact labels. The only
-  uppercase text in the product, and it is uppercased by CSS, never typed.
-- **KPI** (`--t-kpi`, 26px, 600, -0.03em): The figure on a tile. The one size
-  outside the five-step scale, named so the harmony gate can allow it and the
-  type utilities can reach it.
-
-Tailwind's `text-xs..2xl` resolve to Small / Body / Body / H2 / H1 / KPI, so a
-module written with utilities lands on the ramp by construction. The earlier
-sign-in and article ramps are not part of v3: the sign-in pages were
-Keycloak's theme, outside this bundle, until own authentication phase 1
-(phase 3 for AI apps over MCP; Keycloak went in own authentication phase 4);
-they are the console's own now, and rendered documentation must be expressed
-with these rungs (an H1 at 22, an H2 at 15, prose at Body, code at Small) or
-the harmony gate reports the stray.
+Tailwind's `text-xs..2xl` resolve to Small, Body, Body, H2, H1 and KPI.
 
 ### Named Rules
 
-**The Floor Is The Ramp's Smallest Step.** Nothing renders below `--t-cap`,
-10.5px, not in a stylesheet and not inline in JSX; CI enforces both halves. The
-caption is legible at that size only because every caption pair is graded at
-4.5:1, which is why the contrast work and the size floor are one finding. v3
-itself shipped a 9px label (`.wk-h`) and it was corrected in the design file.
+**The Floor Is The Ramp's Smallest Step.** Nothing renders below 10.5px.
 
-**The Cascade Is The Component.** A class name in JSX is not a component; the
-rule it selects is. `confirm.tsx` rendered `className="modal open"` for an
-entire programme while **no `.modal` rule existed**; twelve jsdom tests passed on
-it because jsdom has no cascade. That is what the browser passes exist for.
-
-**The Label Leads Rule.** On a tile the caption sits *above* the figure. The
-number is bigger, but the word is what makes it mean anything.
+**The Label Leads Rule.** A tile's caption sits above its figure.
 
 ## Layout
 
-A fixed 232px rail, a 60px top bar, and a fluid workspace padded `22px 24px 40px`
-and capped at 1440px. Tiles sit on a 12-column grid (`span 3` by default, `span 6`
-below 1100px, full width below 640px); panels stack or pair (`.g2`).
-
-Breakpoints, in the order they bite: **1300px** (tile grids relax), **1024px**
-(the rail becomes a drawer, removed from the tab order when closed; the alert
-count leaves the top bar because the rail badge already says it), **640px**
-(tiles go full width, content padding tightens). The breadcrumb renders above
-the page's `h1`, as the first line of the content, and stays a
-`<nav aria-label="Breadcrumb">` with a real link.
-
-Density is high and deliberate. Panels sit 16px apart; tiles are 92px tall
-minimum; list rows are compact with a severity gutter down the left when a row
-has one. Touch targets reach 44px wherever the pointer is coarse.
+A 232px rail (76px folded, icons only), a 60px top bar and a fluid workspace
+padded `22px 24px 40px`, capped at 1440px; where the Assistant's round button
+is drawn the workspace keeps 88px at its foot instead of 40px, so the last
+line of a page scrolls clear of it. Breakpoints: **1300px** (tile grids
+relax), **1024px** (the rail becomes a drawer, out of the tab order while
+shut), **640px** (the client selector moves into the drawer, tiles go full
+width). The breadcrumb is the first line of the content. Touch targets reach
+44px on coarse pointers.
 
 ## Elevation & Depth
 
-**Almost flat, and layered by hairline rather than by shadow.** Depth comes from
-three things in order: a white surface against the page, a 1px hairline around
-it, and one soft shadow. There is no elevation scale; a panel and a tile sit at
-the same optical height.
+Almost flat. Depth is a white surface on the page, a 1px line around it and one
+soft shadow, `0 1px 2px rgba(16,27,48,.05), 0 6px 20px rgba(16,27,48,.06)`,
+tinted by the rail's own blue. There is no elevation scale: a menu, a dialog
+and a panel wear the same shadow, and a dialog is set apart by the scrim.
 
-### Shadow Vocabulary
-- **The shadow** (`0 1px 2px rgba(15,26,32,.05), 0 6px 20px rgba(15,26,32,.06)`):
-  The resting state of every panel and tile, and the only shadow. It separates
-  white from white.
-
-### Named Rules
-
-**The Flat-Until-Touched Rule.** Surfaces rest almost flat. A hover changes the
-ground (a row lifts to the tinted surface) or the border, and a hover that
-changes only a border must step it at least 2:1 so the eye registers it.
+**The Flat-Until-Touched Rule.** A hover changes the ground or the border; a
+border-only hover steps at least 2:1.
 
 ## Shapes
 
-Three radii, and the ladder shrinks toward the thing you touch: **panels 10px**
-(`--r-panel`: panels, tiles, facts, steps), **controls 6px** (`--r-ctl`:
-buttons, fields, icon buttons, tabs' content), **pills 999px** (`--r-pill`:
-pills, chips, bars, the toggle). The only other radii in the product are the
-2px and 3px of the heat and week cells and the 50% of avatars and pips.
-
-Borders are always exactly 1px. The system distinguishes them by *colour*, not
-weight: a hairline closes a box, control grey says you can operate it.
+The ladder shrinks toward the thing you read: **panels 10px** (`--r-panel`),
+**controls and chips 6px** (`--r-ctl`), **badges 4px** (`--r-badge`). The
+switch's track and the progress bar keep `--r-pill`, because their silhouette
+is how they are recognised; nothing else is round. Avatars and pips are 50%;
+heat cells 2px and 3px. Borders are always 1px, told apart by colour: a line
+closes a box, the control line says it can be operated.
 
 ## Components
 
 ### Buttons
-- **Shape:** 6px radius, 13.5px/500, `9px 13px` padding.
-- **Primary (`.pri`):** accent fill, white text (5.81:1), accent border.
-- **Secondary (default):** white, 1px control grey, ink text.
-- **Ghost:** transparent, no border; the accent as text.
-- **Danger:** the crit ink as its edge and text.
-- **Focus:** 2px accent outline at a positive offset. The offset is
-  load-bearing: with one accent, a ring drawn against the primary button's own
-  fill is accent on accent, 1:1. The offset puts it on the page.
-- **Disabled:** one inert surface, `cursor: not-allowed`, and exempt from the
-  boundary floor by 1.4.11's own carve-out.
-- **One primary per page BODY**, and the chrome's "Install agent" is the
-  standing exception. v3 draws that control `.btn.pri` in the top bar, and it
-  is the one action the whole product is a promise about: the operator's own
-  report was that they could not find how to install an agent. Because it
-  lives in the chrome and not in the page, it does not compete with a page's
-  own primary for the reader's first glance -- the two are never on the same
-  rung. Nothing else in the chrome is primary. (Ruled 2026-09-08, closing the
-  v3 port; before it the console drew the control secondary and
-  `AppShell.test.tsx` held it there, which was a deviation from the design
-  recorded for this wave to settle.)
+- 36px high, 6px radius, 13.5px/500, `0 13px`.
+- **Primary:** cobalt fill, white text; deep on hover, pressed on press.
+- **Secondary:** white, control line, ink text.
+- **Ghost:** no edge, cobalt text. **Danger:** critical edge and text.
+- **Focus:** 2px cobalt outline at a 2px offset, which is what keeps the ring
+  off the primary button's own fill.
+- **One primary per page body.** In the chrome, the "New" menu is the one
+  primary control (it replaced "Add a computer" on 2026-11-23).
 
-### Tiles
-- 10px radius, 92px minimum, `.k` caption over a 26px `.v` figure with an
-  optional unit, a `.z` sub-line, an optional sparkline bottom-right. `kind`
-  colours the whole tile and only `crit` and `warn` ever do; `ok` colours the
-  figure only. A tile with a destination is a link.
+### Chips (filters)
+- 32px high, 6px radius, control line, ink text at 13.5px/500, an optional
+  count at 12px in the muted ink. **Selected:** cobalt wash, cobalt edge and
+  text, and the count in cobalt. A filter chip is a toggle (`aria-pressed`) and
+  its state lives in the URL.
 
-### Panels
-- White, 1px hairline, 10px radius, the shadow, `overflow: hidden`. A head
-  with an H2 and a muted sub-line, actions right; a body at `16px 18px` or
-  bare for a list.
-
-### List rows
-- `<table>` semantics, v3's look: caption headers on a strong hairline, rows
-  separated by hairlines, the tinted surface on hover, an optional severity
-  gutter and lead icon, a `.ttl` cell with a bold title over a muted sub-line.
-
-### Pills
-- 12px/500 on a 999px wash, `3px 9px 3px 7px`, with the kind's icon first.
-  Six kinds: crit, warn, ok, run, mut, info.
+### Badges (status)
+- 24px high, 4px radius, 12px/500, the kind's wash and ink, the kind's icon
+  first. Six kinds: crit, warn, ok, mut, info, run.
 
 ### Inputs / Fields
-- 36px minimum, 6px radius, white, 1px control grey. Placeholder in muted, typed
-  text in ink. Focus shifts the border to the accent.
-- **Checkbox / radio:** native, tinted by `accent-color: var(--accent)`.
-  Deliberately not reimplemented: authoring a border switches Blink and WebKit
-  out of native appearance and takes the checkmark with it, and SC 1.4.11
-  exempts UA-drawn appearance the author has not modified.
-- **Toggle:** a 999px track (control grey off, accent on) with a white knob.
-- **Week painter:** a 7×24 grid of cells for a maintenance window, emitting the
-  cron expression the server parses, with the raw expression in an "Advanced"
-  disclosure so nothing expressible today stops being expressible.
+- 36px, 6px radius, white, control line; focus moves the border to cobalt.
+  Help text sits outside the label (`aria-describedby`). Checkboxes and radios
+  are native, tinted by `accent-color`.
+- **Switch:** a pill track (control line off, cobalt on) and a white knob.
 
-### Callouts
-One component, `.notice`, in the severity tones: a bordered box on the kind's
-wash carrying the kind's ink, every pair graded at 4.5:1. It takes Body and
-reads as a sentence, one level below the panel heading above it.
+### Panels
+- White, 1px line, 10px radius, the shadow. A head with an H2, a muted line
+  and actions; a body at `16px 18px`, or bare around a list.
 
-### Dialogs
-- Centred, 90vw capped, 10px radius, the shadow; `.modal` alone is hidden and
-  `.modal.open` is what shows it. Focus enters on open, is trapped while open,
-  returns to the trigger on close; Escape closes; the page behind is
-  scroll-locked.
+### Lists
+- Page head (title, one sentence, the primary action), then one bare panel:
+  search, filter chips with counts, the client chip when every client is
+  shown, "Showing x of y" at the end of the toolbar; the bulk bar only where
+  bulk actions exist; the table; the pager. An empty list says whether nothing
+  exists yet or nothing matches the filters.
+
+### Records (detail)
+- Back, the record's name, its status badge, its context (client and site),
+  actions on the right; summary tiles; one row of tabs that change the URL;
+  for a device, information on the left and metrics and activity on the right.
+
+### Forms
+- Full page, back and title; collapsible sections; one sticky bar, "Unsaved
+  changes · Discard · Save", for the whole console. Leaving with unsaved
+  changes asks first.
+
+### Dialogs and drawers
+- Centred, 10px radius, the shadow, the scrim; focus enters, is trapped and
+  returns; Escape closes.
 
 ### Navigation
-- **Rail:** 232px on the rail ground; 10.5px uppercase group captions in rail
-  dim; items at Body in rail ink with a Tabler icon at 70% and a right-aligned
-  mono count (`.ct`, `.hot` for the alert count).
-- **Active:** white text on the lifted ground with a 2px accent left edge.
-- **Mobile:** below 1024px the rail becomes a drawer, removed from the tab order
-  when closed.
+- **Rail, in Atera's order, with no group captions:** Dashboard, Tickets,
+  Clients, Devices, Alerts, Patching, Software, Backup, Remote sessions, Assets
+  (Licenses, Subscriptions, IP addresses), IT documentation, Reports, More
+  (Changes, Continuity tests, IT budget, only when on for the chosen client).
+  Anchored at the bottom: Assistant, and Admin, which swaps the rail for an
+  accordion of its sections with a back button and a search.
+- **The Assistant is also a round button at the bottom right of every page**
+  (Atera's AI button, `docs/design/referencias-atera/atera 1.png`; the
+  operator, 2026-11-24), never in the top bar. See "Assistant button".
+- Items at Body in rail text with an outline icon; **current**: lifted ground,
+  white text, the icon and a 7px dot in rail mark. Counts in rail dim; the
+  alert count is a critical badge with white text.
+- Folded: icons only. Below 1024px: a drawer.
+
+### Top bar
+- 60px, white, a line below: the "New" menu (only real destinations, each
+  shown with its permission), the search (`/`, wider than before: up to
+  640px), the client selector, the alert glyph, the platform glyph and the
+  account. No bell: there is no inbox behind one. No Assistant icon: the
+  Assistant is anchored in the rail and is the round button below.
+
+### Assistant button
+- A 48px cobalt circle with the white sparkles glyph, fixed 24px from the
+  bottom right of the viewport (16px on a phone), the one shadow; a link to
+  `/assistant` named "Ask the Assistant", shown only with `ai.use` and not on
+  the Assistant's own page. 48px clears the 44px target on every pointer.
+- **It never covers the save bar.** Atera's walkthrough files exactly that
+  defect ("el botón flotante de IA tapa el botón de guardar"), so while the
+  button is drawn the save bar keeps 72px clear on its right (64px on a
+  phone, where the button sits 16px from the edge), wherever the bar is: the
+  two cannot share the corner at any width. The content keeps 88px clear at
+  its foot, so the button never covers the last row or the last field.
+
+### Brand
+- **Wordmark:** "NOVIERI", built from strokes and arcs (`docs/design/marca/
+  novieri-wordmark.svg`), white on the rail, ink on light grounds.
+- **Symbol:** the zigzag N; on the rail and as the favicon it sits on a 7px
+  cobalt tile with a white stroke (`novieri-favicon.svg`, read at 16 and 32px).
+- **Lockup:** wordmark, a hairline and "RMM" in the muted ink, for the sign-in
+  screens, the portal and emails (`novieri-lockup.svg`).
+- **Name:** "Novieri" in the console's bar; "Page · Novieri RMM" in the tab.
 
 ### Icons
-Tabler, outline, stroke 1.75, `fill: none`, from the sprite; never a hand-drawn
-path. Every icon name in use before the port stays valid as an alias.
-
-### The top bar
-60px, white, a hairline below. A search-first command palette (flex 1, max
-520px) that is an ARIA combobox rather than a dialog; "Install agent"; the
-health and platform glyphs as 36px icon buttons with a 7px pip, each state a
-different tint *and* a different silhouette (the unknown state's pip is
-hollow); AI and documentation links; the account menu. No bell: the console
-has no personal feed, and an icon in the chrome is a promise something is
-behind it.
+Tabler, outline, stroke 1.75, from the sprite; never a hand-drawn path except
+the brand's own symbol and wordmark.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** edit `docs/design/itms-prototype-v3.html` **first**. `tokens.test.ts` requires its `:root` to match the first `:root` of `frontend/src/index.css` exactly; the design file is the authority and the console is the transcription. When a value must change, change it there, leave a comment beside it naming the old value, the new value and the measured ratio, then transcribe.
-- **Do** compute every contrast ratio with the helper in `frontend/src/test/contrast.test.ts` and add the pair to the table that matches its floor: 4.5:1 for text, 3:1 for a control boundary or state.
-- **Do** name the v3 token (`--sev-crit`, `--muted`, `--r-ctl`) in new code. The legacy aliases (`--red`, `--muted-2`, `--radius`) exist so old code keeps resolving; a module is finished migrating when it reads none of them.
-- **Do** give every pill its icon and every unmeasured value its `n/a`.
-- **Do** give every tile, KPI and figure a destination. A number an operator cannot click is a number they cannot act on.
-- **Do** run `node scripts/harmony.mjs` on the routes you touched. It is the browser's opinion of whether the page is on the allowlist, and it is the one the review wave reads.
+- **Do** change a token here first, then in `index.css`, then in the tests.
+- **Do** compute every new pair with `frontend/src/test/contrast.test.ts` and
+  add it to the table its floor belongs to (4.5:1 text, 3:1 boundary).
+- **Do** build every list, record and form from the kit
+  (`frontend/src/shell/listKit.tsx`, `detailKit.tsx`, `formKit.tsx`).
+- **Do** keep filters, tabs and create dialogs in the URL.
+- **Do** run `node scripts/harmony.mjs` on the routes you touched, in both
+  languages.
 
 ### Don't:
-- **Don't** paint `--line` or `--line-2` as a control boundary. They measure 1.23:1 and 1.49:1; the criterion asks 3:1 and the boundary scan in `contrast.test.ts` grades every rule that names a control.
-- **Don't** introduce a second accent, or reach for the retired magenta, violet, gold or teal by name. They alias to the one accent or to a severity, and a hue that is not a severity means nothing here.
-- **Don't** write a font size or a radius as a literal. 14, 16, 18 and 20px are not on the ramp; 8, 12, 14 and 16px are not on the ladder; the harmony gate reports each as a stray.
-- **Don't** type uppercase copy or an em dash into UI text. Captions are uppercased by CSS; sentence case everywhere else.
-- **Don't** ship a dead control in the chrome. No bell, no "+ New".
-- **Don't** reference an undefined token with a fallback (`var(--brand, #6d4aff)`). Two of those shipped, both silently painting a retired colour for months.
-- **Don't** widen a guard to make a colour pass. Change the colour, in the design file, first.
+- **Don't** draw cobalt on the rail, or a second accent anywhere.
+- **Don't** make a chip or a badge a pill.
+- **Don't** write a font size, radius or colour as a literal.
+- **Don't** type uppercase copy or an em dash into UI text.
+- **Don't** ship a dead control: no bell, no "New" entry without a real
+  destination.
+- **Don't** draw a second save button where the save bar belongs.
+- **Don't** let a floating control cover the save bar or a page's last line.
+- **Don't** widen a guard to make a colour pass.

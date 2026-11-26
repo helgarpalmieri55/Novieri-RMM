@@ -4,7 +4,7 @@
 Run from repo root with the backend venv:
 
     ITS_DATABASE_ADMIN_URL=postgresql+asyncpg://its_admin:...@localhost/itsuite \\
-        backend/.venv/bin/python scripts/preflight_email_domain.py toeshee.com
+        backend/.venv/bin/python scripts/preflight_email_domain.py novieri.com
 
 WHY THIS EXISTS AND WHY IT IS A REQUIRED STEP, NOT A SUGGESTION
 ==============================================================
@@ -38,7 +38,7 @@ IT CALLS THE SAME RULE THE DOORS CALL
 `app.core.identity.email_domain.is_allowed_domain`, imported, never
 re-expressed as a SQL `LIKE`. A preflight that reimplements the predicate is a
 preflight that can disagree with the gate, and it would disagree in the
-direction that matters: `LIKE '%toeshee.com'` says `eviltoeshee.com` is fine
+direction that matters: `LIKE '%novieri.com'` says `evilnovieri.com` is fine
 and the gate says it is not, so the operator is told nobody is affected and
 locks out a user anyway.
 
@@ -96,7 +96,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         nargs="?",
         default=os.environ.get("ITS_CONSOLE_EMAIL_DOMAIN", ""),
         help=(
-            "the base domain you are about to configure, e.g. toeshee.com. "
+            "the base domain you are about to configure, e.g. novieri.com. "
             "Defaults to $ITS_CONSOLE_EMAIL_DOMAIN so a value already staged "
             "in the environment can be checked without retyping it."
         ),

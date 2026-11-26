@@ -88,7 +88,7 @@ async def seed_release(
 
 def unique_version(major: int = 2) -> str:
     """Releases are global, so every test uses its own version."""
-    return f"{major}.{uuid4().int % 100000}.0"
+    return f"{major}.{uuid4().int % 10**12}.0"
 
 
 async def set_job(

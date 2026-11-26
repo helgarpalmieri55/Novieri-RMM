@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -13,6 +13,7 @@ import { MyWorkPage } from "../MyWorkPage";
 import { NewTicketDialog } from "../NewTicketDialog";
 import { ServiceDeskAdminPage } from "../ServiceDeskAdminPage";
 import { TicketDetailPage } from "../TicketDetailPage";
+import { renderPage } from "../../../test/renderPage";
 import { TicketListPage } from "../TicketListPage";
 import {
   commentVisibilityVariant,
@@ -28,6 +29,16 @@ import type {
   TicketListFilters,
   TicketOut,
 } from "../types";
+
+/**
+ * The ticket's properties save through the kit's one save bar (redesign plan,
+ * Task 7, 2.3): its "Save" stands where the panel's "Save changes" was, and
+ * the bar is there only while something changed.
+ */
+function saveBarSave(): HTMLElement {
+  return within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" });
+}
+
 
 /**
  * `GET /service-desk/tickets` answers `{items, total}` since closeout
@@ -461,14 +472,16 @@ describe("TicketListPage query states", () => {
     renderWithProviders(<TicketListPage />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByText("No tickets found.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No open tickets.")).not.toBeInTheDocument();
   });
 
+  // Fix round 1 (review): the default view is the OPEN tickets, so the empty
+  // queue says that, "No open tickets.", where it read "No tickets found.".
   it("says there are no tickets when the queue is genuinely empty", async () => {
     mockUseApi.mockReturnValue(baseApi(vi.fn(() => Promise.resolve(page([])))) as ApiClient);
     renderWithProviders(<TicketListPage />);
 
-    expect(await screen.findByText("No tickets found.")).toBeInTheDocument();
+    expect(await screen.findByText("No open tickets.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -1218,7 +1231,7 @@ describe("TicketDetailPage wiring", () => {
   it("offers the copilot on the ticket", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     expect(screen.getByRole("heading", { name: "Copilot" })).toBeInTheDocument();
     expect(screen.getByLabelText("Ask the copilot")).toBeInTheDocument();
   });
@@ -1227,7 +1240,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.type(screen.getByLabelText("Message"), "Replaced the cable.");
     await user.click(screen.getByRole("button", { name: "Send reply" }));
 
@@ -1241,7 +1254,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.click(screen.getByRole("radio", { name: /Internal note/ }));
     await user.type(screen.getByLabelText("Message"), "Escalating internally.");
     await user.click(screen.getByRole("button", { name: "Add note" }));
@@ -1256,10 +1269,10 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "resolved");
     await user.type(screen.getByLabelText("Why is the status changing? (optional)"), "Fixed.");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.changeTicketStatus).toHaveBeenCalledWith("t1", {
       to_status: "resolved",
@@ -1296,7 +1309,7 @@ describe("TicketDetailPage wiring", () => {
       const user = userEvent.setup();
       renderDetail("t1");
 
-      await screen.findByText("INC-1: Laptop won't boot");
+      await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
       expect(await screen.findByText(/This ticket belongs to Novieri IT/)).toBeInTheDocument();
       const select = await screen.findByLabelText("Move to another client");
       const offered = within(select).getAllByRole("option").map((option) => option.textContent);
@@ -1328,7 +1341,7 @@ describe("TicketDetailPage wiring", () => {
       api.me = vi.fn().mockResolvedValue(ME_FULL);
       renderDetail("t1");
 
-      await screen.findByText("INC-1: Laptop won't boot");
+      await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
       expect(screen.queryByLabelText("Move to another client")).not.toBeInTheDocument();
       expect(api.listClients).not.toHaveBeenCalled();
     });
@@ -1338,11 +1351,11 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     // Cycle 6: the label used to be "Assignee user ID" over a text box.
     expect(screen.queryByLabelText("Assignee user ID")).not.toBeInTheDocument();
     await pickEntity(user, "Assigned to", /Tessa Technician/);
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.assignTicket).toHaveBeenCalledWith("t1", { assigned_to: "tech-1" });
   });
@@ -1375,7 +1388,7 @@ describe("TicketDetailPage wiring", () => {
   it("labels status, priority, type and comment visibility for people", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     expect(screen.getAllByText("Open").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Normal").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Incident").length).toBeGreaterThanOrEqual(1);
@@ -1391,7 +1404,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue({ ...TICKET_OPEN, assigned_to: "ghost-9" });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await waitFor(() => expect(screen.getAllByText("ghost-9").length).toBeGreaterThanOrEqual(1));
   });
 
@@ -1399,12 +1412,12 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     expect(screen.queryByLabelText("Device ID")).not.toBeInTheDocument();
     await user.click(screen.getByLabelText("Device"));
     expect(await screen.findByRole("option", { name: /BUILD-01\s*linux · offline/ })).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: /WKS-042\s*windows · online/ }));
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.updateTicket).toHaveBeenCalledWith(
       "t1",
@@ -1415,7 +1428,7 @@ describe("TicketDetailPage wiring", () => {
   it("edits Description and posts comments through textareas, not one-line inputs", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     expect(screen.getByLabelText("Description").tagName).toBe("TEXTAREA");
     expect(screen.getByLabelText("Message").tagName).toBe("TEXTAREA");
   });
@@ -1431,9 +1444,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "cancelled");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     // Nothing has been sent yet -- the dialog is the gate, not a receipt.
     expect(api.changeTicketStatus).not.toHaveBeenCalled();
@@ -1452,9 +1465,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "cancelled");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
     await user.click(
       within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
     );
@@ -1472,9 +1485,9 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue({ ...TICKET_OPEN, status: "resolved" });
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "closed");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     const dialog = await screen.findByRole("dialog", { name: "Close this ticket" });
     expect(within(dialog).getByText(/can be reopened from this same panel/)).toBeInTheDocument();
@@ -1487,9 +1500,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Status"), "resolved");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(api.changeTicketStatus).toHaveBeenCalledWith("t1", {
@@ -1528,9 +1541,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await pickEntity(user, "Assigned to", /^Nobody/);
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.assignTicket).toHaveBeenCalledWith("t1", { assigned_to: null });
   });
@@ -1539,9 +1552,9 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     await user.selectOptions(screen.getByLabelText("Queue"), "q2");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(saveBarSave());
 
     expect(api.assignTicket).toHaveBeenCalledWith("t1", { queue_id: "q2" });
   });
@@ -1551,7 +1564,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "REQ-1 Laptop won't boot" });
     await user.type(screen.getByLabelText("Reason (required to reject)"), "Looks good.");
     await user.click(screen.getByRole("button", { name: "Approve" }));
 
@@ -1563,7 +1576,7 @@ describe("TicketDetailPage wiring", () => {
     const user = userEvent.setup();
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "REQ-1 Laptop won't boot" });
     await user.type(screen.getByLabelText("Reason (required to reject)"), "Not authorized.");
     await user.click(screen.getByRole("button", { name: "Reject" }));
 
@@ -1578,7 +1591,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue(TICKET_PENDING_APPROVAL);
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "REQ-1 Laptop won't boot" });
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
   });
 
@@ -1592,7 +1605,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue(TICKET_PENDING_APPROVAL);
     renderDetail("t2");
 
-    await screen.findByText("REQ-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "REQ-1 Laptop won't boot" });
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
   });
@@ -1604,7 +1617,7 @@ describe("TicketDetailPage wiring", () => {
     api.getTicket = vi.fn().mockResolvedValue(TICKET_CLOSED);
     renderDetail("t3");
 
-    await screen.findByText("INC-2: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-2 Laptop won't boot" });
     expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
     expect(
       screen.getByText("This ticket is closed and takes no new replies. Reopen it to reply."),
@@ -1625,7 +1638,7 @@ describe("TicketDetailPage wiring", () => {
   it("renders the status history table oldest-first", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     const heading = await screen.findByRole("heading", { name: "Status history" });
     // `.panel` RATHER THAN `div`: this panel is `<Panel>` now, which renders a
     // `<section>`, and the heading's nearest `div` is the panel head — which
@@ -1648,7 +1661,7 @@ describe("TicketDetailPage wiring", () => {
     api.listTicketStatusHistory = vi.fn().mockResolvedValue([]);
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     expect(await screen.findByText("No status history yet.")).toBeInTheDocument();
   });
 
@@ -1660,7 +1673,7 @@ describe("TicketDetailPage wiring", () => {
   it("does not render a device summary panel when the ticket has no linked device", async () => {
     renderDetail("t1");
 
-    await screen.findByText("INC-1: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-1 Laptop won't boot" });
     expect(screen.queryByText("Inventory summary")).not.toBeInTheDocument();
     expect(screen.queryByText("Patch state")).not.toBeInTheDocument();
   });
@@ -1671,7 +1684,7 @@ describe("TicketDetailPage wiring", () => {
     api.getDevicePatchStatus = vi.fn().mockResolvedValue(DEVICE_PATCH_STATUS);
     renderDetail("t4");
 
-    await screen.findByText("INC-3: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-3 Laptop won't boot" });
     await screen.findByText("Inventory summary");
     expect(kvValue("Hostname")).toHaveTextContent("WKS-042");
     // The OS reads as a person writes it: the agent reports "windows".
@@ -1692,7 +1705,7 @@ describe("TicketDetailPage wiring", () => {
     api.getDevicePatchStatus = vi.fn().mockResolvedValue(DEVICE_PATCH_STATUS);
     renderDetail("t4");
 
-    await screen.findByText("INC-3: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-3 Laptop won't boot" });
     expect(
       await screen.findByText("Inventory summary not available (insufficient permissions)."),
     ).toBeInTheDocument();
@@ -1709,7 +1722,7 @@ describe("TicketDetailPage wiring", () => {
     api.getDevicePatchStatus = vi.fn().mockRejectedValue(new ApiError(403, "forbidden"));
     renderDetail("t4");
 
-    await screen.findByText("INC-3: Laptop won't boot");
+    await screen.findByRole("heading", { level: 1, name: "INC-3 Laptop won't boot" });
     expect(
       await screen.findByText("Patch state not available (insufficient permissions)."),
     ).toBeInTheDocument();
@@ -1767,6 +1780,53 @@ describe("MyWorkPage", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("No open tickets are assigned to you.")).not.toBeInTheDocument();
+  });
+
+  // General ruling 10a: no tile draws a number it has no data for. Both tiles
+  // counted `tickets.data?.items ?? []`, so they read "0" (and "nothing
+  // assigned to you") while the read was pending and after it failed.
+  const tileValues = () =>
+    [...document.querySelectorAll(".stat-card .stat-value")].map((value) => value.textContent);
+
+  it("draws the absent mark on both tiles, never 0, while the read has not answered", async () => {
+    const api: Partial<ApiClient> = {
+      me: vi.fn().mockResolvedValue(ME_TECHNICIAN),
+      listTicketQueues: vi.fn().mockResolvedValue(QUEUES),
+      listTickets: vi.fn().mockImplementation(() => new Promise<never>(() => {})),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<MyWorkPage />);
+
+    await waitFor(() => expect(api.listTickets).toHaveBeenCalled());
+    expect(tileValues()).toEqual(["n/a", "n/a"]);
+    // No zero sentence either: it is a claim about tickets nobody has read.
+    expect(screen.queryByText("Nothing open is assigned to you")).not.toBeInTheDocument();
+  });
+
+  it("draws the absent mark on both tiles, never 0, when the read failed", async () => {
+    const api: Partial<ApiClient> = {
+      me: vi.fn().mockResolvedValue(ME_TECHNICIAN),
+      listTicketQueues: vi.fn().mockResolvedValue(QUEUES),
+      listTickets: vi.fn().mockRejectedValue(new Error("boom")),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<MyWorkPage />);
+
+    await screen.findByRole("alert");
+    expect(tileValues()).toEqual(["n/a", "n/a"]);
+  });
+
+  it("counts both tiles once the read answers", async () => {
+    const api: Partial<ApiClient> = {
+      me: vi.fn().mockResolvedValue(ME_TECHNICIAN),
+      listTicketQueues: vi.fn().mockResolvedValue(QUEUES),
+      listTickets: vi.fn().mockResolvedValue(page([TICKET_OPEN])),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderWithProviders(<MyWorkPage />);
+
+    await screen.findByText("INC-1");
+    expect(tileValues()).toEqual(["1", "0"]);
   });
 });
 
@@ -1929,6 +1989,108 @@ describe("ServiceDeskAdminPage wiring", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("No queues yet.")).not.toBeInTheDocument();
+  });
+
+  // ON THE FORM KIT (redesign plan, Task 7, 2.5): the create dialogs open
+  // from the URL (decision D8), and a row is edited in its own dialog, saved
+  // there with the same call.
+  it("opens New queue from ?new=queue", async () => {
+    mockUseApi.mockReturnValue(baseApi() as ApiClient);
+    renderPage("/service-desk/admin?new=queue", <ServiceDeskAdminPage />);
+    expect(await screen.findByRole("dialog", { name: "New queue" })).toBeInTheDocument();
+  });
+
+  it("opens New category from ?new=category, and nothing for someone who may not create one", async () => {
+    mockUseApi.mockReturnValue(baseApi() as ApiClient);
+    const first = renderPage("/service-desk/admin?new=category", <ServiceDeskAdminPage />);
+    expect(await screen.findByRole("dialog", { name: "New category" })).toBeInTheDocument();
+    first.unmount();
+    mockUseApi.mockReturnValue(baseApi({ me: vi.fn().mockResolvedValue(ME_TECHNICIAN) }) as ApiClient);
+    renderPage("/service-desk/admin?new=category", <ServiceDeskAdminPage />);
+    await screen.findByText("No categories yet.");
+    expect(screen.queryByRole("dialog", { name: "New category" })).toBeNull();
+  });
+
+  it("edits a category in its dialog and saves it there", async () => {
+    const user = userEvent.setup();
+    const api = baseApi({
+      listTicketCategories: vi.fn().mockResolvedValue(CATEGORIES),
+      updateTicketCategory: vi.fn().mockResolvedValue({ ...CATEGORIES[0], name: "Hardware faults" }),
+    });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    const row = (await screen.findByText("Hardware")).closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit category" });
+    // The row does not turn into a form in place.
+    expect(within(row).queryByRole("textbox")).toBeNull();
+    await user.clear(within(dialog).getByLabelText("Category name"));
+    await user.type(within(dialog).getByLabelText("Category name"), "Hardware faults");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(api.updateTicketCategory).toHaveBeenCalledWith(CATEGORIES[0]?.id, { name: "Hardware faults", active: true });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit category" })).toBeNull());
+  });
+
+  // FIX ROUND 1 (review, Important): Back closes a create dialog without its
+  // Cancel, and the next open used to show the last attempt's refusal.
+  it.each([
+    ["queue", "New queue", { createTicketQueue: vi.fn().mockRejectedValue(new ApiError(503, "")) }],
+    ["category", "New category", { createTicketCategory: vi.fn().mockRejectedValue(new ApiError(503, "")) }],
+  ] as const)("reopens the %s dialog after a failed attempt with no stale error", async (_kind, title, failing) => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(baseApi(failing) as ApiClient);
+    const { router } = renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    await user.click(await screen.findByRole("button", { name: title }));
+    let dialog = screen.getByRole("dialog", { name: title });
+    await user.type(within(dialog).getByLabelText("Key"), "helpdesk");
+    await user.type(within(dialog).getByLabelText("Name"), "Helpdesk");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/unavailable/i);
+    // Back, not Cancel: the dialog closes through the URL, and its guard asks
+    // first (general ruling 3); the person leaves.
+    // React reports the held Back's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx, "LEAVING IS A CLICK ON A LINK"); asserted, not tolerated.
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+    await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).toBeNull());
+    await user.click(screen.getByRole("button", { name: title }));
+    dialog = screen.getByRole("dialog", { name: title });
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(within(dialog).getByLabelText("Key")).toHaveValue("");
+  });
+
+  // General ruling 3: the form in `?new=queue` asks before Back drops it; Cancel does not ask.
+  it("asks before Back drops a half-written queue, and Cancel does not ask", async () => {
+    const user = userEvent.setup();
+    mockUseApi.mockReturnValue(baseApi() as ApiClient);
+    const { router } = renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    await user.click(await screen.findByRole("button", { name: "New queue" }));
+    await user.type(within(screen.getByRole("dialog", { name: "New queue" })).getByLabelText("Key"), "helpdesk");
+    // React reports the held Back's promise as an un-awaited suspension
+    // (shell/formKit.test.tsx, "LEAVING IS A CLICK ON A LINK"); asserted, not tolerated.
+    const heldBack = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(() => router.navigate(-1));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    expect(heldBack.mock.calls.every(([message]) => String(message).includes("suspended inside an `act` scope"))).toBe(true);
+    heldBack.mockRestore();
+    await user.click(within(leave).getByRole("button", { name: "Cancel" }));
+    await user.click(within(screen.getByRole("dialog", { name: "New queue" })).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New queue" })).toBeNull());
+    expect(screen.queryByRole("dialog", { name: "Leave without saving?" })).toBeNull();
+  });
+
+  it("draws no primary button in the body but the open dialog's", async () => {
+    mockUseApi.mockReturnValue(baseApi({ listTicketCategories: vi.fn().mockResolvedValue(CATEGORIES) }) as ApiClient);
+    renderPage("/service-desk/admin", <ServiceDeskAdminPage />);
+    await screen.findByText("Hardware");
+    expect(document.querySelectorAll(".btn.primary")).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "New queue" }));
+    const dialog = await screen.findByRole("dialog", { name: "New queue" });
+    expect(document.querySelectorAll(".btn.primary").length).toBe(dialog.querySelectorAll(".btn.primary").length);
   });
 
   it("hides all write controls without ticket.admin", async () => {
@@ -2149,7 +2311,7 @@ describe("service-desk stat tiles", () => {
     mockUseApi.mockReturnValue(baseApi([]) as ApiClient);
     renderOnRoute(<TicketListPage />, "/service-desk");
 
-    await screen.findByText("No tickets found.");
+    await screen.findByText("No open tickets.");
     for (const card of tiles()) {
       expect(card.querySelector(".stat-foot")).toBeNull();
       expect(card.querySelector(".stat-zero")?.textContent ?? "").not.toBe("");
@@ -2164,7 +2326,7 @@ describe("service-desk stat tiles", () => {
     mockUseApi.mockReturnValue(baseApi([]) as ApiClient);
     renderOnRoute(<TicketListPage />, "/service-desk");
 
-    await screen.findByText("No tickets found.");
+    await screen.findByText("No open tickets.");
     const unassigned = tile("Unassigned");
     expect(unassigned.querySelector(".stat-value")?.textContent).toBe("0");
     expect(unassigned).toHaveTextContent("Every ticket here has an owner");

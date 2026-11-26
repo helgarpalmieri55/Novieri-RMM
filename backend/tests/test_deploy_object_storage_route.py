@@ -44,7 +44,7 @@ def test_object_storage_is_routed_on_the_operator_entrypoint(labels) -> None:
     resolve."""
     assert labels.get("traefik.enable") == "true"
     assert labels["traefik.http.routers.minio.entrypoints"] == "websecure"
-    assert labels["traefik.http.routers.minio.tls"] == "true"
+    assert labels["traefik.http.routers.minio.tls.certresolver"] == "le"
 
 
 def test_the_route_points_at_the_s3_api_port_and_not_the_console(labels, minio) -> None:

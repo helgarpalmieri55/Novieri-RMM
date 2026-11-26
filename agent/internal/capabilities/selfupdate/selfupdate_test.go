@@ -134,7 +134,7 @@ func (r *rig) params(mut func(p map[string]any)) json.RawMessage {
 		"target_version":    "1.1.0",
 		"os":                runtime.GOOS,
 		"arch":              runtime.GOARCH,
-		"artifact_url":      "https://objects.example.test/agent-releases/1.1.0/its-agent?X-Amz-Signature=abc",
+		"artifact_url":      "https://objects.example.test/agent-releases/1.1.0/novieri-agent?X-Amz-Signature=abc",
 		"artifact_sha256":   sha,
 		"artifact_size":     len(newBinary),
 		"rollback":          false,

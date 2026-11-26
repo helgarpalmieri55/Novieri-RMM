@@ -189,7 +189,7 @@ class RoleAssignmentOut(BaseModel):
 class UserOut(BaseModel):
     """One user in this organization. Carries no credential of any kind."""
 
-    id: UUID = Field(description="The ITMS user id. Address every route here to this.")
+    id: UUID = Field(description="The Novieri RMM user id. Address every route here to this.")
     email: str = Field(description="The address this person signs in with.")
     display_name: str = Field(description="How the console shows this person.")
     status: str = Field(
@@ -224,7 +224,7 @@ class InvitedOut(BaseModel):
     """An invitation. `invite_link` is the one secret this surface returns:
     once, and only when no mail carried it (design §7)."""
 
-    user_id: UUID = Field(description="The invited technician's ITMS user id.")
+    user_id: UUID = Field(description="The invited technician's Novieri RMM user id.")
     invite_link: str | None = Field(
         description=(
             "The one-time link to hand over another way when the mail did not go; null when it "
@@ -337,7 +337,7 @@ async def list_users(
     """Everyone in the calling user's organization, with their role assignments
     and, while an invitation is open, when it expires.
 
-    The ITMS rows, which are what every other surface in the platform joins
+    The platform's own user rows, which are what every other surface in the platform joins
     against.
     """
     async with org_session(
@@ -663,7 +663,7 @@ async def delete_user(
     ctx: AuthContext = Depends(_MANAGE),
 ) -> Response:
     """Mark the user deleted and end their sessions, remembered devices and any
-    open invitation. The ITMS row is RETAINED, marked `deleted`.
+    open invitation. The platform user row is RETAINED, marked `deleted`.
 
     Retained because 89 foreign-key columns across 21 tables reference
     `users.id`, audit `actor_id` among them: a hard delete either fails on the

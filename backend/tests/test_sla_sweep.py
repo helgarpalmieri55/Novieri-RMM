@@ -96,6 +96,7 @@ from app.modules.sla.sweep import (
     sweep_all_orgs,
     sweep_org,
 )
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_sla_breach import _events, _seed_ticket, _ticket_row, _track
 from tests.test_sla_migration import _seed_calendar, _seed_policy, _seed_queue, _seed_user
 from tests.test_sla_tracking import _ALWAYS, LONDON, MONDAY_0900, _row, _stop_clocks
@@ -1424,7 +1425,7 @@ def test_create_celery_registers_the_sla_sweep(pg_cluster, tmp_path: Path) -> No
         database_admin_url=pg_cluster.admin_url,
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
     )
     with override_settings(settings):
         celery = worker.create_celery()

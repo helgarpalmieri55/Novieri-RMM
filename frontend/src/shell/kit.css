@@ -1,0 +1,87 @@
+/* The pattern kit (DESIGN.md v4: "Lists", "Records (detail)", "Forms").
+ * Tokens only: the harmony gate reads every value here at runtime. */
+.list-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* THE CHIPS FLOW BESIDE THE SEARCH (kit requests batch 1, O1). `.list-chips`
+ * as one flex item wrapped as a whole: a flex line breaks on an item's
+ * max-content width, so a row of groups never fit beside the search, which
+ * then took the first row alone, and /devices' toolbar was four rows tall at
+ * 1440. As `contents`, each group (and each select chip) is an item of the
+ * bar and wraps on its own width; the bar's own gap spaces them. A search
+ * basis alone left the toolbar as tall as before (the batch 1 report's
+ * Chromium measurement over /__preview, with a replica of /devices' toolbar). */
+.filterbar > .list-chips { display: contents; }
+/* Beside chips the search has a basis and a ceiling: wide enough for its
+ * placeholder, never a box across the whole bar. ONLY WHEN A CHIP IS DRAWN
+ * (batch 1 review, Minor 1): `ListToolbar` draws `.list-chips` whenever it is
+ * handed `chips`, and a Client chip alone draws nothing with a client chosen
+ * above, so `:not(:empty)`. With no chip drawn the search still takes the row. */
+.filterbar:has(> .list-chips:not(:empty)) > .srch-wrap { flex: 1 1 320px; max-width: 480px; }
+.chip-select { padding: 0 4px 0 11px; gap: 6px; }
+.chip-select select { min-height: 30px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.chip-select:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; background: var(--accent-s); border-bottom: 1px solid var(--line); }
+.bulkbar-count { font-weight: 600; color: var(--accent); }
+
+.back-link { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 6px; font-size: var(--t-sm); color: var(--muted); text-decoration: none; }
+.back-link:hover { color: var(--accent); }
+.back-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
+
+/* A TITLE THAT WRAPS WRAPS EVENLY (kit requests batch 1): the page's, the
+ * record's (`.ph.detail-head`) and the form's (`FormPage`) h1 are all `.ph h1`.
+ * A long record name at 390 left one word alone on its second line. */
+.ph h1 { text-wrap: balance; }
+
+.detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.detail-context { font-size: var(--t-sm); color: var(--muted); }
+.detail-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; gap: 16px; }
+.detail-main, .detail-aside { display: grid; gap: 16px; min-width: 0; }
+.tab-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1024px) { .detail-grid { grid-template-columns: minmax(0, 1fr); } }
+/* THE NARROW COLUMN FIRST (`DetailGrid asideFirst`, kit requests batch 3,
+ * B3-6): a library beside its reader. The aside is first in the DOM, so no
+ * `order`. Its own narrow rule, since `.detail-grid.aside-first` outranks the
+ * one above. */
+.detail-grid.aside-first { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+@media (max-width: 1024px) { .detail-grid.aside-first { grid-template-columns: minmax(0, 1fr); } }
+/* A library with nothing open beside it (/docs; P3 adoption pass, C's request
+ * R1): `main={null}` leaves the main column empty, so the aside is drawn
+ * alone, across the row, and the empty column takes no track and no gap. */
+.detail-grid.aside-first:has(> .detail-main:empty) { grid-template-columns: minmax(0, 1fr); }
+.detail-grid.aside-first > .detail-main:empty { display: none; }
+
+/* THE LEAVE QUESTION'S OWN LAYER (kit requests batch 2, G1). The question is
+ * portalled to the end of <body> inside this div, a stacking context above
+ * `.modal` (95) and its scrim (70), so a form's dialog never paints over it
+ * whatever order the page renders them in; under the toasts (110). Zero
+ * height, so it takes no room at the end of the page. */
+.leave-layer { position: relative; z-index: 96; }
+
+.form-page { max-width: 1100px; }
+.form-section { margin-bottom: 16px; }
+.form-section-h { margin: 0; }
+.form-section-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 14px 18px; border: 0; background: transparent; color: var(--ink); font: 600 var(--t-h2)/1.3 var(--sans); text-align: left; cursor: pointer; }
+.form-section-toggle .chev { margin-left: auto; transition: transform .15s ease; }
+.form-section-toggle .chev.open { transform: rotate(180deg); }
+.form-section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A section's lead paragraph (`FormSection`'s `description`, kit requests
+ * batch 1): flush at the top of the body, the fields' gap below, at the page
+ * description's measure (`.ph .sub`). */
+.form-section-lead { margin: 0 0 12px; max-width: 70ch; }
+
+.savebar { position: sticky; bottom: 12px; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); }
+.savebar-what { margin-right: auto; font-weight: 500; color: var(--ink); }
+.savebar-error { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--sev-crit); }
+.savebar-blocked { order: 3; flex-basis: 100%; font-size: var(--t-sm); color: var(--muted); }
+.savebar.saved { gap: 8px; }
+.savebar.saved .ic { color: var(--sev-ok); }
+/* A PHONE (DESIGN.md v4, "Forms"; the /__preview critique's P1): the label takes
+ * the first row and Discard and Save stay together at the end of the next,
+ * instead of Save wrapping alone to the left edge, away from its pair. The
+ * saved line is one icon and one sentence, and keeps its own row. */
+@media (max-width: 640px) {
+  .savebar:not(.saved) { justify-content: flex-end; }
+  .savebar:not(.saved) .savebar-what { flex-basis: 100%; margin-right: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) { .form-section-toggle .chev { transition: none; } }

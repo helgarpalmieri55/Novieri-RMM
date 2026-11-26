@@ -17,7 +17,7 @@
 // and the default ticket category are set; an org missing either gets alerts
 // that never become tickets, and nothing anywhere errors.
 
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { DurationInput } from "../../components/duration";
@@ -26,7 +26,7 @@ import type { PickerOption } from "../../components/picker";
 import { Badge, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
-import { FieldGroup, KIND_ICON, Panel } from "../../shell/components";
+import { FormSection, KIND_ICON, SaveBar, UnsavedGuard, useDraft } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { NUMERIC_FIELDS } from "../health/fields";
 import { SETTING_BOUNDS } from "../health/types";
@@ -34,8 +34,8 @@ import type { SettingsOut, SettingsUpdate } from "../health/types";
 import { useHealthSettings, useTicketCategories, useTicketQueues, useUpdateHealthSettingsMutation, useGlobalWriteReason } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
-import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField } from "./settingsState";
+import { ReadOnlyNotice } from "./ReadOnlyNotice";
+import { isForbidden, parseIntegerField, sentenceProblem } from "./settingsState";
 
 export const HEALTH_READ = "health.read";
 export const HEALTH_ADMIN = "health.admin";
@@ -104,17 +104,24 @@ export function HealthTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: b
   const queues = useTicketQueues(canRead, true);
   const categories = useTicketCategories(canRead, true);
 
+  // THE KIT'S DRAFT (redesign, Receta FO): the server's values are the saved
+  // state, and a save's answer becomes it (`markSent`).
   const seed = seedFrom(settings.data);
-  const [form, setForm] = useState<HealthForm>(seed);
-
-  const seedSignature = JSON.stringify(seed);
-  useEffect(() => {
-    setForm(JSON.parse(seedSignature) as HealthForm);
-  }, [seedSignature]);
+  const { draft, setDraft, dirty, discard, markSent } = useDraft<HealthForm>(
+    settings.data ? seed : undefined,
+  );
+  const form = draft ?? seed;
+  const setForm = (change: (current: HealthForm) => HealthForm) => setDraft(change(form));
+  // What the duration boxes are keyed on: they re-derive their unit when the
+  // values they show are replaced (a load, a save's answer, Discard), never on
+  // a keystroke. See `duration.tsx`'s own comment on why that matters.
+  const [remount, setRemount] = useState(0);
+  const seedSignature = `${JSON.stringify(seed)}#${remount}`;
+  // A save refused for a numeric field, said in the bar until it is fixed.
+  const [tried, setTried] = useState(false);
 
   const forbidden = isForbidden(settings.error);
   const failed = settings.error != null && !forbidden;
-  const dirty = isDirty(form, seed);
   const editable = canAdmin && settings.data != null;
 
   // A box the operator emptied or filled with something that is not a whole
@@ -126,6 +133,12 @@ export function HealthTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: b
   ).map((field) => field.key);
 
   function submit() {
+    // A blank or non-numeric box keeps Save enabled and is said on submit (the
+    // kit's rule: `blockedReason` is a permission, never input to correct).
+    if (invalidKeys.length > 0) {
+      setTried(true);
+      return;
+    }
     const body: SettingsUpdate = {};
     for (const field of NUMERIC_FIELDS) {
       const value = parseIntegerField(form.numbers[field.key] ?? "");
@@ -141,7 +154,9 @@ export function HealthTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: b
     body.monitoring_deep_link_template =
       form.monitoringDeepLinkTemplate === "" ? null : form.monitoringDeepLinkTemplate;
     body.auto_resolve_alert_tickets = form.autoResolveAlertTickets;
-    update.mutate(body);
+    setTried(false);
+    markSent(form);
+    update.mutate(body, { onError: () => markSent(null) });
   }
 
   // `queuesForbidden`/`categoriesForbidden` decide the WORDING of the
@@ -220,217 +235,195 @@ export function HealthTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: b
   const alertQueueOrphanId = useId();
   const ticketCategoryOrphanId = useId();
 
+  if (settings.isLoading) return <p className="note">{t("settings.health.loading")}</p>;
+  if (forbidden) return <p className="note">{t("settings.health.forbidden", { code: HEALTH_READ })}</p>;
+  if (failed) return <LoadFailure error={settings.error} />;
+
   return (
-    <Panel
-      title={t("settings.health.title")}
-      subtitle={t("settings.health.subtitle")}
-    >
-      {settings.isLoading ? (
-        <p className="note">{t("settings.health.loading")}</p>
-      ) : forbidden ? (
-        <p className="note">
-          {t("settings.health.forbidden", { code: HEALTH_READ })}
-        </p>
-      ) : failed ? (
-        <LoadFailure error={settings.error} />
-      ) : (
-        <>
-          {settings.data ? (
-            <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 14 }}>
-              <Badge variant={settings.data.configured ? "muted" : "warning"}>
-                {settings.data.configured ? t("settings.health.configured") : t("settings.health.defaults")}
-              </Badge>
-              <Badge variant={settings.data.alert_tickets_enabled ? "success" : "warning"}>
-                {settings.data.alert_tickets_enabled ? t("settings.health.ticketsOn") : t("settings.health.ticketsOff")}
-              </Badge>
-              {/* The fix is on this tab, so the hint is a link to it rather
-                  than "below" (docs/design/cross-module-guidance.md §2). */}
-              {settings.data.alert_tickets_enabled ? null : (
-                <a href="#alert-tickets">{t("settings.health.pickQueue")}</a>
-              )}
-            </div>
-          ) : null}
+    <>
+      <UnsavedGuard dirty={dirty} search={["tab"]} />
+      <p className="note" style={{ marginBottom: 14 }}>
+        {t("settings.health.subtitle")}
+      </p>
+      {!canAdmin ? <ReadOnlyNotice reason={reason} /> : null}
+      {settings.data ? (
+        <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 14 }}>
+          <Badge variant={settings.data.configured ? "muted" : "warning"}>
+            {settings.data.configured ? t("settings.health.configured") : t("settings.health.defaults")}
+          </Badge>
+          <Badge variant={settings.data.alert_tickets_enabled ? "success" : "warning"}>
+            {settings.data.alert_tickets_enabled ? t("settings.health.ticketsOn") : t("settings.health.ticketsOff")}
+          </Badge>
+          {/* The fix is on this tab, so the hint is a link to it rather
+              than "below" (docs/design/cross-module-guidance.md §2). */}
+          {settings.data.alert_tickets_enabled ? null : (
+            <a href="#alert-tickets">{t("settings.health.pickQueue")}</a>
+          )}
+        </div>
+      ) : null}
 
-          <FieldGroup title={t("settings.health.groups.timing")} icon="adjustments">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              {NUMERIC_FIELDS.map((field) => {
-                const bounds = SETTING_BOUNDS[field.key];
-                return (
-                  <Field key={field.key} label={field.label} help={field.help}>
-                    {field.kind === "duration" ? (
-                      // Keyed on the SEED, not the live edit: this remounts
-                      // (and re-derives its displayed unit from the stored
-                      // seconds) only when a fresh value arrives from the
-                      // server -- initial load, or a refetch after save --
-                      // never on every keystroke. See `duration.tsx`'s own
-                      // comment on why that distinction matters.
-                      <DurationInput
-                        key={seedSignature}
-                        value={form.numbers[field.key] ?? ""}
-                        bounds={bounds}
-                        disabled={!editable}
-                        label={field.label}
-                        unitLabel={t("settings.health.unitLabel", { label: field.label })}
-                        onChange={(next) =>
-                          setForm((current) => ({
-                            ...current,
-                            numbers: { ...current.numbers, [field.key]: next },
-                          }))
-                        }
-                      />
-                    ) : (
-                      <input
-                        className={inputClass}
-                        type="number"
-                        min={bounds?.[0]}
-                        max={bounds?.[1]}
-                        value={form.numbers[field.key] ?? ""}
-                        disabled={!editable}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            numbers: { ...current.numbers, [field.key]: event.target.value },
-                          }))
-                        }
-                      />
-                    )}
-                  </Field>
-                );
-              })}
-            </div>
-          </FieldGroup>
-
-          <div id="alert-tickets">
-          <FieldGroup title={t("settings.health.groups.alerting")} icon="heartbeat">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              {queuesUnavailable ? (
-                <Field
-                  label={t("settings.health.queueIdLabel")}
-                  help={
-                    queuesForbidden
-                      ? t("settings.health.queueIdForbidden")
-                      : t("settings.health.queueIdFailed")
-                  }
-                >
-                  <input
-                    className={inputClass}
-                    value={form.defaultAlertQueueId}
+      <FormSection title={t("settings.health.groups.timing")} icon="adjustments">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          {NUMERIC_FIELDS.map((field) => {
+            const bounds = SETTING_BOUNDS[field.key];
+            return (
+              <Field key={field.key} label={field.label} help={field.help}>
+                {field.kind === "duration" ? (
+                  // Keyed on the SEED, not the live edit: this remounts
+                  // (and re-derives its displayed unit from the stored
+                  // seconds) only when a fresh value arrives from the
+                  // server -- initial load, or a refetch after save --
+                  // never on every keystroke. See `duration.tsx`'s own
+                  // comment on why that distinction matters.
+                  <DurationInput
+                    key={seedSignature}
+                    value={form.numbers[field.key] ?? ""}
+                    bounds={bounds}
                     disabled={!editable}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, defaultAlertQueueId: event.target.value }))
+                    label={field.label}
+                    unitLabel={t("settings.health.unitLabel", { label: field.label })}
+                    onChange={(next) =>
+                      setForm((current) => ({
+                        ...current,
+                        numbers: { ...current.numbers, [field.key]: next },
+                      }))
                     }
                   />
-                </Field>
-              ) : (
-                // ONE GRID CELL, NOT TWO. `EntityPicker` and its hint used to
-                // be separate direct children of `.form-grid` -- two grid
-                // items where Task 1's whole argument for `.field-wrap` was
-                // that a control and its hint are one. Wrapped here, they are
-                // (review finding 2).
-                <div className="picker-group">
-                  <EntityPicker
-                    label={t("settings.health.queueLabel")}
-                    options={queueOptions}
-                    loading={queues.isLoading}
-                    placeholder={t("settings.health.searchQueues")}
-                    value={form.defaultAlertQueueId}
-                    disabled={!editable}
-                    // Review finding 8: `emptyHint` is unreachable here --
-                    // the synthetic "No default queue" entry means
-                    // `options.length` is never 0 -- so it is no longer
-                    // passed at all.
-                    describedBy={alertQueueOrphaned ? alertQueueOrphanId : undefined}
-                    onChange={(id) =>
-                      setForm((current) => ({ ...current, defaultAlertQueueId: id }))
-                    }
-                  />
-                  {queuesEmpty ? (
-                    <p className="form-hint">
-                      <Trans
-                        k="settings.queuePicker.none"
-                        components={{ link: <Link to="/service-desk/admin" /> }}
-                      />
-                    </p>
-                  ) : null}
-                  {alertQueueOrphaned ? (
-                    <p className="form-hint" id={alertQueueOrphanId}>
-                      {t("settings.health.queueOrphan", { id: form.defaultAlertQueueId })}
-                    </p>
-                  ) : null}
-                </div>
-              )}
-
-              {categoriesUnavailable ? (
-                <Field
-                  label={t("settings.health.categoryIdLabel")}
-                  help={
-                    categoriesForbidden
-                      ? t("settings.health.categoryIdForbidden")
-                      : t("settings.health.categoryIdFailed")
-                  }
-                >
+                ) : (
                   <input
                     className={inputClass}
-                    value={form.defaultTicketCategoryId}
+                    type="number"
+                    min={bounds?.[0]}
+                    max={bounds?.[1]}
+                    value={form.numbers[field.key] ?? ""}
                     disabled={!editable}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
-                        defaultTicketCategoryId: event.target.value,
+                        numbers: { ...current.numbers, [field.key]: event.target.value },
                       }))
                     }
                   />
-                </Field>
-              ) : (
-                <div className="picker-group">
-                  <EntityPicker
-                    label={t("settings.health.categoryLabel")}
-                    options={categoryOptions}
-                    loading={categories.isLoading}
-                    placeholder={t("settings.health.searchCategories")}
-                    value={form.defaultTicketCategoryId}
-                    disabled={!editable}
-                    describedBy={ticketCategoryOrphaned ? ticketCategoryOrphanId : undefined}
-                    onChange={(id) =>
-                      setForm((current) => ({ ...current, defaultTicketCategoryId: id }))
-                    }
-                  />
-                  {categoriesEmpty ? (
-                    <p className="form-hint">
-                      <Trans
-                        k="settings.queuePicker.noCategories"
-                        components={{ link: <Link to="/service-desk/admin" /> }}
-                      />
-                    </p>
-                  ) : null}
-                  {ticketCategoryOrphaned ? (
-                    <p className="form-hint" id={ticketCategoryOrphanId}>
-                      {t("settings.health.categoryOrphan", { id: form.defaultTicketCategoryId })}
-                    </p>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </FieldGroup>
-          </div>
-          <FieldGroup title={t("settings.health.groups.monitoring")} icon="activity">
-            <div className="form-grid" style={FOLDING_FORM_GRID}>
-              <Field label={t("settings.health.deepLink")} help={t("settings.health.blankForNone")}>
+                )}
+              </Field>
+            );
+          })}
+        </div>
+      </FormSection>
+
+      <div id="alert-tickets">
+        <FormSection title={t("settings.health.groups.alerting")} icon="heartbeat">
+          <div className="form-grid" style={FOLDING_FORM_GRID}>
+            {queuesUnavailable ? (
+              <Field
+                label={t("settings.health.queueIdLabel")}
+                help={
+                  queuesForbidden
+                    ? t("settings.health.queueIdForbidden")
+                    : t("settings.health.queueIdFailed")
+                }
+              >
                 <input
                   className={inputClass}
-                  value={form.monitoringDeepLinkTemplate}
+                  value={form.defaultAlertQueueId}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, defaultAlertQueueId: event.target.value }))
+                  }
+                />
+              </Field>
+            ) : (
+              // ONE GRID CELL, NOT TWO. `EntityPicker` and its hint used to
+              // be separate direct children of `.form-grid` -- two grid
+              // items where Task 1's whole argument for `.field-wrap` was
+              // that a control and its hint are one. Wrapped here, they are
+              // (review finding 2).
+              <div className="picker-group">
+                <EntityPicker
+                  label={t("settings.health.queueLabel")}
+                  options={queueOptions}
+                  loading={queues.isLoading}
+                  placeholder={t("settings.health.searchQueues")}
+                  value={form.defaultAlertQueueId}
+                  disabled={!editable}
+                  // Review finding 8: `emptyHint` is unreachable here --
+                  // the synthetic "No default queue" entry means
+                  // `options.length` is never 0 -- so it is no longer
+                  // passed at all.
+                  describedBy={alertQueueOrphaned ? alertQueueOrphanId : undefined}
+                  onChange={(id) =>
+                    setForm((current) => ({ ...current, defaultAlertQueueId: id }))
+                  }
+                />
+                {queuesEmpty ? (
+                  <p className="form-hint">
+                    <Trans
+                      k="settings.queuePicker.none"
+                      components={{ link: <Link to="/service-desk/admin" /> }}
+                    />
+                  </p>
+                ) : null}
+                {alertQueueOrphaned ? (
+                  <p className="form-hint" id={alertQueueOrphanId}>
+                    {t("settings.health.queueOrphan", { id: form.defaultAlertQueueId })}
+                  </p>
+                ) : null}
+              </div>
+            )}
+
+            {categoriesUnavailable ? (
+              <Field
+                label={t("settings.health.categoryIdLabel")}
+                help={
+                  categoriesForbidden
+                    ? t("settings.health.categoryIdForbidden")
+                    : t("settings.health.categoryIdFailed")
+                }
+              >
+                <input
+                  className={inputClass}
+                  value={form.defaultTicketCategoryId}
                   disabled={!editable}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      monitoringDeepLinkTemplate: event.target.value,
+                      defaultTicketCategoryId: event.target.value,
                     }))
                   }
                 />
               </Field>
-            </div>
-          </FieldGroup>
-
+            ) : (
+              <div className="picker-group">
+                <EntityPicker
+                  label={t("settings.health.categoryLabel")}
+                  options={categoryOptions}
+                  loading={categories.isLoading}
+                  placeholder={t("settings.health.searchCategories")}
+                  value={form.defaultTicketCategoryId}
+                  disabled={!editable}
+                  describedBy={ticketCategoryOrphaned ? ticketCategoryOrphanId : undefined}
+                  onChange={(id) =>
+                    setForm((current) => ({ ...current, defaultTicketCategoryId: id }))
+                  }
+                />
+                {categoriesEmpty ? (
+                  <p className="form-hint">
+                    <Trans
+                      k="settings.queuePicker.noCategories"
+                      components={{ link: <Link to="/service-desk/admin" /> }}
+                    />
+                  </p>
+                ) : null}
+                {ticketCategoryOrphaned ? (
+                  <p className="form-hint" id={ticketCategoryOrphanId}>
+                    {t("settings.health.categoryOrphan", { id: form.defaultTicketCategoryId })}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+          {/* WITH THE ALERT TICKETS IT DECIDES (redesign, Receta FO): it was
+              the one control left outside every group. */}
           <label className="flex items-center gap-2" style={{ marginTop: 14 }}>
             <input
               type="checkbox"
@@ -445,30 +438,54 @@ export function HealthTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: b
             />
             {t("settings.health.autoResolve")}
           </label>
+        </FormSection>
+      </div>
+      <FormSection title={t("settings.health.groups.monitoring")} icon="activity">
+        <div className="form-grid" style={FOLDING_FORM_GRID}>
+          <Field label={t("settings.health.deepLink")} help={t("settings.health.blankForNone")}>
+            <input
+              className={inputClass}
+              value={form.monitoringDeepLinkTemplate}
+              disabled={!editable}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  monitoringDeepLinkTemplate: event.target.value,
+                }))
+              }
+            />
+          </Field>
+        </div>
+      </FormSection>
 
-          {invalidKeys.length > 0 ? (
-            <p className="form-error" style={{ marginTop: 10 }}>
-              <Icon name={KIND_ICON.crit} size={13} />{" "}
-              {t("settings.health.invalid", { keys: invalidKeys.join(", ") })}
-            </p>
-          ) : null}
 
-          <SaveBar
-            label={t("settings.health.save")}
-            canEdit={editable && invalidKeys.length === 0}
-            disabledReason={
-              canAdmin
-                ? t("settings.health.correct")
-                : reason
-            }
-            dirty={dirty}
-            pending={update.isPending}
-            error={update.error}
-            saved={update.isSuccess && !dirty}
-            onSave={submit}
-          />
-        </>
-      )}
-    </Panel>
+
+      {/* Said as it is typed; once a save was refused, the bar says it. */}
+      {invalidKeys.length > 0 && !tried ? (
+        <p className="form-error" style={{ marginTop: 10 }}>
+          <Icon name={KIND_ICON.crit} size={13} />{" "}
+          {t("settings.health.invalid", { keys: invalidKeys.join(", ") })}
+        </p>
+      ) : null}
+
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        error={update.error}
+        problems={
+          tried && invalidKeys.length > 0
+            ? [sentenceProblem("numbers", t("settings.health.invalid", { keys: invalidKeys.join(", ") }))]
+            : []
+        }
+        saved={update.isSuccess && !dirty}
+        onDiscard={() => {
+          discard();
+          setRemount((count) => count + 1);
+          setTried(false);
+          update.reset();
+        }}
+        onSave={submit}
+      />
+    </>
   );
 }

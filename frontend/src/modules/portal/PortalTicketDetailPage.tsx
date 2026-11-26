@@ -16,7 +16,7 @@ import {
 } from "./api";
 import { usePortalMe } from "./usePortalMe";
 import { PortalAssistantPanel } from "./PortalAssistantPanel";
-import { PortalNav } from "./PortalNav";
+import { PortalTitle } from "./portalTitle";
 import {
   portalApprovalLabel,
   portalApprovalVariant,
@@ -26,8 +26,10 @@ import {
   portalTicketStatusVariant,
   portalTicketTypeLabel,
 } from "./portalState";
+import { BADGE_KIND } from "../service-desk/badgeKind";
 import type { PortalAttachmentOut } from "./types";
-import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
+import { Btn, DetailGrid, DetailHead, Panel, QueryState } from "../../shell/components";
+
 
 // Ticket detail (spec §7): status, history, the public comment thread,
 // attachments, approval outcome when present, and a reply box.
@@ -62,6 +64,9 @@ export function PortalTicketDetailPage() {
 
   return (
     <div>
+      {/* The tab names the ticket by its number (redesign plan, Task 7, 2.11):
+          "INC-4127 · Novieri RMM". The portal has no `AppShell`. */}
+      <PortalTitle page={ticket.data?.number} />
       <QueryState
         loading={ticket.isLoading}
         error={ticket.error}
@@ -71,60 +76,74 @@ export function PortalTicketDetailPage() {
       >
         {ticket.data && (
           <>
-            <PageHead
-              title={`${ticket.data.number}: ${ticket.data.subject}`}
-              description={t("portal.detail.description", {
-                opened: formatDateTime(ticket.data.created_at, zone),
-                updated: formatDateTime(ticket.data.updated_at, zone),
-              })}
+            {/* THE RECORD'S HEAD (Receta F; DESIGN.md "Records"): back to My
+                tickets, the number and the subject, the state as its pill,
+                and what kind of ticket it is beside it. No tabs: the page is
+                one conversation. */}
+            <DetailHead
+              back={{ to: "/portal", label: t("portal.nav.myTickets") }}
+              title={`${ticket.data.number} ${ticket.data.subject}`}
+              status={{
+                kind: BADGE_KIND[portalTicketStatusVariant(ticket.data.status)],
+                label: portalTicketStatusLabel(ticket.data.status),
+              }}
+              context={
+                <span className="flex flex-wrap items-center gap-2">
+                  <Badge variant={portalTicketPriorityVariant(ticket.data.priority)}>
+                    {portalTicketPriorityLabel(ticket.data.priority)}
+                  </Badge>
+                  <Badge variant="muted">{portalTicketTypeLabel(ticket.data.type)}</Badge>
+                  <span>
+                    {t("portal.detail.description", {
+                      opened: formatDateTime(ticket.data.created_at, zone),
+                      updated: formatDateTime(ticket.data.updated_at, zone),
+                    })}
+                  </span>
+                </span>
+              }
             />
-            <PortalNav canRead={canRead} />
 
-            <div className="flex flex-wrap items-center gap-2" style={{ margin: "-8px 0 14px" }}>
-              <Badge variant={portalTicketStatusVariant(ticket.data.status)}>
-                {portalTicketStatusLabel(ticket.data.status)}
-              </Badge>
-              <Badge variant={portalTicketPriorityVariant(ticket.data.priority)}>
-                {portalTicketPriorityLabel(ticket.data.priority)}
-              </Badge>
-              <Badge variant="muted">{portalTicketTypeLabel(ticket.data.type)}</Badge>
-            </div>
-
-            <div className="grid grid-2">
-              <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-                <CommentsPanel
-                  ticketId={ticketId}
-                  description={ticket.data.description}
-                  openedAt={ticket.data.created_at}
-                  comments={ticket.data.comments}
-                  canWrite={canWrite}
-                  zone={zone}
-                />
-                <AttachmentsPanel
-                  ticketId={ticketId}
-                  attachments={ticket.data.attachments}
-                  canWrite={canWrite}
-                  zone={zone}
-                />
-              </div>
-              <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-                <Panel title={t("portal.detail.details")}>
-                  <KV
-                    items={[
-                      [t("portal.detail.number"), <span className="mono">{ticket.data.number}</span>],
-                      [t("portal.detail.type"), portalTicketTypeLabel(ticket.data.type)],
-                      [t("portal.detail.opened"), formatDateTime(ticket.data.created_at, zone)],
-                      [t("portal.detail.lastUpdate"), formatDateTime(ticket.data.updated_at, zone)],
-                    ]}
+            {/* The conversation on the left, what is known about the ticket on
+                the right; one column below 1024px. */}
+            <DetailGrid
+              main={
+                <>
+                  <CommentsPanel
+                    ticketId={ticketId}
+                    description={ticket.data.description}
+                    openedAt={ticket.data.created_at}
+                    comments={ticket.data.comments}
+                    canWrite={canWrite}
+                    zone={zone}
                   />
-                </Panel>
-                {ticket.data.approval && <ApprovalOutcomeCard approval={ticket.data.approval} zone={zone} />}
-                <StatusHistoryPanel history={ticket.data.status_history} zone={zone} />
-                {/* The resolver's one placement (in-ticket only); its routes
-                    are gated on `portal.ticket.read`. */}
-                {canRead && <PortalAssistantPanel />}
-              </div>
-            </div>
+                  <AttachmentsPanel
+                    ticketId={ticketId}
+                    attachments={ticket.data.attachments}
+                    canWrite={canWrite}
+                    zone={zone}
+                  />
+                </>
+              }
+              aside={
+                <>
+                  <Panel title={t("portal.detail.details")}>
+                    <KV
+                      items={[
+                        [t("portal.detail.number"), <span className="mono">{ticket.data.number}</span>],
+                        [t("portal.detail.type"), portalTicketTypeLabel(ticket.data.type)],
+                        [t("portal.detail.opened"), formatDateTime(ticket.data.created_at, zone)],
+                        [t("portal.detail.lastUpdate"), formatDateTime(ticket.data.updated_at, zone)],
+                      ]}
+                    />
+                  </Panel>
+                  {ticket.data.approval && <ApprovalOutcomeCard approval={ticket.data.approval} zone={zone} />}
+                  <StatusHistoryPanel history={ticket.data.status_history} zone={zone} />
+                  {/* The resolver's one placement (in-ticket only); its routes
+                      are gated on `portal.ticket.read`. */}
+                  {canRead && <PortalAssistantPanel />}
+                </>
+              }
+            />
           </>
         )}
       </QueryState>
@@ -151,8 +170,8 @@ function ApprovalOutcomeCard({
           {portalApprovalLabel(approval.state)}
         </Badge>
         {/* `formatDateTime` renders NO_DATE for a null decision time, so the
-            guard is only about not printing a bare em dash beside a state that
-            has not been decided at all. */}
+            guard is only about not printing a bare absent mark beside a state
+            that has not been decided at all. */}
         {approval.decided_at && (
           <span className="note">{formatDateTime(approval.decided_at, zone)}</span>
         )}

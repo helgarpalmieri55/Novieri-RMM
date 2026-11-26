@@ -179,7 +179,9 @@ describe("the device's site (MSP clients phase 3, design §4.3)", () => {
       me: andes(["clients.read", "assets.manage"]) as Partial<Me>,
       listClientSites: vi.fn().mockResolvedValue(SITES),
     });
-    expect(await screen.findByText("Site: Principal")).toBeInTheDocument();
+    // In the Overview's Relations list, under the term "Site" (redesign Task 6, 1.2).
+    expect(await screen.findByText("Principal")).toBeInTheDocument();
+    expect(screen.getByText("Principal").closest("dd")?.previousElementSibling).toHaveTextContent("Site");
     expect(screen.getByRole("button", { name: "Change site" })).toBeInTheDocument();
   });
 
@@ -188,7 +190,8 @@ describe("the device's site (MSP clients phase 3, design §4.3)", () => {
       me: andes(["clients.read"]) as Partial<Me>,
       listClientSites: vi.fn().mockResolvedValue(SITES),
     });
-    expect(await screen.findByText("Site: Principal")).toBeInTheDocument();
+    // In the Overview's Relations list, under the term "Site".
+    expect(await screen.findByText("Principal")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Change site" })).toBeNull();
   });
 

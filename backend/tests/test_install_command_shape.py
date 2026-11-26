@@ -10,7 +10,7 @@ import base64
 
 from app.modules.agent_distribution.service import _installer_bytes, install_command
 
-_URL = "https://minio.example/agent-releases/v1/its-agent-linux-amd64?sig=abc"
+_URL = "https://minio.example/agent-releases/v1/novieri-agent-linux-amd64?sig=abc"
 _SHA = "a" * 64
 _TOKEN = "tok-DEADBEEF"
 _ENROLL = "https://console.example"
@@ -33,7 +33,7 @@ def test_darwin_reuses_the_launchd_installer_and_keeps_the_token_off_argv() -> N
     assert "shasum -a 256 -c -" in cmd
     # Runs the reviewed darwin/install.sh with the plist beside it.
     assert 'sudo bash "$d/install.sh"' in cmd
-    assert '> "$d/com.toeshee.itsagent.plist"' in cmd
+    assert '> "$d/com.novieri.rmm.agent.plist"' in cmd
     assert "--token-stdin" in cmd
     assert f"--url '{_ENROLL}'" in cmd
     # Token on stdin, never an argument.

@@ -7,7 +7,7 @@ export const health: Shape<typeof en> = {
     acknowledged: {
       label: "Reconocida",
       meaning:
-        "Asignada a una persona, y SIGUE ABIERTA. Reconocerla no detiene la comprobación, no impide que se cierre sola y no cancela una corrección ya en curso: solo pausa las nuevas notificaciones y la escalada.",
+        "Asignada a una persona, pero sigue abierta. Reconocerla no detiene la comprobación, no impide que se cierre sola y no cancela una corrección ya en curso: solo pausa las nuevas notificaciones y la escalada.",
     },
     muted: {
       label: "Silenciada",
@@ -41,7 +41,7 @@ export const health: Shape<typeof en> = {
         "La cerró una persona. Eso no demuestra que se corrigiera nada, y por eso se cuenta aparte de una recuperación.",
     },
   },
-  statusCleared: "{state} — {reason}",
+  statusCleared: "{state} · {reason}",
   severity: { critical: "Crítica", warning: "Advertencia", info: "Información" },
   comparator: {
     gt: "por encima de",
@@ -179,7 +179,7 @@ export const health: Shape<typeof en> = {
     subtitle: "Lo que otras pantallas tienen que configurar para que se generen y se vean las alertas.",
   },
   page: {
-    title: "Salud y alertas",
+    title: "Alertas",
     description: "Las alertas que ha generado el parque y lo que puede ejecutarse para cerrarlas.",
     noPermission: "No tienes permiso para ver el estado de los dispositivos, así que los paneles de abajo estarán vacíos.",
     tileCritical: "Críticas",
@@ -197,17 +197,25 @@ export const health: Shape<typeof en> = {
     tileMutedOpen: "Silenciadas y aún abiertas",
     drawerTitle: "Alerta",
   },
+  views: {
+    label: "Vistas de alertas",
+    alerts: "Alertas",
+    profiles: "Perfiles",
+    actions: "Acciones aprobadas",
+    settings: "Configuración",
+  },
   console: {
     title: "Alertas",
     forbidden: "Las alertas no están disponibles (permisos insuficientes).",
     loadFailed:
       "No se pudo cargar la lista de alertas, así que este panel no muestra las alertas del parque, ni siquiera cero. {detail}",
     subtitle: "Abiertas: {open} de {total} mostradas",
-    filterState: "Filtrar por estado",
+    stateLabel: "Estado",
+    severityLabel: "Gravedad",
     anyState: "Cualquier estado",
-    openAny: "Abiertas (cualquier estado)",
-    filterSeverity: "Filtrar por gravedad",
     anySeverity: "Cualquier gravedad",
+    chipOpen: "Abiertas",
+    resolutionLabel: "Resolución",
     filterResolution: "Filtrar por resolución",
     anyResolution: "Cualquier resolución",
     resolved: "Contadas como resueltas",
@@ -219,8 +227,8 @@ export const health: Shape<typeof en> = {
     showEvery: "Mostrar todos los dispositivos",
     sortSeverity: "Ordenar por gravedad",
     sortRepeating: "Ordenar primero las que se repiten",
-    emptyTitle: "Ninguna alerta coincide con este filtro.",
-    emptyBody: "Amplía los filtros de estado, gravedad o resolución de arriba.",
+    emptyYet: "Todavía no se ha abierto ninguna alerta.",
+    noComputer: "Ningún equipo envía todavía su estado.",
     colDevice: "Dispositivo",
     colState: "Estado",
     colSeverity: "Gravedad",
@@ -243,6 +251,7 @@ export const health: Shape<typeof en> = {
     notFix: "no cuenta como corrección",
     factDevice: "Dispositivo",
     factProfile: "Perfil",
+    factProfileNone: "Sin perfil registrado",
     factCheck: "Comprobación",
     factObserved: "Observado",
     factOpened: "Abierta",
@@ -250,6 +259,7 @@ export const health: Shape<typeof en> = {
     factOccurrences: "Repeticiones",
     factEscalated: "Escalada",
     factTicket: "Ticket",
+    factTicketNone: "Sin ticket",
     factMutedUntil: "Silenciada hasta",
     factAcknowledged: "Reconocida",
     reopened: "Reabierta tras una alerta anterior",
@@ -327,7 +337,7 @@ export const health: Shape<typeof en> = {
     colGrantedBy: "Concedida por",
     colGranted: "Concedida",
     colReason: "Motivo",
-    noReason: "— (sin motivo registrado)",
+    noReason: "Sin motivo registrado",
     revoke: "Revocar",
     failedActivate: "Activar/desactivar",
     failedExempt: "Conceder exención",
@@ -346,7 +356,7 @@ export const health: Shape<typeof en> = {
     deactivateBody:
       "La acción deja de poder enviarse. Cualquier comprobación que la declare deja de corregir, y no falla nada: simplemente la corrección nunca se declara.",
     activateAutoBody:
-      "Esta acción se ejecuta AUTOMÁTICAMENTE, sin ninguna persona en el circuito, en todos los dispositivos cuya comprobación la declare, hasta {perDevice} por dispositivo y día y {perOrg} por hora en toda la organización. Activarla puede poner una tarea firmada en el parque antes de que nadie vuelva a leer esta página.",
+      "Esta acción se ejecuta automáticamente, sin ninguna persona en el circuito, en todos los dispositivos cuya comprobación la declare, hasta {perDevice} por dispositivo y día y {perOrg} por hora en toda la organización. Activarla puede poner una tarea firmada en el parque antes de que nadie vuelva a leer esta página.",
     activateBody:
       "La acción pasa a poder enviarse. Cada ejecución sigue esperando la aprobación de una persona en la alerta que la declara.",
     exemptField: "Eximir {key} ({script} v{version})",
@@ -604,6 +614,7 @@ export const health: Shape<typeof en> = {
     matrixType: "Tipo de comprobación",
     matrixCadence: "Cadencia",
     matrixSelector: "Selector",
+    matrixSelectorNone: "No admite selector",
     answersOn: "{type} responde en {family}",
     unavailableOnFamily: "{type} no está disponible en {family}",
     yes: "sí",

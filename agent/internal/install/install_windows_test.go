@@ -50,9 +50,9 @@ func fakeBox(t *testing.T, answer int32) *[]boxCall {
 	return &calls
 }
 
-var testLink = Link{Console: "https://itms.toeshee.com", Code: "e2eLINKcode_0123456789-ABCDEFGHI"}
+var testLink = Link{Console: "https://rmm.novieri.com", Code: "e2eLINKcode_0123456789-ABCDEFGHI"}
 
-const testExe = `C:\Users\ana\Downloads\ITMS-Agent-Setup_itms.toeshee.com_e2eLINKcode_0123456789-ABCDEFGHI.exe`
+const testExe = `C:\Users\ana\Downloads\NovieriRMM-Agent-Setup_rmm.novieri.com_e2eLINKcode_0123456789-ABCDEFGHI.exe`
 
 func TestTheUACRelaunchIsRunasOnThisFileWithOnlyTheElevatedArgument(t *testing.T) {
 	calls := fakeShell(t)

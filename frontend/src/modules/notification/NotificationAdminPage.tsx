@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import type { Me } from "../../lib/api";
@@ -17,7 +17,8 @@ import { NotificationPrerequisites } from "./NotificationPrerequisites";
 import { QueueMembersPanel } from "./QueueMembersPanel";
 import { RulesPanel } from "./RulesPanel";
 import type { ChannelKind } from "./types";
-import { PageHead, StatCard, StatsGrid } from "../../shell/components";
+import { PageHead, SaveBar, StatCard, StatsGrid, useUnsavedGuard } from "../../shell/components";
+import { SwitchesProvider, useSwitchDraft } from "./switches";
 import { intlLocale } from "../../lib/datetime";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 
@@ -100,16 +101,28 @@ export function NotificationAdminPage() {
   const rules = useNotificationRules();
   const allowlist = useNotificationAllowlist();
   const deadCount = useNotificationDeadCount();
+  // Every rule's and channel's on/off switch, as one draft (`switches.tsx`).
+  const switchDraft = useSwitchDraft(rules.data, channels.data);
+  // THE PAGE'S ONE GUARD (general ruling 3): the switches, and the Add rule
+  // form in its `?new=rule` dialog, where a change of `new` (Back) leaves it.
+  const [ruleDialogDirty, setRuleDialogDirty] = useState(false);
+  const { guard, release } = useUnsavedGuard(switchDraft.dirty || ruleDialogDirty, {
+    search: ruleDialogDirty ? ["new"] : false,
+  });
 
   const link = useStatLinks("/notifications");
 
   // A PENDING QUERY IS NOT A ZERO. `channels.data?.length ?? 0` renders "0"
-  // for the whole of the first paint and for every failed load — "nothing is
+  // for the whole of the first paint and for every failed load: "nothing is
   // configured" and "we have not been told" printed identically, which is the
-  // exact defect `zeroLabel` exists to close one level further down. Undefined
-  // data gets an em dash; a zero on screen is then always a measured zero, and
-  // its `zeroLabel` always true.
-  const count = (n: number | undefined): string => (n === undefined ? "—" : String(n));
+  // exact defect `zeroLabel` exists to close one level further down. With no
+  // data a tile is `pending` (ruling 10a), which draws the kit's absent mark;
+  // a zero on screen is then always a measured zero, and its `zeroLabel`
+  // always true.
+  const noChannels = channels.data === undefined;
+  const noRules = rules.data === undefined;
+  const noAllowlist = allowlist.data === undefined;
+  const noDeadCount = deadCount.data === undefined;
 
   // WHAT THE FIGURE IS MADE OF. v3's tile for this route draws the count and
   // then its composition ("3 · Email · Teams · webhook"); the console drew a
@@ -178,7 +191,7 @@ export function NotificationAdminPage() {
   return (
     <div>
       <PageHead
-        title={t("notification.admin.title")}
+        title={t("shell.nav.item.notifications")}
         description={t("notification.admin.description")}
       />
 
@@ -194,7 +207,8 @@ export function NotificationAdminPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("notification.admin.channelsLabel")}
-          value={count(channels.data?.length)}
+          value={String(channels.data?.length ?? "")}
+          pending={noChannels}
           icon="mail"
           to={link("channels")}
           tone="blue"
@@ -203,7 +217,8 @@ export function NotificationAdminPage() {
         />
         <StatCard
           label={t("notification.admin.rulesLabel")}
-          value={count(rules.data?.length)}
+          value={String(rules.data?.length ?? "")}
+          pending={noRules}
           icon="bell"
           to={link("rules")}
           tone="blue"
@@ -212,7 +227,8 @@ export function NotificationAdminPage() {
         />
         <StatCard
           label={t("notification.admin.allowlistLabel")}
-          value={count(allowlist.data?.length)}
+          value={String(allowlist.data?.length ?? "")}
+          pending={noAllowlist}
           icon="shield-lock"
           to={link("allowlist")}
           tone="primary"
@@ -224,7 +240,8 @@ export function NotificationAdminPage() {
         />
         <StatCard
           label={t("notification.admin.deadLabel")}
-          value={count(deadCount.data?.total)}
+          value={String(deadCount.data?.total ?? "")}
+          pending={noDeadCount}
           /* THE GLYPH IS THE KIND, NOT THE HUE. This tile is drawn crit
              (`tone="red" urgent`), and the plan's severity table pairs crit
              with `circle-x`; `alert-triangle` is warn's glyph. Carrying it
@@ -245,16 +262,31 @@ export function NotificationAdminPage() {
       {/* One list per panel, full width, the way the design draws its rules
           panel: every row here names a destination or a person, and a
           half-width column truncates exactly the part that matters. */}
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-        <RulesPanel canAdmin={canAdmin} />
-        <ChannelsPanel canAdmin={canAdmin} />
-        <QueueMembersPanel canAdmin={canAdmin} />
-        <AllowlistPanel canAdmin={canAdmin} />
-        {/* The profile zone (`/me`.timezone, cycle 2) reaches the one panel
-            that renders a time. This page already holds `me` for its
-            permission gate, so nothing new is fetched. */}
-        <DeliveriesPanel zone={me.data?.timezone} />
-      </div>
+      <SwitchesProvider value={{ ...switchDraft.switches, reportDialog: setRuleDialogDirty, release }}>
+        <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <RulesPanel canAdmin={canAdmin} />
+          <ChannelsPanel canAdmin={canAdmin} />
+          <QueueMembersPanel canAdmin={canAdmin} />
+          <AllowlistPanel canAdmin={canAdmin} />
+          {/* The profile zone (`/me`.timezone, cycle 2) reaches the one panel
+              that renders a time. This page already holds `me` for its
+              permission gate, so nothing new is fetched. */}
+          <DeliveriesPanel zone={me.data?.timezone} />
+        </div>
+      </SwitchesProvider>
+      {guard}
+      {/* THE ONE SAVE BAR (Task 7, 2.8): the rules' and channels' switches,
+          saved or discarded together. */}
+      {canAdmin ? (
+        <>
+          <SaveBar
+            dirty={switchDraft.dirty}
+            saving={switchDraft.saving}
+            onDiscard={switchDraft.discard}
+            onSave={switchDraft.save}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

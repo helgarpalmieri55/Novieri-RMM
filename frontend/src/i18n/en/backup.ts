@@ -71,8 +71,8 @@ export const backup = {
   },
   // What a run dispatched, in a sentence.
   runMessage: {
-    none: "Nothing was dispatched — no backup job was created for that device.",
-    queued: { one: "Backup queued — {count} job dispatched.", other: "Backup queued — {count} jobs dispatched." },
+    none: "Nothing was dispatched: no backup job was created for that device.",
+    queued: { one: "Backup queued: {count} job dispatched.", other: "Backup queued: {count} jobs dispatched." },
   },
   picker: {
     deviceEmptyHint:
@@ -129,7 +129,6 @@ export const backup = {
     offsiteSubtitle: "A second, locked copy needs a recovery key and working off-site storage.",
   },
   points: {
-    title: "Backup & Restore",
     description: "Backup coverage, restore points, and verification.",
     runBackup: "Run backup",
     tileSuccess: "Backup success",
@@ -147,8 +146,9 @@ export const backup = {
     filterAria: "Filter backup points",
     allPoints: "All backup points",
     awaitingVerification: "Awaiting verification",
+    deviceChip: "Device",
+    allDevices: "All devices",
     emptyNone: "No backup points recorded yet.",
-    emptyFiltered: "No backup point is awaiting verification.",
     colDevice: "Device",
     colRepository: "Repository",
     colTaken: "Taken",
@@ -179,7 +179,7 @@ export const backup = {
     noEntries: "No entries in this backup point.",
     target: "Restore target",
     original: "Original location",
-    originalWarning: "— overwrites the files currently on this device",
+    originalWarning: "(overwrites the files currently on this device)",
     alternate: "Alternate location",
     alternatePath: "Alternate target path",
     selectOne: "Select at least one file or folder to restore",
@@ -216,7 +216,6 @@ export const backup = {
     filterAria: "Filter policies by state",
     allPolicies: "All policies",
     emptyNone: "No backup policies configured.",
-    emptyFiltered: "No policy matches that filter.",
     colScope: "Scope",
     colClient: "Client",
     colRepository: "Repository",
@@ -257,7 +256,6 @@ export const backup = {
     everyPolicy: "Every device has a backup policy",
     filterAria: "Show devices",
     allDevices: "All devices",
-    emptyFiltered: "No device matches that filter.",
     emptyNone: "No devices yet.",
     colDevice: "Device",
     colProtection: "Protection",
@@ -295,7 +293,6 @@ export const backup = {
     filterAria: "Filter repositories by state",
     allRepositories: "All repositories",
     emptyNone: "No repositories registered.",
-    emptyFiltered: "No repository matches that filter.",
     colName: "Name",
     colClient: "Client",
     colState: "State",
@@ -315,7 +312,7 @@ export const backup = {
   },
   offsite: {
     title: "Off-site copy",
-    description: "A second, locked copy of every backup, somewhere this server cannot delete it.",
+    description: "A second, locked copy that this server cannot delete.",
     keyTitle: "Recovery key",
     keySubtitle: "Lets you read the off-site copy if this server is ever lost. Only you hold it.",
     keySetUp: "Set up the recovery key",
@@ -386,7 +383,7 @@ export const backup = {
     gfsMonthly: "Monthly copies to keep",
     gfsYearly: "Yearly copies to keep",
     keyHelp: "Leave blank to keep the current one.",
-    editStorage: "Edit off-site storage",
+    editStorageNamed: "Edit {name}",
     targetIntro:
       "Create the bucket with Object Lock turned on first; it cannot be added later. Give this server a key that can write, read and set locks, but not change the bucket or bypass its lock.",
     storageAddress: "Storage address",
@@ -398,7 +395,6 @@ export const backup = {
     lockDaysHelp: "Nobody can delete or change a locked backup, including someone who takes over this server.",
     speedLimit: "Upload speed limit (Mbit/s)",
     speedLimitHelp: "Leave blank for no limit.",
-    save: "Save",
     add: "Add",
     copyTitle: "Copy these repositories off-site",
     copyEmpty: "No repositories yet.",

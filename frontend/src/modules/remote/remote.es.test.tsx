@@ -271,10 +271,11 @@ describe("the sessions page, in Spanish", () => {
     expect(screen.getByText("Flota, ahora mismo")).toBeInTheDocument();
     expect(screen.getByText("Activas ahora")).toBeInTheDocument();
     expect(screen.getByText("Grabadas")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Todas las sesiones/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Sesiones activas/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Con grabación/ })).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "Todas las sesiones" })).toBeInTheDocument();
+    // The strip that filtered the list is chips on the same ?state= (redesign plan, Receta L point 5).
+    const chips = screen.getByRole("group", { name: "Sesiones" });
+    expect(within(chips).getByRole("button", { name: "Todas las sesiones" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(chips).getByRole("button", { name: "Sesiones activas" })).toBeInTheDocument();
+    expect(within(chips).getByRole("button", { name: "Con grabación" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Buscar sesiones" })).toHaveAttribute(
       "placeholder",
       "Buscar por dispositivo, protocolo o estado",
@@ -303,7 +304,8 @@ describe("the sessions page, in Spanish", () => {
     const { container } = renderApp(<SessionsPage />);
     await screen.findAllByText("workstation-1");
     await user.type(screen.getByRole("textbox", { name: "Buscar sesiones" }), "zzz");
-    expect(await screen.findByText("Ninguna sesión coincide con ese filtro.")).toBeInTheDocument();
+    // The kit's empty list with a filter on (redesign plan, Receta L).
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -325,10 +327,10 @@ describe("the sessions page, in Spanish", () => {
     stubApi();
     renderApp(<SessionsPage />);
     await screen.findAllByText("workstation-1");
-    expect(screen.getByRole("tabpanel", { name: "Todas las sesiones" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Sesiones" })).toBeInTheDocument();
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("heading", { name: "Remote sessions" })).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel", { name: "All sessions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All sessions" })).toBeInTheDocument();
     expect(screen.getByText("Awaiting consent")).toBeInTheDocument();
     expect(screen.getByText("2m 05s")).toBeInTheDocument();
     expect(screen.getByText("Unattended")).toBeInTheDocument();
@@ -422,11 +424,11 @@ describe("the Start session dialog, in Spanish", () => {
     await user.type(screen.getByLabelText("Motivo"), "x");
     await user.click(screen.getByRole("button", { name: "Iniciar sesión remota" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "El motivo se escribe en el registro de auditoría — indica al menos una referencia de ticket",
+      "El motivo se escribe en el registro de auditoría: indica al menos una referencia de ticket",
     );
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Reason is written to the audit log — give at least a ticket reference",
+      "Reason is written to the audit log: give at least a ticket reference",
     );
   });
 
@@ -439,7 +441,7 @@ describe("the Start session dialog, in Spanish", () => {
     expect(screen.getByRole("status")).toHaveTextContent("No se pide consentimiento a nadie en el dispositivo.");
     await user.click(screen.getByRole("button", { name: "Iniciar sesión remota" }));
     const confirm = await screen.findByRole("dialog", { name: "Iniciar una sesión desatendida" });
-    expect(confirm).toHaveTextContent("El modo desatendido se conecta SIN pedir consentimiento a la persona que está en ese dispositivo.");
+    expect(confirm).toHaveTextContent("El modo desatendido se conecta sin pedir nunca consentimiento a la persona que está en ese dispositivo.");
     expect(confirm).toHaveTextContent("El motivo que has indicado se escribe en el registro de auditoría inmutable junto con esta sesión.");
     expect(within(confirm).getByRole("button", { name: "Iniciar sesión remota desatendida" })).toBeInTheDocument();
     expectNoEnglish(confirm);
@@ -455,7 +457,7 @@ describe("the Start session dialog, in Spanish", () => {
     await pick(user, /sentinel-2/);
     await user.type(screen.getByLabelText("Motivo"), "INC-4821");
     expect(screen.getAllByRole("status")[0]).toHaveTextContent(
-      "sentinel-2 está sin conexión — el agente no responde, así que la conexión no se completará.",
+      "sentinel-2 está sin conexión: el agente no responde, así que la conexión no se completará.",
     );
     await user.click(screen.getByRole("button", { name: "Iniciar sesión remota" }));
     const confirm = await screen.findByRole("dialog", { name: "Iniciar una sesión en un dispositivo que no puede responder" });
@@ -469,7 +471,7 @@ describe("the Start session dialog, in Spanish", () => {
     await pick(user, /legacy-3/);
     expect(
       await screen.findByText(
-        "legacy-3 tiene un agente demasiado antiguo para compartir su pantalla — la sesión se rechaza hasta que se actualice el agente.",
+        "legacy-3 tiene un agente demasiado antiguo para compartir su pantalla: la sesión se rechaza hasta que se actualice el agente.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Actualizar el agente" })).toHaveAttribute(
@@ -543,7 +545,8 @@ describe("the live screen, in Spanish", () => {
     expect(await screen.findByText("Esperando a que la persona que está en el dispositivo permita esta sesión")).toBeInTheDocument();
     expect(screen.getByText("Tiene 30 segundos para responder. Si nadie responde, la solicitud se rechaza.")).toBeInTheDocument();
     expect(screen.getByText("Esperando el consentimiento")).toBeInTheDocument();
-    expect(screen.getByText("La pantalla del dispositivo, en directo.")).toBeInTheDocument();
+    // The record head (redesign plan, Receta F): back to the sessions, in place of the head's sentence.
+    expect(screen.getByRole("link", { name: "Sesiones remotas" })).toHaveAttribute("href", "/remote");
     expect(screen.getByRole("button", { name: "Finalizar sesión" })).toBeInTheDocument();
     expectNoEnglish(container);
   });
@@ -704,7 +707,7 @@ describe("the live screen, in Spanish", () => {
     expectNoEnglish(confirm);
     await user.click(within(confirm).getByRole("button", { name: "Finalizar sesión" }));
     await waitFor(() => expect(api.stopRemoteSession).toHaveBeenCalled());
-    expect(await screen.findByRole("alert")).toHaveTextContent("Esa sesión sigue en marcha — no se finalizó.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Esa sesión sigue en marcha: no se finalizó.");
   });
 });
 
@@ -724,14 +727,15 @@ describe("the recording player, in Spanish", () => {
     stubApi();
     const { container } = renderPlayer();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reproducir" })).toBeEnabled());
-    expect(screen.getByText("Grabación de la sesión")).toBeInTheDocument();
+    // The record head names the machine now (redesign plan, Receta F; O3 3.6), and says what the page is.
+    expect(await screen.findByRole("heading", { level: 1, name: "workstation-1" })).toBeInTheDocument();
     expect(screen.getByText("Una grabación almacenada. Nada de lo que hay aquí llega al dispositivo.")).toBeInTheDocument();
     expect(screen.getByLabelText("Posición de reproducción")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Pantalla de la grabación" })).toBeInTheDocument();
     expectNoEnglish(container);
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
-    expect(screen.getByText("Session recording")).toBeInTheDocument();
+    expect(screen.getByText("A stored recording. Nothing here reaches the device.")).toBeInTheDocument();
   });
 
   it("words a recording with no frames", async () => {
@@ -795,14 +799,15 @@ describe("the remote sentences built outside React, in Spanish", () => {
     expect(consentModeLabel("attended")).toBe("Asistida");
     expect(consentModeLabel("unattended")).toBe("Desatendida");
     expect(formatDuration("2026-01-01T00:00:00.000Z", "2026-01-01T00:02:05.000Z")).toBe("2 min 05 s");
-    expect(formatDuration(null, null)).toBe("—");
+    // A session not started has no duration: the kit's absent mark, in Spanish.
+    expect(formatDuration(null, null)).toBe("n/d");
     setActiveLanguage("en");
     expect(formatDuration("2026-01-01T00:00:00.000Z", "2026-01-01T00:02:05.000Z")).toBe("2m 05s");
   });
 
   it("words why a device cannot be reached", () => {
-    expect(unreachableReason(NO_AGENT)).toBe("no tiene agente — una sesión remota necesita uno, así que no se puede establecer la conexión");
-    expect(unreachableReason(OFFLINE)).toBe("está sin conexión — el agente no responde, así que la conexión no se completará");
+    expect(unreachableReason(NO_AGENT)).toBe("no tiene agente: una sesión remota necesita uno, así que no se puede establecer la conexión");
+    expect(unreachableReason(OFFLINE)).toBe("está sin conexión: el agente no responde, así que la conexión no se completará");
     expect(unreachableReason(OLD_AGENT)).toContain("demasiado antiguo para compartir su pantalla");
     expect(unreachableReason(ONLINE)).toBeNull();
   });

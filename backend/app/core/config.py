@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     s3_secret_key: str | None = None
     s3_bucket: str = "it-suite"
 
-    # The https address people open the console at, e.g. https://itms.toeshee.com.
+    # The https address people open the console at, e.g. https://rmm.novieri.com.
     # Optional: Microsoft sign-in for email intake needs it (as the OAuth
     # redirect URI) and so does the MCP server (the resource is this + "/mcp",
     # `app/core/mcp_channel.py::mcp_resource`); their routes answer 503 without

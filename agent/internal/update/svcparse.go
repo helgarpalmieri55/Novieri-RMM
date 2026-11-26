@@ -13,11 +13,11 @@ import (
 // Service identities. The unit, label and service name are fixed by the
 // shipped installers; the service definition is never changed (spec §5.1).
 const (
-	systemdUnit        = "its-agent"
-	helperUnit         = "its-agent-update"
-	launchdLabel       = "com.toeshee.itsagent"
-	launchdHelperLabel = "com.toeshee.itsagent.update"
-	windowsService     = "its-agent"
+	systemdUnit        = "novieri-agent"
+	helperUnit         = "novieri-agent-update"
+	launchdLabel       = "com.novieri.rmm.agent"
+	launchdHelperLabel = "com.novieri.rmm.agent.update"
+	windowsService     = "novieri-agent"
 )
 
 func parseSystemdShow(out string) (pid int, path string, err error) {

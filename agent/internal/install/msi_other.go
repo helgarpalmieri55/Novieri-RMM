@@ -9,6 +9,6 @@ import (
 
 // RunMsi is Windows-only: the MSI exists for Windows alone.
 func RunMsi(_ string) int {
-	fmt.Fprintln(os.Stderr, "its-agent --msi-install runs on Windows, from the ITMS MSI.")
+	fmt.Fprintln(os.Stderr, "novieri-agent --msi-install runs on Windows, from the Novieri RMM MSI.")
 	return 2
 }

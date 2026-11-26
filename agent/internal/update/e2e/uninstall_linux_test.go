@@ -17,7 +17,7 @@ import (
 // the self-update scenarios are), a SIGNED agent.uninstall is sent through
 // the harness gateway, and the helper -- a transient unit outside the
 // service's cgroup -- must stop and disable the unit and remove the unit
-// file, /etc/its-agent, the binary and the data directory.
+// file, /etc/novieri-agent, the binary and the data directory.
 func TestUninstallLinux(t *testing.T) {
 	binDir := os.Getenv("E2E_BIN_DIR")
 	if binDir == "" {
@@ -50,11 +50,11 @@ func TestUninstallLinux(t *testing.T) {
 	}
 
 	gone := []string{
-		plat.target(), plat.dataDir(), "/etc/systemd/system/its-agent.service", "/etc/its-agent",
+		plat.target(), plat.dataDir(), "/etc/systemd/system/novieri-agent.service", "/etc/novieri-agent",
 	}
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
-		state, _ := runQuiet("systemctl", "show", "its-agent.service", "-p", "LoadState")
+		state, _ := runQuiet("systemctl", "show", "novieri-agent.service", "-p", "LoadState")
 		var left []string
 		for _, path := range gone {
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -65,21 +65,21 @@ func TestUninstallLinux(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			helper, _ := runQuiet("journalctl", "-u", "its-agent-uninstall", "--no-pager", "-n", "100")
+			helper, _ := runQuiet("journalctl", "-u", "novieri-agent-uninstall", "--no-pager", "-n", "100")
 			t.Fatalf("not removed within 3 minutes: %s, still present %v\nhelper log:\n%s",
 				strings.TrimSpace(state), left, helper)
 		}
 		time.Sleep(2 * time.Second)
 	}
 	// The helper's last acts are the daemon-reload that makes LoadState
-	// not-found, its "its-agent removed" line and its exit, so the loop above
+	// not-found, its "novieri-agent removed" line and its exit, so the loop above
 	// can see everything gone a few milliseconds before its process is (CI,
 	// 2026-10-29: is-active asked 1 ms after that line, and the unit
 	// deactivated in the same second). What is asserted is that the helper
 	// exits, not that it already has by the poll that saw the files go.
 	exitBy := time.Now().Add(30 * time.Second)
 	for {
-		out, _ := runQuiet("systemctl", "is-active", "its-agent-uninstall")
+		out, _ := runQuiet("systemctl", "is-active", "novieri-agent-uninstall")
 		if strings.TrimSpace(out) != "active" {
 			break
 		}

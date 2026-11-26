@@ -4,7 +4,10 @@
  * severity vocabulary is one closed set.
  */
 
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -126,6 +129,130 @@ describe("Tile", () => {
     const tile = container.querySelector(".tile");
     expect(tile).toHaveClass("crit", "has-sp");
     expect(tile?.querySelector("svg.sp")).not.toBeNull();
+  });
+});
+
+describe("Tile while its read has not answered (kit requests batch 2, K3; ruling 10a)", () => {
+  const pendingTile = (pending: boolean) =>
+    render(
+      <MemoryRouter>
+        <Tile
+          label="Deployed"
+          value="0"
+          unit="%"
+          sub="Nothing has ever been deployed"
+          kind="crit"
+          spark={[4, 5, 4, 6, 9]}
+          to="/deploy"
+          pending={pending}
+        />
+      </MemoryRouter>,
+    );
+
+  it("draws no number and no claim: the absent mark, no unit, no sub-line, no trend", () => {
+    const { container } = pendingTile(true);
+    const tile = container.querySelector(".tile");
+    // The kit's one absent mark (the Absent Zero Rule), as StatCard's pending draws it.
+    expect(tile?.querySelector(".v")).toHaveTextContent(/^n\/a$/);
+    expect(tile?.querySelector(".v small")).toBeNull();
+    expect(screen.queryByText("Nothing has ever been deployed")).toBeNull();
+    expect(tile?.querySelector(".z")).toBeNull();
+    expect(tile?.querySelector("svg.sp")).toBeNull();
+  });
+
+  it("wears no wash, which would be a claim about a reading", () => {
+    const { container } = pendingTile(true);
+    expect(container.querySelector(".tile")).not.toHaveClass("crit");
+  });
+
+  it("says it is busy, and keeps its label and where it leads", () => {
+    pendingTile(true);
+    const link = screen.getByRole("link", { name: /Deployed/ });
+    expect(link).toHaveAttribute("aria-busy", "true");
+    expect(link).toHaveAttribute("href", "/deploy");
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<Tile\b[^>]*\bpending\b/);
+  });
+
+  it("is drawn pending after a failed read too, as pages pass it: pending={!q.data} (batch 2 review, H2)", async () => {
+    // Ruling 10a binds "pending or failed": a failed read has no figure and
+    // no claim either. `isPending` alone would draw the 0 and the claim after
+    // a failure, so the doc tells pages to pass `!q.data`.
+    function Deployed() {
+      const q = useQuery({ queryKey: ["deployed"], queryFn: () => Promise.reject(new Error("down")) });
+      return (
+        <>
+          <Tile label="Deployed" value={String(q.data ?? 0)} sub="Nothing has ever been deployed" pending={!q.data} />
+          <p>{q.isError ? "failed" : "reading"}</p>
+        </>
+      );
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <Deployed />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("failed")).toBeInTheDocument();
+    expect(container.querySelector(".tile .v")).toHaveTextContent(/^n\/a$/);
+    expect(screen.queryByText("Nothing has ever been deployed")).toBeNull();
+    expect(container.querySelector(".tile")).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("is the tile as before once the read answers", () => {
+    const { container } = pendingTile(false);
+    const tile = container.querySelector(".tile");
+    expect(tile).not.toHaveAttribute("aria-busy");
+    expect(tile?.querySelector(".v")).toHaveTextContent("0%");
+    expect(screen.getByText("Nothing has ever been deployed")).toBeInTheDocument();
+    expect(tile).toHaveClass("crit");
+  });
+});
+
+/*
+ * TWO WAYS TO HAVE NO FIGURE (coordinator, P3 adoption pass). `pending`: the
+ * read has not answered, so the tile says nothing under the mark and is
+ * busy. `absent`: the read answered and there is no figure to draw (a success
+ * rate with no completed runs), so the tile draws the mark and KEEPS the line
+ * that says why ("No completed runs yet"), and is not busy: nothing is coming.
+ */
+describe("Tile with an absent figure: the read answered, and there is nothing to count", () => {
+  const absentTile = (props: { pending?: boolean } = {}) =>
+    render(
+      <MemoryRouter>
+        <Tile label="Success rate" value="0" unit="%" sub="No completed runs yet" kind="crit" spark={[1, 2, 3]} to="/jobs" absent {...props} />
+      </MemoryRouter>,
+    );
+
+  it("draws the absent mark, no unit, no wash and no sparkline, and keeps the line that says why", () => {
+    const { container } = absentTile();
+    const tile = container.querySelector(".tile");
+    expect(tile?.querySelector(".v")).toHaveTextContent(/^n\/a$/);
+    expect(tile?.querySelector(".v small")).toBeNull();
+    expect(tile?.querySelector(".z")).toHaveTextContent("No completed runs yet");
+    expect(tile).not.toHaveClass("crit");
+    expect(tile?.querySelector("svg.sp")).toBeNull();
+  });
+
+  it("is not busy, and keeps its label and where it leads", () => {
+    absentTile();
+    const link = screen.getByRole("link", { name: /Success rate/ });
+    expect(link).not.toHaveAttribute("aria-busy");
+    expect(link).toHaveAttribute("href", "/jobs");
+  });
+
+  it("is on /__preview, so the browser's a11y pass measures it", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    expect(preview).toMatch(/<Tile\b[^>]*\babsent\b/);
+  });
+
+  it("is pending, with nothing under the mark, when its read has not answered either", () => {
+    const { container } = absentTile({ pending: true });
+    expect(container.querySelector(".tile")).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".z")).toBeNull();
   });
 });
 
@@ -424,6 +551,17 @@ describe("StatCard renders a Tile", () => {
     expect(container.querySelector(".stat-card .stat-label")).toHaveTextContent("At risk");
   });
 
+  it("with `to={null}`, links nowhere on purpose and keeps its figure and hooks", () => {
+    // A tile counted under a Client chip whose only destination lists every
+    // client's rows (general ruling 2): the caller says "nowhere" in so many
+    // words, and the type still refuses a tile that says nothing.
+    const { container } = card({ to: null });
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container.querySelector(".stat-card")).toHaveClass("tile");
+    expect(container.querySelector(".stat-card")).not.toHaveAttribute("href");
+    expect(container.querySelector(".stat-card .stat-value")).toHaveTextContent("18");
+  });
+
   it("says `n/a` while the figure is unmeasured, rather than a confident zero", () => {
     // A tile above a `QueryState` renders while its list is still loading, so
     // `String(items.length)` is 0 -- a measurement nobody made, on every stat
@@ -436,6 +574,67 @@ describe("StatCard renders a Tile", () => {
     // Not urgent and not "nothing breached": both are claims about a reading.
     expect(container.querySelector(".tile")).not.toHaveClass("urgent");
     expect(container.querySelector(".stat-zero")).toBeNull();
+  });
+
+  /*
+   * PENDING IS TILE'S PENDING (coordinator, P3 adoption pass; ruling 10a).
+   * StatCard drew the absent mark itself and kept everything else: no
+   * `aria-busy`, and its `foot` stayed under the mark, though a foot can be a
+   * claim about the data the card does not have yet ("Mostly “Job sent”, 2 of
+   * 3"). It now hands `pending` to the Tile it renders, so the two pendings are
+   * one: the label, the destination and the n/a mark, and nothing else.
+   */
+  it("while pending says it is busy, draws no foot, no trend and no sparkline, and keeps its label, link and the n/a mark", () => {
+    const { container } = card({
+      value: "3",
+      pending: true,
+      foot: "Mostly “Job sent”, 2 of 3",
+      trend: { direction: "up", label: "+4 since yesterday" },
+      spark: [1, 2, 3, 4],
+    });
+    const link = screen.getByRole("link", { name: /At risk/ });
+    expect(link).toHaveAttribute("aria-busy", "true");
+    expect(link).toHaveAttribute("href", "/devices?state=at-risk");
+    expect(container.querySelector(".stat-value")).toHaveTextContent(/^n\/a$/);
+    expect(container.querySelector(".stat-label")).toHaveTextContent("At risk");
+    expect(screen.queryByText("Mostly “Job sent”, 2 of 3")).toBeNull();
+    expect(container.querySelector(".stat-foot")).toBeNull();
+    expect(container.querySelector(".z")).toBeNull();
+    expect(container.querySelector(".stat-trend")).toBeNull();
+    expect(container.querySelector("svg.sp")).toBeNull();
+    expect(container.querySelector(".tile")).toHaveClass("mut");
+  });
+
+  it("with an absent figure draws the mark, keeps its foot, and is not busy, urgent or zero", () => {
+    const { container } = card({
+      value: "0",
+      absent: true,
+      tone: "red",
+      urgent: true,
+      zeroLabel: "Nothing failed",
+      foot: "No completed runs yet",
+      trend: { direction: "up", label: "+4 since yesterday" },
+    });
+    const link = screen.getByRole("link", { name: /At risk/ });
+    expect(link).not.toHaveAttribute("aria-busy");
+    expect(container.querySelector(".stat-value")).toHaveTextContent(/^n\/a$/);
+    expect(container.querySelector(".stat-foot")).toHaveTextContent("No completed runs yet");
+    expect(container.querySelector(".stat-zero")).toBeNull();
+    expect(container.querySelector(".stat-trend")).toBeNull();
+    expect(container.querySelector(".tile")).not.toHaveClass("urgent");
+    expect(container.querySelector(".tile")).not.toHaveClass("crit");
+  });
+
+  it("is pending, foot and all, when its read has not answered, even with absent set", () => {
+    const { container } = card({ value: "0", absent: true, pending: true, foot: "No completed runs yet" });
+    expect(container.querySelector(".tile")).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".stat-foot")).toBeNull();
+  });
+
+  it("once its read answers, is not busy and draws its foot", () => {
+    const { container } = card({ value: "3", foot: "Mostly “Job sent”, 2 of 3" });
+    expect(container.querySelector(".tile")).not.toHaveAttribute("aria-busy");
+    expect(container.querySelector(".stat-foot")).toHaveTextContent("Mostly “Job sent”, 2 of 3");
   });
 
   it("wears the crit wash only when urgent and red, and never for a measured zero", () => {

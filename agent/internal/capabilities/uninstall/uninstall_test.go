@@ -50,8 +50,8 @@ func (f *fakeLauncher) seen() []launchCall {
 func bound(f *fakeLauncher) *uninstall.Service {
 	return uninstall.New(uninstall.Options{
 		Launch:  f.launch,
-		Binary:  func() (string, error) { return "/usr/local/bin/its-agent", nil },
-		DataDir: "/var/lib/its-agent",
+		Binary:  func() (string, error) { return "/usr/local/bin/novieri-agent", nil },
+		DataDir: "/var/lib/novieri-agent",
 		Logger:  quiet(),
 	})
 }
@@ -88,7 +88,7 @@ func TestASignedJobSchedulesTheHelperAndAnswersScheduled(t *testing.T) {
 	if body["scheduled"] != true {
 		t.Fatalf("result = %v, want {scheduled: true}", body)
 	}
-	if got := f.seen(); len(got) != 1 || got[0] != (launchCall{"/usr/local/bin/its-agent", "/var/lib/its-agent"}) {
+	if got := f.seen(); len(got) != 1 || got[0] != (launchCall{"/usr/local/bin/novieri-agent", "/var/lib/novieri-agent"}) {
 		t.Fatalf("launcher calls = %v; the helper is told THIS agent's binary and data directory, "+
 			"and nothing from the job", got)
 	}

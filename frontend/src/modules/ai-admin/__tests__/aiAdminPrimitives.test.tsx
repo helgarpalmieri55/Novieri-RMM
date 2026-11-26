@@ -101,7 +101,7 @@ describe("ChatPanel's recent sessions, dated", () => {
     await waitFor(() => expect(document.querySelector("time")?.getAttribute("title")).toMatch(/^15 Aug 2026/));
   });
 
-  it("renders an absent last-turn date as an em dash, never 'Invalid Date'", async () => {
+  it("renders an absent last-turn date as the absent mark, never 'Invalid Date'", async () => {
     stubApi(
       { listAiSessions: vi.fn().mockResolvedValue([{ ...SESSION, last_turn_at: "" }]) },
       "Asia/Tokyo",
@@ -109,7 +109,10 @@ describe("ChatPanel's recent sessions, dated", () => {
     renderWithProviders(<ChatPanel />);
     await screen.findByText("Ticket triage");
     expect(screen.queryByText(/invalid date/i)).not.toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    // The kit's absent mark, n/a, where this was an em dash (P3 adoption pass:
+    // `NO_DATE` is `shell.viz.na`). Same element, same meaning.
+    expect(screen.getByText("n/a")).toBeInTheDocument();
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
   });
 });
 

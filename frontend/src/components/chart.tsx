@@ -106,10 +106,12 @@ function useDrawnWidth(): [ref: (node: HTMLDivElement | null) => void, width: nu
 
 /** Series fills, in order. Drawn from the palette's ink tones, which clear
  *  4.5:1 on the surface behind them (cycle 9). */
-/* v3's palette has one accent and four severities that double as series
- * inks; each series also carries a distinct hatch, so the fills are never the
- * only thing telling two bars apart. */
-const SERIES_INK = ["var(--accent)", "var(--sev-run)", "var(--sev-warn)", "var(--sev-ok)"];
+/* One accent and the severity inks as series inks, each also with a distinct
+ * hatch, so a fill is never the only thing telling two bars apart. Series 2
+ * WAS `--sev-run`, which is the accent itself since DESIGN.md v4 (D2): two
+ * cobalt bars told apart by their hatch alone. It is the unknown grey now
+ * (6.15:1 on white), the Rationed Hue Rule's own answer. */
+const SERIES_INK = ["var(--accent)", "var(--sev-mut)", "var(--sev-warn)", "var(--sev-ok)"];
 
 export interface Series {
   /** Named in the legend and in the data table. Never colour alone. */

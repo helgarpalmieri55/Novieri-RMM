@@ -44,6 +44,8 @@ export function ResetPasswordPage() {
 
   async function submit() {
     if (inFlight.current) return;
+    // On while empty: an empty press is refused here with the rule it breaks
+    // (coordinator ruling 8a), and nothing is sent.
     const problem = checkNewPassword(password, again);
     if (problem) {
       setError(problem);
@@ -69,7 +71,7 @@ export function ResetPasswordPage() {
       <AuthCard title={t("auth.reset.title")}>
         <AuthDone>{t("auth.reset.done")}</AuthDone>
         <div className="form-actions">
-          <Link className="btn primary" to="/sign-in">
+          <Link className="btn primary wide" to="/sign-in">
             {t("auth.reset.signIn")}
           </Link>
         </div>
@@ -111,11 +113,12 @@ export function ResetPasswordPage() {
         <AuthAlert text={error} />
         <div className="form-actions">
           <Btn
+            wide
             type="submit"
             variant="primary"
             icon="lock"
             label={busy ? t("auth.common.working") : t("auth.reset.submit")}
-            disabled={busy || !password || !again}
+            disabled={busy}
           />
         </div>
       </Form>

@@ -7,10 +7,10 @@
 //
 //	release-sign genkey > key.pem                     # a new key, offline, once
 //	release-sign pubkey                               # base64 public key, for -ldflags
-//	release-sign sign -version 1.4.0 dist/its-agent-linux-amd64 ...
+//	release-sign sign -version 1.4.0 dist/novieri-agent-linux-amd64 ...
 //
 // `sign` writes <file>.sig (base64) beside each binary. The platform is taken
-// from the file name, its-agent-<os>-<arch>[.exe], as build.sh names them.
+// from the file name, novieri-agent-<os>-<arch>[.exe], as build.sh names them.
 package main
 
 import (
@@ -110,8 +110,8 @@ func parseKey(keyPEM string) (ed25519.PrivateKey, error) {
 func platformOf(path string) (goos, goarch string, err error) {
 	name := strings.TrimSuffix(filepath.Base(path), ".exe")
 	parts := strings.Split(name, "-")
-	if len(parts) != 4 || parts[0] != "its" || parts[1] != "agent" {
-		return "", "", fmt.Errorf("%s is not named its-agent-<os>-<arch>", path)
+	if len(parts) != 4 || parts[0] != "novieri" || parts[1] != "agent" {
+		return "", "", fmt.Errorf("%s is not named novieri-agent-<os>-<arch>", path)
 	}
 	goos, goarch = parts[2], parts[3]
 	switch goos {

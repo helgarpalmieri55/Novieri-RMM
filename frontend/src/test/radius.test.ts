@@ -1,8 +1,9 @@
 /**
  * WHY THIS FILE EXISTS.
  *
- * v3 (`docs/design/itms-prototype-v3.html`) has a radius ladder of exactly
- * three rungs -- control 6px, panel 10px, pill 999px -- and a type ramp of
+ * The design has a radius ladder of four rungs (DESIGN.md v4) -- badge 4px,
+ * control 6px, panel 10px, and the pill kept for the switch and the progress
+ * bar -- and a type ramp of
  * exactly five steps -- 22 / 15 / 13.5 / 12 / 10.5 -- plus one named size for
  * the KPI figure, 26px. The console's own CSS follows both. Tailwind's stock
  * scales do not: `rounded-sm` is 2px, `rounded-lg` 8px, `text-sm` 14px,
@@ -29,6 +30,7 @@ const CSS = readFileSync(resolve(REPO, "frontend/src/index.css"), "utf8");
 
 /** The ladder, verbatim from v3's `:root` and DESIGN.md's `rounded:` block. */
 const LADDER: Record<string, string> = {
+  "--r-badge": "4px",
   "--r-ctl": "6px",
   "--r-panel": "10px",
   "--r-pill": "999px",
@@ -36,6 +38,7 @@ const LADDER: Record<string, string> = {
 
 /** Which Tailwind utility must resolve to which rung. */
 const SCALE: Record<string, string> = {
+  "--radius-xs": "--r-badge",
   "--radius-sm": "--r-ctl",
   "--radius-md": "--r-ctl",
   "--radius-lg": "--r-panel",

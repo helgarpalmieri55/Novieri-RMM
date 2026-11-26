@@ -55,11 +55,12 @@ def test_no_service_image_or_label_of_the_identity_provider_is_left() -> None:
 
 
 def test_no_router_leads_to_an_identity_provider() -> None:
-    """The :443 routers are the platform's own three, and no other: the api,
-    the console, and object storage's presigned URLs. (The gateway's :8443 is
+    """The :443 routers are the platform's own three, plus the file provider's
+    503 router, and no other: the api, the console, and object storage's
+    presigned URLs. (The gateway's :8443 is
     a TCP router of its own entrypoint, never websecure.)"""
     names = {name for _, name, _ in routers()}
-    assert names == {"api", "minio", "web"}, names
+    assert names == {"api", "api-unavailable", "minio", "web"}, names
 
 
 def test_the_former_identity_paths_fall_to_the_console() -> None:

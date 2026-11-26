@@ -5,7 +5,7 @@
 
     docker compose run --rm --no-deps \\
       -e BAO_TOKEN="$(grep '^OPENBAO_TOKEN=' .env | cut -d= -f2-)" \\
-      ... /tmp/issue-gateway-cert.py itms.toeshee.com
+      ... /tmp/issue-gateway-cert.py rmm.novieri.com
 
 The shell expands that before `docker` is executed, so the **root** OpenBao
 token — the credential that can re-key `transit/job-signing`, the key
@@ -64,7 +64,9 @@ RUNNABLE_FENCES = ("sh", "bash", "shell", "console")
 #: file with `==`.
 REMOVED_MARKER = "[removed]"
 
-EXPECTED_MARKED_LINES = {"README.md": 0, "GO-LIVE.md": 1, "issue-gateway-cert.py": 1}
+# GO-LIVE.md §5 held the one quotation of the removed invocation; it points at
+# README step 6b since 2026-11-24, and README quotes it in a ```text block.
+EXPECTED_MARKED_LINES = {"README.md": 0, "GO-LIVE.md": 0, "issue-gateway-cert.py": 1}
 
 
 def _runnable_lines(path: Path) -> list[tuple[int, str]]:

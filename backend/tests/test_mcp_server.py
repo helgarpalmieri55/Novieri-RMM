@@ -499,7 +499,7 @@ async def test_an_admitted_request_reaches_the_sdk_at_both_paths(mcp_env) -> Non
         for path in ("/mcp", "/mcp/"):
             resp = await client.post(path, json=INITIALIZE, headers=_bearer(token))
             assert resp.status_code == 200, (path, resp.text)
-            assert resp.json()["result"]["serverInfo"]["name"] == "itms"
+            assert resp.json()["result"]["serverInfo"]["name"] == "novieri-rmm"
 
 
 async def test_the_tool_handlers_read_the_principal_from_the_scope(

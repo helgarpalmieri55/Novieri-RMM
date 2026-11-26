@@ -7,6 +7,7 @@ import { useApi } from "../../lib/ApiContext";
 import { useEmailIntakeMessages, useEmailMailboxes } from "./api";
 import { EmailIntakePrerequisites } from "./EmailIntakePrerequisites";
 import { MailboxList } from "./MailboxList";
+import { MailboxSettings } from "./MailboxSettings";
 import { MessageLog } from "./MessageLog";
 import { MicrosoftConnection } from "./MicrosoftConnection";
 import { PageHead, StatCard, StatsGrid } from "../../shell/components";
@@ -173,15 +174,17 @@ export function EmailIntakeAdminPage() {
 
   // A PENDING OR FAILED QUERY IS NOT A ZERO. `?? 0` printed "0 quarantined"
   // for the whole of the first paint and for every failed load, so "nothing
-  // is quarantined" and "we have not been told" looked identical — the same
-  // defect `zeroLabel` closes one level down. An em dash for absent data means
-  // a zero on screen is always a measured zero.
-  const count = (n: number | undefined): string => (n === undefined ? "—" : String(n));
+  // is quarantined" and "we have not been told" looked identical: the same
+  // defect `zeroLabel` closes one level down. With no data a tile is
+  // `pending` (ruling 10a): StatCard draws the kit's absent mark and no wash,
+  // so a zero on screen is always a measured zero.
+  const noMailboxes = mailboxes.data === undefined;
+  const noMessages = messages.data === undefined;
 
   return (
     <div>
       <PageHead
-        title={t("emailIntake.admin.title")}
+        title={t("shell.nav.item.emailIntake")}
         description={t("emailIntake.admin.description")}
       />
 
@@ -198,7 +201,8 @@ export function EmailIntakeAdminPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("emailIntake.admin.mailboxesLabel")}
-          value={count(mailboxes.data?.length)}
+          value={String(mailboxes.data?.length ?? "")}
+          pending={noMailboxes}
           icon="mail"
           to={link("mailboxes")}
           tone="blue"
@@ -210,7 +214,8 @@ export function EmailIntakeAdminPage() {
         />
         <StatCard
           label={t("emailIntake.admin.errorsLabel")}
-          value={count(mailboxesWithErrors)}
+          value={String(mailboxesWithErrors ?? "")}
+          pending={noMailboxes}
           /* THE GLYPH IS THE KIND, NOT THE HUE. `tone="red" urgent` draws
              this tile crit, and the plan's severity table pairs crit with
              `circle-x`; `alert-triangle` belongs to warn. With the warn glyph
@@ -225,7 +230,8 @@ export function EmailIntakeAdminPage() {
         />
         <StatCard
           label={t("emailIntake.admin.messagesLabel")}
-          value={count(messages.data?.total)}
+          value={String(messages.data?.total ?? "")}
+          pending={noMessages}
           icon="logs"
           to={link("messages")}
           tone="blue"
@@ -234,7 +240,8 @@ export function EmailIntakeAdminPage() {
         />
         <StatCard
           label={t("emailIntake.admin.quarantinedLabel")}
-          value={count(messages.data?.quarantined_count)}
+          value={String(messages.data?.quarantined_count ?? "")}
+          pending={noMessages}
           /* Warn's own glyph. `shield-lock` is not in the kind table at all,
              so a warn-washed tile was wearing a glyph that named no severity
              -- and quarantine IS the warn story: mail held for a human to
@@ -254,8 +261,17 @@ export function EmailIntakeAdminPage() {
       {/* The profile zone (`/me`.timezone, cycle 2) reaches both panels that
           render a time. This page already holds `me` for its permission
           gate, so nothing new is fetched. */}
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {/* THE MAILBOXES, THEN WHAT EACH DOES WITH ITS MAIL (redesign plan,
+          Task 7, 2.7): the list with each mailbox's connection and its
+          actions, then a section per mailbox with its settings, saved by the
+          page's one save bar; the Microsoft app registration and the message
+          log after. The log is every client's mail and is read only with the
+          code on every client (invariant 5a), so it carries no Client chip. */}
+      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)", marginBottom: 16 }}>
         <MailboxList canAdmin={canAdmin} zone={me.data?.timezone} />
+      </div>
+      <MailboxSettings canAdmin={canAdmin} />
+      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)", marginTop: 16 }}>
         <MicrosoftConnection canAdmin={canAdmin} />
         <MessageLog zone={me.data?.timezone} />
       </div>

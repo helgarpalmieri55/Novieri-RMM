@@ -32,7 +32,7 @@ func hardenProcess() error {
 }
 
 // LaunchHelper copies the binary into a staging directory of its own,
-// `%ProgramData%\ITSuite\uninstall-<n>` (review M1), and starts the COPY
+// `%ProgramData%\NovieriRMM\uninstall-<n>` (review M1), and starts the COPY
 // detached: a running image cannot be deleted, and the helper must delete the
 // installed one. The directory is CREATED owned by Administrators with the
 // protected SYSTEM+Administrators DACL (secdir.MkdirOwned, one CreateDirectory
@@ -41,12 +41,12 @@ func hardenProcess() error {
 // shared, and a helper image a local user could replace between the copy and
 // the start would run as SYSTEM.
 //
-// ITSuite ITSELF is secured first (secdir.SecureOwned: owner Administrators,
+// NovieriRMM ITSELF is secured first (secdir.SecureOwned: owner Administrators,
 // protected DACL, a junction refused). The staging directory's own descriptor
-// is not enough: whoever owns ITSuite holds FILE_DELETE_CHILD on it, and could
+// is not enough: whoever owns NovieriRMM holds FILE_DELETE_CHILD on it, and could
 // rename `uninstall-<n>` away between the copy and the start and put a
-// directory holding their own its-agent-uninstall.exe in its place. A
-// standard user can pre-create ITSuite on a default install (Users may create
+// directory holding their own novieri-agent-uninstall.exe in its place. A
+// standard user can pre-create NovieriRMM on a default install (Users may create
 // folders in C:\ProgramData), and an endpoint installed before the installers
 // secured it may still have one they own.
 //

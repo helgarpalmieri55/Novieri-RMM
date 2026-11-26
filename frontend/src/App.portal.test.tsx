@@ -6,7 +6,7 @@
  * the portal forgets a client the console stored on this computer.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -213,6 +213,21 @@ describe("a contact on the real /portal page (fix round 1)", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Ana Ruiz")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // The portal's own frame with the Novieri brand (redesign design §4; plan
+  // Task 7): the lockup links home, the section is named beside it, and the
+  // page names the browser tab, which the portal (no AppShell) does itself.
+  it("draws the Novieri RMM lockup and names the page in the tab", async () => {
+    document.title = "Novieri RMM";
+    stubServer(PORTAL_ONLY);
+    appReal("/portal");
+    await screen.findByText("Ana Ruiz");
+    const banner = screen.getByRole("banner");
+    expect(within(banner).getByRole("link", { name: "Novieri RMM" })).toHaveAttribute("href", "/portal");
+    expect(within(banner).getByText("Support portal")).toBeInTheDocument();
+    expect(within(banner).getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("My tickets · Novieri RMM"));
   });
 
   it("has one navigation landmark named Portal, the page's own", async () => {

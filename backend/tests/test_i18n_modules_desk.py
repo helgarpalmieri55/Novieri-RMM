@@ -269,16 +269,16 @@ def test_notification_an_email_is_worded_in_the_recipients_language() -> None:
     event = _email_event("ticket.sla_breached")
     english = _render_email(event)
     assert english == (
-        "[Toeshee] SLA breached: ticket #T-1 — Printer",
+        "[Novieri RMM] SLA breached: ticket #T-1 — Printer",
         "The response SLA for ticket #T-1 — Printer was due at 2026-01-01T00:00:00+00:00 "
-        "and has been breached.\nSign in to Toeshee to review it.\n",
+        "and has been breached.\nSign in to Novieri RMM to review it.\n",
     )
     with use_locale("es"):
         subject, body = _render_email(event)
-    assert subject == "[Toeshee] SLA incumplido: ticket #T-1 — Printer"
+    assert subject == "[Novieri RMM] SLA incumplido: ticket #T-1 — Printer"
     assert body == (
         "El SLA de respuesta del ticket #T-1 — Printer vencía el 2026-01-01T00:00:00+00:00 "
-        "y se ha incumplido.\nInicia sesión en Toeshee para ver el detalle.\n"
+        "y se ha incumplido.\nInicia sesión en Novieri RMM para ver el detalle.\n"
     )
     # The worker has no request: outside use_locale the email is English again.
     assert _render_email(event) == english
@@ -288,7 +288,7 @@ def _template_words(line: str, payload: dict[str, Any]) -> bool:
     """True when `line` still has a word that is not payload data: a template word."""
     import re
 
-    rest = line.replace("[Toeshee]", "")
+    rest = line.replace("[Novieri RMM]", "")
     for value in sorted(_flatten(payload), key=len, reverse=True):
         rest = rest.replace(value, "")
     return re.search(r"[A-Za-z]{3,}", rest) is not None
@@ -316,7 +316,7 @@ def test_notification_every_email_renderer_has_a_spanish_subject_and_body() -> N
         english_subject, english_body = _render_email(event)
         with use_locale("es"):
             subject, body = _render_email(event)
-        assert subject.startswith("[Toeshee] "), event_type
+        assert subject.startswith("[Novieri RMM] "), event_type
         english_lines = [english_subject, *english_body.split("\n")]
         spanish_lines = [subject, *body.split("\n")]
         assert len(english_lines) == len(spanish_lines), event_type
@@ -506,17 +506,17 @@ def test_notification_an_approval_decision_agrees_in_gender() -> None:
     from app.modules.notification.delivery import _render_email
 
     event = _email_event("ticket.approval_decided")  # approved
-    assert _render_email(event)[0] == "[Toeshee] Ticket #T-1: approval approved"
+    assert _render_email(event)[0] == "[Novieri RMM] Ticket #T-1: approval approved"
     with use_locale("es"):
         subject, body = _render_email(event)
-        assert subject == "[Toeshee] Ticket #T-1: aprobación aprobada"
+        assert subject == "[Novieri RMM] Ticket #T-1: aprobación aprobada"
         assert body == "El ticket #T-1 fue aprobado.\n"
         event.payload = {"ticket_number": "T-1", "decision": "rejected"}
         subject, body = _render_email(event)
-        assert subject == "[Toeshee] Ticket #T-1: aprobación rechazada"
+        assert subject == "[Novieri RMM] Ticket #T-1: aprobación rechazada"
         assert body == "El ticket #T-1 fue rechazado.\n"
         event.payload = {"ticket_number": "T-1", "decision": "odd"}
-        assert _render_email(event)[0] == "[Toeshee] Ticket #T-1: aprobación odd"
+        assert _render_email(event)[0] == "[Novieri RMM] Ticket #T-1: aprobación odd"
 
 
 def test_notification_a_closed_health_alert_says_closed_and_why_in_the_consoles_words() -> None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the Toeshee agent as a systemd service.
+# Install the Novieri RMM agent as a systemd service.
 #
 #   ITS_AGENT_ENROLL_TOKEN=... ./install.sh --url https://control-plane.example
 #
@@ -15,9 +15,9 @@ set -euo pipefail
 DESTDIR=""                       # staging prefix; when set, nothing is started
 BINDIR="/usr/local/bin"
 UNITDIR="/etc/systemd/system"
-CONFDIR="/etc/its-agent"
-STATEDIR="/var/lib/its-agent"
-SERVICE="its-agent"
+CONFDIR="/etc/novieri-agent"
+STATEDIR="/var/lib/novieri-agent"
+SERVICE="novieri-agent"
 BINARY=""
 URL="${ITS_AGENT_ENROLL_URL:-}"
 TOKEN_FROM_STDIN=0
@@ -38,8 +38,8 @@ Required:
   Neither is needed when re-installing over an already-enrolled agent.
 
 Options:
-  --binary PATH         The its-agent binary to install.
-                        Default: ../../dist/its-agent, then ./its-agent.
+  --binary PATH         The novieri-agent binary to install.
+                        Default: ../../dist/novieri-agent, then ./novieri-agent.
   --destdir DIR         Stage everything under DIR instead of installing.
                         Nothing is started, nothing is enabled, no systemctl.
   --bindir DIR          Default /usr/local/bin
@@ -83,7 +83,7 @@ done
 
 # --- the binary ------------------------------------------------------------
 if [ -z "$BINARY" ]; then
-  for candidate in "$here/../../dist/its-agent" "$here/its-agent" "./its-agent"; do
+  for candidate in "$here/../../dist/novieri-agent" "$here/novieri-agent" "./novieri-agent"; do
     if [ -f "$candidate" ]; then BINARY="$candidate"; break; fi
   done
 fi
@@ -146,15 +146,15 @@ fi
 
 # --- binary + unit ---------------------------------------------------------
 install -d -m 0755 "${DESTDIR}${BINDIR}"
-install -m 0755 -o root -g root "$BINARY" "${DESTDIR}${BINDIR}/its-agent"
+install -m 0755 -o root -g root "$BINARY" "${DESTDIR}${BINDIR}/novieri-agent"
 
 install -d -m 0755 "${DESTDIR}${UNITDIR}"
 unit="${DESTDIR}${UNITDIR}/${SERVICE}.service"
-install -m 0644 -o root -g root "$here/its-agent.service" "$unit"
+install -m 0644 -o root -g root "$here/novieri-agent.service" "$unit"
 # The unit ships with the default ExecStart; honour --bindir without asking the
 # operator to edit a file.
 if [ "$BINDIR" != "/usr/local/bin" ]; then
-  sed -i "s|^ExecStart=/usr/local/bin/its-agent$|ExecStart=${BINDIR}/its-agent|" "$unit"
+  sed -i "s|^ExecStart=/usr/local/bin/novieri-agent$|ExecStart=${BINDIR}/novieri-agent|" "$unit"
 fi
 
 if [ -n "$DESTDIR" ]; then
@@ -172,7 +172,7 @@ fi
 
 cat <<EOF
 
-its-agent installed.
+novieri-agent installed.
 
   status   systemctl status ${SERVICE}
   logs     journalctl -u ${SERVICE} -f

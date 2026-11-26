@@ -166,7 +166,8 @@ function renderPage(api: Record<string, unknown> = {}, entry = "/docs", permissi
 describe("the documentation library in Spanish", () => {
   it("renders the tiles, their feet, the article list and the sections", async () => {
     const { container } = renderPage();
-    expect(await screen.findByRole("heading", { name: "Documentación de TI" })).toBeInTheDocument();
+    // The h1 is the rail's label (coordinator ruling 1).
+    expect(await screen.findByRole("heading", { name: "Documentación" })).toBeInTheDocument();
     expect(await screen.findByText("Procedimiento de copias")).toBeInTheDocument();
     const labels = [...container.querySelectorAll(".stat-card .stat-label")].map((el) => el.textContent);
     expect(labels).toEqual(["Artículos", "Registros", "Referencias vinculadas", "Documentos"]);
@@ -174,7 +175,8 @@ describe("the documentation library in Spanish", () => {
     expect(screen.getByText("2 servicios, 1 proveedor")).toBeInTheDocument();
     expect(screen.getByText("De 1 de 2 artículos")).toBeInTheDocument();
     expect(screen.getByText("1 documento sin archivo subido todavía")).toBeInTheDocument();
-    expect(screen.getByText("2 artículos")).toBeInTheDocument();
+    // The kit's count (Receta L).
+    expect(screen.getByText("Mostrando 2 de 2")).toBeInTheDocument();
     expect(screen.getByText(/vinculado a 2 objetos/)).toBeInTheDocument();
     expect(screen.getByText(/^Busca en títulos, descripciones/)).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Buscar en la documentación" })).toHaveAttribute("placeholder", "Buscar artículos, hosts, IP");
@@ -197,9 +199,10 @@ describe("the documentation library in Spanish", () => {
     const user = userEvent.setup();
     const { container } = renderPage();
     await screen.findByText("Procedimiento de copias");
-    await user.click(screen.getByRole("button", { name: "Manual" }));
+    // The category chips carry their count now (Receta L, 4).
+    await user.click(screen.getByRole("button", { name: /^Manual/ }));
     expect(screen.queryByText("Procedimiento de copias")).toBeNull();
-    expect(screen.getByText("1 artículo")).toBeInTheDocument();
+    expect(screen.getByText("Mostrando 1 de 2")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -260,7 +263,9 @@ describe("the article in Spanish", () => {
     // A link the sanitiser removed says so, in Spanish, in its tooltip.
     expect(container.querySelector("[data-link-removed]")).toHaveAttribute("title", "Vínculo eliminado: esquema de URL no admitido.");
     await user.click(screen.getByRole("button", { name: "Historial" }));
-    expect(await screen.findByText(/^v2 — /)).toBeInTheDocument();
+    // The history row: the version, then its date ("v2 · 30 jul 2026, 10:00"; no
+    // dash in the copy). The list row beside it reads "v2 · 1 vínculo".
+    expect(await screen.findByText(/^v2 · \d{1,2} \S+ \d{4}/)).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -470,7 +475,7 @@ describe("the document view in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Purgar v2" }));
     let dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Destruir estos bytes" })).toBeInTheDocument();
-    expect(within(dialog).getAllByText(/Versión 2 — contrato-2026\.pdf, 2\.1 MiB/).length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText(/Versión 2 \(contrato-2026\.pdf, 2\.1 MiB\)/).length).toBeGreaterThan(0);
     expect(within(dialog).getByText(/^El archivo se elimina del almacenamiento/)).toBeInTheDocument();
     expectNoEnglish(dialog);
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
@@ -614,7 +619,7 @@ describe("the labels and sentences built outside React", () => {
     expect(renderMarkdown("[x](javascript:alert(1))")).toContain('title="Vínculo eliminado: esquema de URL no admitido."');
     setActiveLanguage("en");
     expect(typeLabel("text/plain")).toBe("Text");
-    expect(renderMarkdown("[x](javascript:alert(1))")).toContain('title="Link removed — unsupported URL scheme."');
+    expect(renderMarkdown("[x](javascript:alert(1))")).toContain('title="Link removed: unsupported URL scheme."');
   });
 
   it("agrees every count with its number", () => {

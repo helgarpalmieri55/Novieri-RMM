@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import {
@@ -41,9 +41,17 @@ import type {
   RemediationState,
   StepResult,
 } from "./types";
-import { PageHead, Panel, StatusPill } from "../../shell/components";
+import {
+  DetailHead,
+  FormSection,
+  Panel,
+  StatusPill,
+  UnsavedGuard,
+  useDraft,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { Facts } from "../../shell/viz";
+import { recordOnSubPage, useRecordTitle } from "../../shell/title";
+import { Facts, KV } from "../../shell/viz";
 
 type TriState = "" | "true" | "false";
 
@@ -63,6 +71,27 @@ function hasEvidenceSummary(value: BcpEvidenceValue): value is BcpEvidence {
 // snapshot captured at that moment (backend/app/modules/bcp/service.py's
 // record_test) — the per-device rows below are that snapshot, not a live
 // recomputation.
+//
+// ON THE KIT (redesign plan, Task 9, 4.5; Recetas F and FO). The test's head
+// is the record head: back to its plan, the outcome it stands at, and View
+// report. Its three forms -- the outcome, a step, a finding -- are collapsible
+// sections, and ONE guard, fed all three's changes, asks before the page is
+// left with an exercise half recorded (what the guard is for). Each form keeps
+// its own act: Record test writes the evidence (and asks before replacing
+// it), Save step and Add finding each add a row. A single save bar would fold
+// three acts with three different consequences into one Save, and could not
+// record a test whose defaults are its answer (a pass with nothing to add).
+type OutcomeValues = {
+  executedAt: string;
+  rtoMet: TriState;
+  rpoMet: TriState;
+  outcome: "pass" | "partial" | "fail";
+  notes: string;
+};
+
+/** What the outcome form opens with, as it always has: a pass, nothing else said. */
+const BLANK_OUTCOME: OutcomeValues = { executedAt: "", rtoMet: "", rpoMet: "", outcome: "pass", notes: "" };
+
 export function TestRecorder() {
   const t = useT();
   const { testId } = useParams<{ testId: string }>();
@@ -77,12 +106,28 @@ export function TestRecorder() {
 
   const test = useTest(testId);
   const recordTest = useRecordTestMutation();
+  // A RECORD ON A SUB-PAGE NAMES BOTH (general ruling 1b): the test, as the
+  // plan's list of tests names it (its type), then this page, then the rail
+  // entry: "Restore drill · DR test · Continuity tests · Novieri RMM". A test
+  // has no name of its own, and the plan's name is the plan page's tab.
+  useRecordTitle(recordOnSubPage(t("bcp.recorder.title"), test.data ? testTypeLabel(test.data.type) : undefined));
 
-  const [executedAt, setExecutedAt] = useState("");
-  const [rtoMet, setRtoMet] = useState<TriState>("");
-  const [rpoMet, setRpoMet] = useState<TriState>("");
-  const [outcome, setOutcome] = useState<"pass" | "partial" | "fail">("pass");
-  const [notes, setNotes] = useState("");
+  // WHAT WAS LAST RECORDED FROM THIS FORM, as the form holds it: what the
+  // draft is compared with. It starts blank and becomes the values sent once
+  // the server took them, so a recorded form is not a change to lose, and the
+  // values stay on screen.
+  const [recorded, setRecorded] = useState<OutcomeValues>(BLANK_OUTCOME);
+  const { draft, setDraft, dirty: outcomeDirty, markSent } = useDraft(recorded);
+  const values = draft ?? recorded;
+  const { executedAt, rtoMet, rpoMet, outcome, notes } = values;
+  const set = (patch: Partial<OutcomeValues>) => setDraft({ ...values, ...patch });
+  const setExecutedAt = (executedAt: string) => set({ executedAt });
+  const setRtoMet = (rtoMet: TriState) => set({ rtoMet });
+  const setRpoMet = (rpoMet: TriState) => set({ rpoMet });
+  const setOutcome = (outcome: OutcomeValues["outcome"]) => set({ outcome });
+  const setNotes = (notes: string) => set({ notes });
+  const [stepDirty, setStepDirty] = useState(false);
+  const [findingDirty, setFindingDirty] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
   // Cycle 8. Recording a test the FIRST time creates the evidence; recording it
@@ -97,19 +142,29 @@ export function TestRecorder() {
   if (!testId) return null;
 
   function submit() {
-    recordTest.mutate({
-      id: testId as string,
-      body: {
-        // The wall clock the field hands back carries no zone. Unqualified,
-        // a 14:00 execution is recorded as 14:00Z and read back as 09:00 --
-        // the five hours this evidence pack is supposed to be trusted about.
-        executed_at: toInstant(executedAt, zone) || null,
-        rto_met: triToBool(rtoMet),
-        rpo_met: triToBool(rpoMet),
-        outcome,
-        notes,
+    const sent = values;
+    // What is sent becomes what is recorded when the server answers (useDraft).
+    markSent(sent);
+    recordTest.mutate(
+      {
+        id: testId as string,
+        body: {
+          // The wall clock the field hands back carries no zone. Unqualified,
+          // a 14:00 execution is recorded as 14:00Z and read back as 09:00 --
+          // the five hours this evidence pack is supposed to be trusted about.
+          executed_at: toInstant(executedAt, zone) || null,
+          rto_met: triToBool(rtoMet),
+          rpo_met: triToBool(rpoMet),
+          outcome,
+          notes,
+        },
       },
-    });
+      {
+        onSuccess: () => setRecorded(sent),
+        // Not recorded: the values are still a change, and stay one.
+        onError: () => markSent(null),
+      },
+    );
   }
 
   const evidence = test.data?.evidence;
@@ -124,14 +179,20 @@ export function TestRecorder() {
 
   return (
     <div>
-      {/* IN THE HEAD'S SLOT, not in a flex row built around the head. `PageHead`
-          is already the row this page was reproducing, and the page beside this
-          one in the same module passes `actions` — so the one link this screen
-          offers sat at a different height and a different gap from every other
-          page action in the console. */}
-      <PageHead
+      {/* ONE GUARD for the page's three forms (formKit: two guards holding
+          changes at once cannot both ask). */}
+      <UnsavedGuard dirty={outcomeDirty || stepDirty || findingDirty} />
+      <DetailHead
+        back={{
+          to: test.data ? `/bcp/plans/${test.data.plan_id}` : "/bcp",
+          label: test.data ? t("bcp.recorder.backToPlan") : t("bcp.detail.back"),
+        }}
         title={t("bcp.recorder.title")}
-        description={t("bcp.recorder.description")}
+        status={
+          test.data
+            ? { kind: outcomeKind(test.data.outcome), label: outcomeLabel(test.data.outcome) }
+            : undefined
+        }
         actions={
           <Link className="btn" to={`/bcp/tests/${testId}/report`}>
             <Icon name="file-text" size={14} />
@@ -149,16 +210,7 @@ export function TestRecorder() {
           <Facts
             items={[
               { k: t("bcp.recorder.type"), v: testTypeLabel(test.data.type) },
-              {
-                k: t("bcp.recorder.outcome"),
-                v: (
-                  <StatusPill
-                    value={test.data.outcome}
-                    kind={outcomeKind(test.data.outcome)}
-                    label={outcomeLabel(test.data.outcome)}
-                  />
-                ),
-              },
+              // No Outcome fact: the record head's badge says it (critique, wave O4).
               {
                 k: t("bcp.recorder.scheduled"),
                 v: <span>{formatDateTime(test.data.scheduled_for, zone)}</span>,
@@ -173,8 +225,7 @@ export function TestRecorder() {
       )}
 
       {canManage && (
-        <div className="mb-4">
-          <Panel title={t("bcp.recorder.recordOutcome")}>
+        <FormSection title={t("bcp.recorder.recordOutcome")} icon="circle-check">
             <div className="form-grid">
               {/* THE DATE FIELD SPANS THE ROW, and the control takes ONE
                   COLUMN'S MEASURE WHERE THERE IS ONE. `.form-grid` WAS two
@@ -235,9 +286,7 @@ export function TestRecorder() {
                 <select
                   className={inputClass}
                   value={outcome}
-                  onChange={(e) =>
-                    setOutcome(e.target.value as "pass" | "partial" | "fail")
-                  }
+                  onChange={(e) => setOutcome(e.target.value as OutcomeValues["outcome"])}
                 >
                   <option value="pass">{outcomeLabel("pass")}</option>
                   <option value="partial">{outcomeLabel("partial")}</option>
@@ -277,13 +326,17 @@ export function TestRecorder() {
                 {describeSubmitError(recordTest.error)}
               </p>
             )}
+            {recordTest.isSuccess && !outcomeDirty ? (
+              <p className="note" role="status">
+                {t("bcp.recorder.recordedNote")}
+              </p>
+            ) : null}
             <div className="mt-3">
               <Button onClick={press} disabled={recordTest.isPending}>
                 {recordTest.isPending ? t("bcp.recorder.recording") : t("bcp.recorder.recordTest")}
               </Button>
             </div>
-          </Panel>
-        </div>
+        </FormSection>
       )}
 
       <ConfirmDialog
@@ -313,11 +366,14 @@ export function TestRecorder() {
             title={t("bcp.recorder.snapshotTitle")}
             subtitle={t("bcp.recorder.snapshotSubtitle", { when: formatDateTime(evidence.captured_at, zone) })}
           >
-            <Facts
+            {/* A PLAIN DEFINITION LIST, NOT A FACTS STRIP: the strip is a
+                bordered card, and inside this panel it was a card in a card
+                (the detector's `nested-cards`; critique, wave O4). */}
+            <KV
               items={[
-                { k: t("bcp.recorder.devices"), v: evidence.summary.total_n },
-                { k: t("bcp.recorder.covered"), v: evidence.summary.covered_n },
-                { k: t("bcp.recorder.restoreProven"), v: evidence.summary.restore_proven_n },
+                [t("bcp.recorder.devices"), <span className="mono">{evidence.summary.total_n}</span>],
+                [t("bcp.recorder.covered"), <span className="mono">{evidence.summary.covered_n}</span>],
+                [t("bcp.recorder.restoreProven"), <span className="mono">{evidence.summary.restore_proven_n}</span>],
               ]}
             />
             <Table>
@@ -380,8 +436,8 @@ export function TestRecorder() {
         </div>
       )}
 
-      {canManage && <StepForm testId={testId} />}
-      <FindingsSection testId={testId} canManage={canManage} />
+      {canManage && <StepForm testId={testId} onDirty={setStepDirty} />}
+      <FindingsSection testId={testId} canManage={canManage} onDirty={setFindingDirty} />
     </div>
   );
 }
@@ -404,13 +460,23 @@ const stepRules = (): readonly FieldRule[] => [
   },
 ];
 
-function StepForm({ testId }: { testId: string }) {
+function StepForm({ testId, onDirty }: { testId: string; onDirty: (dirty: boolean) => void }) {
   const t = useT();
   const upsertStep = useUpsertStepMutation();
   const [ordinal, setOrdinal] = useState("1");
   const [description, setDescription] = useState("");
   const [result, setResult] = useState<StepResult>("pending");
   const [evidenceRef, setEvidenceRef] = useState("");
+  // A step typed and not saved is part of the exercise half recorded: the
+  // page's one guard hears of it. The number and the result have defaults; the
+  // words are what a person would lose.
+  const dirty = description.trim() !== "" || evidenceRef.trim() !== "";
+  // Reported up, and taken back when this form goes (fix round 1, M5): a form
+  // unmounted while dirty must not leave the page's guard asking about it.
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
   // Held as data (rules and values), so a language switch re-words the refusal.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
@@ -431,13 +497,17 @@ function StepForm({ testId }: { testId: string }) {
           evidence_ref: evidenceRef.trim() || null,
         },
       },
-      { onSuccess: () => setDescription("") },
+      {
+        onSuccess: () => {
+          setDescription("");
+          setEvidenceRef("");
+        },
+      },
     );
   }
 
   return (
-    <div className="mb-4">
-      <Panel title={t("bcp.recorder.stepPanel")}>
+      <FormSection title={t("bcp.recorder.stepPanel")} icon="list-check">
         {/* A real <form>, so Enter in the Description field saves the step
             instead of doing nothing. */}
         {/* THE GRID, AND THE SUBMIT ON ITS OWN LINE. As a wrapping flex row the
@@ -486,7 +556,10 @@ function StepForm({ testId }: { testId: string }) {
               the user gets to read, and a control that will not move is not. The
               server failure comes from here too, so a bodyless 503 produces a
               sentence instead of the empty string the old line rendered. */}
+          {/* OUTLINE: Record test is the page's one primary (DESIGN.md, "One
+              primary per page body"); a step only adds a row. */}
           <FormActions
+            variant="outline"
             label={t("bcp.recorder.saveStep")}
             pendingLabel={t("bcp.recorder.saving")}
             pending={upsertStep.isPending}
@@ -494,8 +567,7 @@ function StepForm({ testId }: { testId: string }) {
             problems={attemptProblems(attempt)}
           />
         </Form>
-      </Panel>
-    </div>
+      </FormSection>
   );
 }
 
@@ -506,9 +578,11 @@ const findingRules = (): readonly FieldRule[] => [
 function FindingsSection({
   testId,
   canManage,
+  onDirty,
 }: {
   testId: string;
   canManage: boolean;
+  onDirty: (dirty: boolean) => void;
 }) {
   const t = useT();
   const findings = useFindings(testId);
@@ -518,6 +592,13 @@ function FindingsSection({
   const [severity, setSeverity] = useState<FindingSeverity>("low");
   // Held as data (rules and values), so a language switch re-words the refusal.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // A finding typed and not added is part of the exercise half recorded.
+  const dirty = description.trim() !== "";
+  // Reported up, and taken back on unmount (fix round 1, M5).
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
 
   function submit() {
     const next: Attempt = { rules: findingRules, values: { description } };
@@ -530,7 +611,7 @@ function FindingsSection({
   }
 
   return (
-    <Panel title={t("bcp.recorder.findings")}>
+    <FormSection title={t("bcp.recorder.findings")} icon="flag">
         <Table>
           <thead>
             <tr>
@@ -620,7 +701,9 @@ function FindingsSection({
             {/* Enabled with the description empty ON PURPOSE, and the server's
                 refusal comes from here too. A DR finding that fails to save
                 silently is a gap in the evidence pack nobody knows about. */}
+            {/* OUTLINE, like Save step: Record test is the one primary. */}
             <FormActions
+              variant="outline"
               label={t("bcp.recorder.addFinding")}
               pending={createFinding.isPending}
               error={createFinding.error}
@@ -639,6 +722,6 @@ function FindingsSection({
             {describeSubmitError(updateFinding.error)}
           </p>
         )}
-    </Panel>
+    </FormSection>
   );
 }

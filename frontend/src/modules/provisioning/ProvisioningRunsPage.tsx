@@ -24,7 +24,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
 import { Form, FormActions, attemptProblems } from "../../components/form";
@@ -51,13 +51,19 @@ import { provisionRunStateKind, provisionRunStateLabel } from "./provisioningSta
 import { ProvisioningPageNav } from "./provisioningNav";
 import {
   Btn,
-  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
 } from "../../shell/components";
 import { ProvisioningPrerequisites } from "./ProvisioningPrerequisites";
 import type { ProvisionRunState } from "./types";
@@ -68,19 +74,20 @@ import type { ProvisionRunState } from "./types";
 // draw a progress bar and a time remaining; `ProvisionRun` carries neither,
 // so both are OMITTED rather than faked.
 
+/** The median build time in words, or `null` when no run has both ends (unmeasured). */
 function medianDurationLabel(
   runs: ReadonlyArray<{ started_at: string | null; finished_at: string | null }>,
-): string {
+): string | null {
   const durations = runs
     .filter((run) => run.started_at && run.finished_at)
     .map((run) => new Date(run.finished_at as string).getTime() - new Date(run.started_at as string).getTime())
     .filter((ms) => ms >= 0)
     .sort((a, b) => a - b);
-  if (durations.length === 0) return NO_DATE;
+  if (durations.length === 0) return null;
   const mid = Math.floor(durations.length / 2);
   const lower = durations[mid - 1];
   const upper = durations[mid];
-  if (upper === undefined) return NO_DATE;
+  if (upper === undefined) return null;
   const medianMs = durations.length % 2 === 0 && lower !== undefined ? (lower + upper) / 2 : upper;
   return translate("provisioning.runs.minutes", { minutes: Math.round(medianMs / 60_000) });
 }
@@ -102,12 +109,14 @@ const RUN_STATE_FILTERS: ReadonlyArray<ProvisionRunState> = [
 export function ProvisioningRunsPage() {
   const t = useT();
   const api = useApi();
-  const [provisionOpen, setProvisionOpen] = useState(false);
+  // Build a computer opens from `?new=run` (decision D8). No Client chip:
+  // imaging works in the client chosen at the top (redesign plan, Task 9, 4.6).
+  const provision = useNewParam("run");
   // The filter lives in the URL because the tiles above link into it: "Failed
   // runs 2" opens those two rows. Held in component state the tile would be
   // an anchor to the page the reader is already standing on.
-  const [params, setParams] = useSearchParams();
-  const stateFilter = params.get("state") ?? "";
+  const filters = useUrlFilters(["state"] as const);
+  const stateFilter = filters.values.state;
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -137,6 +146,10 @@ export function ProvisioningRunsPage() {
     (sum, count) => sum + count,
     0,
   );
+  // Three tiles count the report: until it answers, or once it failed, each is
+  // the kit's pending tile, the absent mark (clarification 10a).
+  const noReport = !report.data;
+  const median = medianDurationLabel(items);
 
   // Otherwise the table names each run's profile by UUID, the same raw-id
   // defect the pickers close on the writing side, seen on the reading side.
@@ -150,11 +163,15 @@ export function ProvisioningRunsPage() {
   return (
     <div>
       <PageHead
-        title={t("provisioning.runs.title")}
+        // The rail's own label (general ruling 1): the h1 and the rail entry
+        // say the same, as the tab title already does.
+        title={t("shell.nav.item.imaging")}
         description={t("provisioning.runs.description")}
         actions={
           canRun ? (
-            <Btn label={t("provisioning.runs.provision")} icon="plus" variant="primary" onClick={() => setProvisionOpen(true)} />
+            // One act, one name (fix round 1): the head's button, the empty
+            // state's and the dialog they open all say the brief's words.
+            <Btn label={t("provisioning.runs.buildComputer")} icon="plus" variant="primary" onClick={provision.start} />
           ) : undefined
         }
       />
@@ -177,19 +194,19 @@ export function ProvisioningRunsPage() {
         <StatCard
           label={t("provisioning.runs.successRate")}
           value={
-            report.data
-              ? totalRuns === 0
-                ? t("provisioning.runs.neverRun")
-                : t("provisioning.runs.percent", { percent: Math.round(report.data.success_rate * 100) })
-              : "—"
+            totalRuns === 0
+              ? t("provisioning.runs.neverRun")
+              : t("provisioning.runs.percent", { percent: Math.round((report.data?.success_rate ?? 0) * 100) })
           }
+          pending={noReport}
           icon="circle-check"
           to="/provisioning?state=complete"
           tone="green"
         />
         <StatCard
           label={t("provisioning.runs.machinesProvisioned")}
-          value={report.data ? String(report.data.machines_provisioned) : "—"}
+          value={String(report.data?.machines_provisioned ?? 0)}
+          pending={noReport}
           icon="devices"
           to="/devices"
           tone="blue"
@@ -197,7 +214,8 @@ export function ProvisioningRunsPage() {
         />
         <StatCard
           label={t("provisioning.runs.failedRuns")}
-          value={report.data ? String(failedRuns) : "—"}
+          value={String(failedRuns)}
+          pending={noReport}
           icon="circle-x"
           to="/provisioning?state=failed"
           tone="red"
@@ -208,10 +226,12 @@ export function ProvisioningRunsPage() {
         />
         {/* Computed from the runs this page holds (see `medianDurationLabel`),
             so the list it opens is exactly the set it was measured over: no
-            filter, because a median spans the failed builds too. */}
+            filter, because a median spans the failed builds too. With no run
+            that has both ends it is unmeasured: the kit's absent mark. */}
         <StatCard
           label={t("provisioning.runs.medianBuildTime")}
-          value={medianDurationLabel(items)}
+          value={median ?? ""}
+          pending={median === null}
           icon="clock"
           to="/provisioning"
           tone="neutral"
@@ -219,38 +239,40 @@ export function ProvisioningRunsPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={stateFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              // An empty value is ABSENT, not `?state=`.
-              if (event.target.value === "") next.delete("state");
-              else next.set("state", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("provisioning.runs.filterAria")}
-          >
-            <option value="">{t("provisioning.runs.allRuns")}</option>
-            {RUN_STATE_FILTERS.map((value) => (
-              <option key={value} value={value}>
-                {humaniseEnum(value, "ProvisionRunState")}
-              </option>
-            ))}
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={runs.isLoading}
-          error={runs.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0 ? t("provisioning.runs.emptyNone") : t("provisioning.runs.emptyFiltered")
+        <ListToolbar
+          chips={
+            // No counts: the brief keeps these chips bare (redesign plan, Task
+            // 9, 4.6), and the Absent Zero rule never draws one it was not given.
+            <FilterChips
+              label={t("provisioning.runs.filterAria")}
+              options={[
+                { value: "", label: t("provisioning.runs.allRuns") },
+                ...RUN_STATE_FILTERS.map((value) => ({ value, label: humaniseEnum(value, "ProvisionRunState") })),
+              ]}
+              value={stateFilter}
+              onChange={(value) => filters.set("state", value)}
+            />
           }
-          emptyIcon="image"
-        >
-          <Table>
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={runs.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        <QueryState loading={runs.isLoading} error={runs.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("provisioning.runs.emptyNone")}
+              icon="image"
+              action={
+                canRun ? (
+                  // The brief's words for the empty list (redesign plan, Task 9,
+                  // 4.6; fix round 1): "nothing built yet", and the way to build one.
+                  <Btn label={t("provisioning.runs.buildComputer")} icon="plus" small onClick={provision.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("shell.nav.item.imaging")}>
             <thead>
               <tr>
                 <Th>{t("provisioning.runs.colTarget")}</Th>
@@ -314,10 +336,14 @@ export function ProvisioningRunsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <ProvisionDialog open={provisionOpen} onClose={() => setProvisionOpen(false)} />
+      {/* Open only for someone who may start a run, whatever the URL asks: a
+          courtesy, the server checks `provisioning.run` (invariant 6). */}
+      {/* KEYED, so every opening starts empty however it was opened (general ruling 4). */}
+      <ProvisionDialog key={provision.open && canRun ? "open" : "closed"} open={provision.open && canRun} onClose={provision.close} />
     </div>
   );
 }
@@ -344,6 +370,8 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   // The submit does not start the build. It asks — see `confirmBody`.
   const [confirming, setConfirming] = useState(false);
+  // ONE GUARD FOR THE FORM IN `?new=run` (general ruling 3).
+  const { guard, release } = useUnsavedGuard(open && (profileId !== "" || targetRef !== ""), { search: ["new"] });
 
   // This dialog is never unmounted — the page keeps it rendered and toggles
   // `open` — so without this a failure from the previous attempt is still on
@@ -382,6 +410,8 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
           // table behind this dialog. The confirmation is the row, not a
           // message on a component that is about to disappear.
           reset();
+          // Saved: the close that follows is not a change being dropped.
+          release();
           onClose();
         },
       },
@@ -416,7 +446,9 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
   ].join(" ");
 
   return (
-    <Dialog open={open} onClose={onClose} title={t("provisioning.provisionDialog.title")}>
+    <>
+    {guard}
+    <Dialog open={open} onClose={onClose} title={t("provisioning.runs.buildComputer")}>
       <Form onSubmit={requestStart}>
         <div className="form-grid">
           {/* CYCLES 6 AND 7, and this is Auditor A's BLOCKER for the module.
@@ -475,12 +507,14 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
           unrecoverable but narrow — one endpoint — and asking for a typed name
           on every build is the kind of friction people learn to copy without
           reading, which is worse than the confirmation it replaced. */}
+      {/* ONE NAME FOR ONE ACT (fix round 2): the confirmation says what the
+          button that opened the form and the form itself say. */}
       <ConfirmDialog
         open={confirming}
-        title={t("provisioning.provisionDialog.confirmTitle")}
+        title={t("provisioning.runs.buildComputer")}
         subject={chosen?.label ?? t("provisioning.provisionDialog.confirmSubjectFallback")}
         body={confirmBody}
-        confirmLabel={t("provisioning.provisionDialog.confirmLabel")}
+        confirmLabel={t("provisioning.runs.buildComputer")}
         destructive
         onCancel={() => setConfirming(false)}
         onConfirm={() => {
@@ -489,5 +523,6 @@ function ProvisionDialog({ open, onClose }: { open: boolean; onClose: () => void
         }}
       />
     </Dialog>
+    </>
   );
 }

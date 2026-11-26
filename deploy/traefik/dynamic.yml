@@ -1,46 +1,45 @@
-# TLS material for the OPERATOR-FACING entrypoint (:443) only.
+# The operator-facing entrypoint's (:443) configuration that no container's
+# labels can carry. A Go template: Traefik's file provider fills
+# `{{ env "ITS_PUBLIC_HOST" }}` from traefik's environment (docker-compose.yml).
 #
-# THIS IS NOT THE AGENT-FACING TLS. The gateway entrypoint (:8443) is TCP
-# passthrough -- the gateway process terminates mutual TLS itself so the
-# agent's client certificate reaches it, and its server certificate is issued
-# from the INTERNAL CA by deploy/scripts/issue-gateway-cert.py. Putting your
-# public certificate there would break every agent: agents pin the internal CA
-# at enrollment and would reject a publicly-issued chain. Public certificate
-# here, internal CA there, and the two never swap.
+# THE CERTIFICATE IS NOT CONFIGURED HERE ANY MORE (design
+# 2026-11-23-vps-y-marca-novieri §2). Until 2026-11-23 this file pointed
+# Traefik at deploy/certs/, copied in by hand, and a missing file made it serve
+# its own self-signed default without a word. Traefik now asks Let's Encrypt
+# for the certificate of ITS_PUBLIC_HOST itself (the `le` resolver) and keeps
+# it in the traefik-acme volume; scripts/check-public-tls.sh says, after a
+# start, whether a client would accept what :443 presents.
 #
-# WHERE THE FILES COME FROM. deploy/certs/ is a bind mount (gitignored, with a
-# .gitkeep so a fresh clone still has the directory). The operator drops the
-# certificate and key in as:
+# NOT THE AGENT-FACING TLS EITHER. :8443 is TCP passthrough -- the gateway
+# terminates mutual TLS itself, with a certificate from the INTERNAL CA
+# (scripts/issue-gateway-cert.py), which agents pin at enrollment. While the
+# gateway is absent or not yet healthy there is no TCP router, and Traefik
+# terminates TLS on :8443 itself (with SNI ITS_PUBLIC_HOST it presents the
+# public certificate; without SNI, its default). Invariant 2 does not rest on
+# the two never swapping: the agent dials with the CA pinned at enrollment
+# and refuses anything the internal CA did not sign. Every http router must
+# therefore name entrypoints websecure (test_deploy_acme.py).
 #
-#     deploy/certs/fullchain.pem   leaf + intermediates, in that order
-#     deploy/certs/privkey.pem     the matching private key, chmod 600
-#
-# Those are certbot's own filenames, so
-# `cp /etc/letsencrypt/live/<host>/{fullchain,privkey}.pem deploy/certs/` is
-# the whole install step. A bind mount and not a named volume, deliberately:
-# this deployment is a `git pull` on the host, and you cannot `git pull`,
-# `scp` or `certbot renew` a file into a named volume without a container
-# round-trip.
-#
-# THE SILENT FALLBACK IS THE TRAP. If either file is missing or unreadable,
-# Traefik does NOT fail -- it logs once and serves its own self-signed
-# certificate, and every browser warning gets clicked through. Verify
-# explicitly after any change (see deploy/README.md, "Verify Traefik actually
-# picked up your certificate"):
-#
-#     echo | openssl s_client -connect itms.toeshee.com:443 \
-#         -servername itms.toeshee.com 2>/dev/null \
-#       | openssl x509 -noout -issuer -subject -dates
-#
-# An issuer of `CN=TRAEFIK DEFAULT CERT` means it fell back and your
-# certificate is NOT in use.
-
-tls:
-  certificates:
-    - certFile: /etc/traefik/certs/fullchain.pem
-      keyFile: /etc/traefik/certs/privkey.pem
-  stores:
-    default:
-      defaultCertificate:
-        certFile: /etc/traefik/certs/fullchain.pem
-        keyFile: /etc/traefik/certs/privkey.pem
+# WHILE THE API IS DOWN, ITS PATHS ANSWER 503 (design §6). Traefik's Docker
+# provider leaves out a container that is stopped or not yet healthy, and its
+# router with it; until 2026-11-23 a request for /api or /mcp then fell to the
+# console's catch-all (`web`, priority 1) and got the console's index.html
+# with a 200 -- HTML where an AI app and the console's own client expect
+# JSON. `api-unavailable` claims exactly the api router's paths
+# (backend/tests/test_deploy_acme.py holds the two rules equal) at priority 2:
+# above `web`, below `api`, whose default priority is its rule's length. Its
+# service has no server, which Traefik answers "503 no available server"
+# (measured on Traefik 3.6.25, 2026-11-23).
+http:
+  routers:
+    api-unavailable:
+      rule: Host(`{{ env "ITS_PUBLIC_HOST" }}`) && (PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`) || Path(`/.well-known/jwks.json`) || Path(`/oauth/token`) || Path(`/oauth/register`) || Path(`/oauth/revoke`))
+      entryPoints: [websecure]
+      priority: 2
+      service: api-unavailable
+      tls:
+        certResolver: le
+  services:
+    api-unavailable:
+      loadBalancer:
+        servers: []

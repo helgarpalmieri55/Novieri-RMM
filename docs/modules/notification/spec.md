@@ -187,7 +187,7 @@ created_by, created_at, updated_at`.
 
 - `kind='webhook'`: `config = {url}`. The delivery transport always sends a
   `POST` (`_send_webhook` never reads a `method` from `config`) and builds its
-  own headers from scratch (`X-Toeshee-Event-Id`, and `Authorization` only
+  own headers from scratch (`X-Novieri-Event-Id`, and `Authorization` only
   when a credential is attached) — there is no `method`/`headers` key at all
   (whole-branch review finding M3: an earlier revision of this spec named
   both, and the frontend sent `method: "POST"` into a field nothing consumed;
@@ -476,7 +476,7 @@ revision set `MAX_ATTEMPTS = len(BACKOFF_SECONDS)`, which gave five attempts
 only four gaps and left the 10h delay dead code -- the real retry window was
 2.52h, not the 12.52h the five delays sum to; whole-branch review finding I4).
 Duplicates are possible by design; every webhook carries a stable
-`X-Toeshee-Event-Id` header so a consumer can dedupe.
+`X-Novieri-Event-Id` header so a consumer can dedupe.
 
 **Retryable vs terminal.** A 5xx, a timeout, or a connection reset retries. A
 4xx (other than 429), an SMTP permanent reject, a DNS failure, an egress

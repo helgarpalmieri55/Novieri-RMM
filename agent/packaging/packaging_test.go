@@ -112,7 +112,7 @@ func isMaintainerScript(p string) bool {
 // excluded and checked separately.
 func shellScripts(t *testing.T) []string {
 	t.Helper()
-	out := []string{"linux/its-agent-enroll"}
+	out := []string{"linux/novieri-agent-enroll"}
 	err := filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -139,28 +139,28 @@ func TestEveryPlatformHasItsArtifacts(t *testing.T) {
 	for _, f := range []string{
 		"README.md",
 		"build.sh",
-		"linux/its-agent.service",
+		"linux/novieri-agent.service",
 		"linux/install.sh",
 		"linux/uninstall.sh",
 		"linux/build-deb.sh",
-		"linux/its-agent-enroll",
+		"linux/novieri-agent-enroll",
 		"linux/debian/control.in",
 		"linux/debian/postinst",
 		"linux/debian/prerm",
 		"linux/debian/postrm",
-		"darwin/com.toeshee.itsagent.plist",
+		"darwin/com.novieri.rmm.agent.plist",
 		"darwin/install.sh",
 		"darwin/uninstall.sh",
 		"windows/install.ps1",
 		"windows/uninstall.ps1",
-		// The Windows counterpart of linux/its-agent-enroll. Managed
+		// The Windows counterpart of linux/novieri-agent-enroll. Managed
 		// distribution (GPO, Intune) installs and enrols in TWO steps, because
 		// the package is staged on a share every machine reads and must
 		// therefore carry no credential -- see
 		// docs/modules/agent-distribution/spec-managed-distribution.md §1.1.
 		// Without this script the only way to enrol a Windows endpoint was to
 		// hand the token to install.ps1, i.e. to the thing being staged.
-		"windows/its-agent-enroll.ps1",
+		"windows/novieri-agent-enroll.ps1",
 	} {
 		if _, err := os.Stat(f); err != nil {
 			t.Errorf("missing packaging artifact: %v", err)
@@ -173,8 +173,8 @@ func TestEveryPlatformHasItsArtifacts(t *testing.T) {
 // having been baked into it.
 func TestNoServiceDefinitionCarriesTheEnrollmentToken(t *testing.T) {
 	for _, f := range []string{
-		"linux/its-agent.service",
-		"darwin/com.toeshee.itsagent.plist",
+		"linux/novieri-agent.service",
+		"darwin/com.novieri.rmm.agent.plist",
 	} {
 		text := read(t, f)
 		if strings.Contains(text, "ITS_AGENT_ENROLL_TOKEN") {
@@ -188,7 +188,7 @@ func TestNoServiceDefinitionCarriesTheEnrollmentToken(t *testing.T) {
 // The service command line is the other place a token must never be: argv is
 // world-readable through /proc/<pid>/cmdline for as long as the agent runs.
 func TestTheServiceCommandLineTakesNoArguments(t *testing.T) {
-	d := unitDirectives(t, read(t, "linux/its-agent.service"))
+	d := unitDirectives(t, read(t, "linux/novieri-agent.service"))
 	exec := d["Service.ExecStart"]
 	if len(exec) != 1 {
 		t.Fatalf("want exactly one ExecStart, got %v", exec)
@@ -201,7 +201,7 @@ func TestTheServiceCommandLineTakesNoArguments(t *testing.T) {
 	// else. Read from the array itself rather than by grepping the file, which
 	// would match the word "enroll-token" in a comment and pass or fail for the
 	// wrong reason.
-	args := programArguments(t, read(t, "darwin/com.toeshee.itsagent.plist"))
+	args := programArguments(t, read(t, "darwin/com.novieri.rmm.agent.plist"))
 	if len(args) != 1 {
 		t.Errorf("launchd ProgramArguments = %v; want the binary alone — every argument is visible in `ps`", args)
 	}
@@ -235,7 +235,7 @@ func programArguments(t *testing.T, text string) []string {
 }
 
 func TestTheSystemdUnitIsHardenedAndRestarts(t *testing.T) {
-	d := unitDirectives(t, read(t, "linux/its-agent.service"))
+	d := unitDirectives(t, read(t, "linux/novieri-agent.service"))
 
 	// Each of these is a claim agent/packaging/README.md makes. A README that
 	// says "ProtectSystem=strict" and a unit that does not is worse than
@@ -247,7 +247,7 @@ func TestTheSystemdUnitIsHardenedAndRestarts(t *testing.T) {
 		"Service.ProtectSystem":    "strict",
 		"Service.ProtectHome":      "yes",
 		"Service.PrivateTmp":       "yes",
-		"Service.StateDirectory":   "its-agent",
+		"Service.StateDirectory":   "novieri-agent",
 		"Service.LockPersonality":  "yes",
 		"Service.RestrictSUIDSGID": "yes",
 	}
@@ -277,13 +277,13 @@ func TestTheSystemdUnitIsHardenedAndRestarts(t *testing.T) {
 		t.Errorf("StateDirectoryMode = %v, want 0700 (the device private key lives there)", got)
 	}
 	rw := d["Service.ReadWritePaths"]
-	if len(rw) != 1 || !strings.Contains(rw[0], "/var/lib/its-agent") {
+	if len(rw) != 1 || !strings.Contains(rw[0], "/var/lib/novieri-agent") {
 		t.Errorf("ReadWritePaths = %v, want the state directory and nothing else", rw)
 	}
 }
 
 func TestTheLaunchdPlistIsWellFormedAndDaemonic(t *testing.T) {
-	text := read(t, "darwin/com.toeshee.itsagent.plist")
+	text := read(t, "darwin/com.novieri.rmm.agent.plist")
 	keys := plistKeys(t, text)
 	for _, k := range []string{"Label", "ProgramArguments", "RunAtLoad", "KeepAlive", "StandardErrorPath", "EnvironmentVariables"} {
 		if !keys[k] {
@@ -293,8 +293,8 @@ func TestTheLaunchdPlistIsWellFormedAndDaemonic(t *testing.T) {
 	if keys["Sockets"] {
 		t.Error("the plist requests socket activation; the agent opens no listening port (invariant #2)")
 	}
-	if !strings.Contains(text, "<string>com.toeshee.itsagent</string>") {
-		t.Error("the Label must be com.toeshee.itsagent — the uninstall script boots it out by that name")
+	if !strings.Contains(text, "<string>com.novieri.rmm.agent</string>") {
+		t.Error("the Label must be com.novieri.rmm.agent — the uninstall script boots it out by that name")
 	}
 }
 
@@ -445,32 +445,32 @@ func TestWindowsInstallDoesNotStartAnUnenrolledAgent(t *testing.T) {
 }
 
 // The enrol helper is the step that carries the credential on the managed
-// path, so it is held to every rule linux/its-agent-enroll is held to.
+// path, so it is held to every rule linux/novieri-agent-enroll is held to.
 func TestTheWindowsEnrolHelperRefusesATokenOnTheCommandLine(t *testing.T) {
-	text := read(t, "windows/its-agent-enroll.ps1")
+	text := read(t, "windows/novieri-agent-enroll.ps1")
 
 	// -Token must be a DECLARED parameter that is refused, not an unknown one.
 	// PowerShell's own error for an undeclared parameter teaches nothing and
 	// sends the operator looking for a different spelling.
 	if !strings.Contains(text, "$Token") {
-		t.Error("windows/its-agent-enroll.ps1 does not declare -Token at all; an operator who tries " +
+		t.Error("windows/novieri-agent-enroll.ps1 does not declare -Token at all; an operator who tries " +
 			"it gets PowerShell's unknown-parameter error instead of the reason")
 	}
 	if !strings.Contains(text, "if ($Token) {") || !strings.Contains(text, "throw") {
-		t.Error("windows/its-agent-enroll.ps1 declares -Token without refusing it")
+		t.Error("windows/novieri-agent-enroll.ps1 declares -Token without refusing it")
 	}
 	// And the two ways it IS accepted.
 	if !strings.Contains(text, "ITS_AGENT_ENROLL_TOKEN") {
-		t.Error("windows/its-agent-enroll.ps1 does not read the token from the environment")
+		t.Error("windows/novieri-agent-enroll.ps1 does not read the token from the environment")
 	}
 	if !strings.Contains(text, "TokenFromStdin") {
-		t.Error("windows/its-agent-enroll.ps1 offers no stdin path; that is the form a pipeline needs")
+		t.Error("windows/novieri-agent-enroll.ps1 offers no stdin path; that is the form a pipeline needs")
 	}
 	// The token goes to a file with the directory ACL applied, never to the
 	// service Environment value -- which anyone who can read the service key
 	// can read, and which outlives the token by months.
 	if !strings.Contains(text, "enroll-token") {
-		t.Error("windows/its-agent-enroll.ps1 does not write the token file")
+		t.Error("windows/novieri-agent-enroll.ps1 does not write the token file")
 	}
 	for _, line := range strings.Split(text, "\n") {
 		l := strings.TrimSpace(line)
@@ -478,13 +478,13 @@ func TestTheWindowsEnrolHelperRefusesATokenOnTheCommandLine(t *testing.T) {
 			continue
 		}
 		if strings.Contains(l, "ITS_AGENT_ENROLL_TOKEN=") {
-			t.Errorf("windows/its-agent-enroll.ps1:%q puts the token in an environment block", l)
+			t.Errorf("windows/novieri-agent-enroll.ps1:%q puts the token in an environment block", l)
 		}
 	}
 	// Re-running at every boot is what a GPO startup script DOES, so enrolling
 	// twice must be a no-op rather than a second device record.
 	if !strings.Contains(text, "identity.json") {
-		t.Error("windows/its-agent-enroll.ps1 does not short-circuit on an already-enrolled endpoint; " +
+		t.Error("windows/novieri-agent-enroll.ps1 does not short-circuit on an already-enrolled endpoint; " +
 			"a GPO startup script runs at every boot")
 	}
 }
@@ -696,7 +696,7 @@ func TestPowerShellScriptsAvoidShellSpecificCmdlets(t *testing.T) {
 // spelling rather than for stdin, and leaves the token in the history file
 // either way.
 func TestEveryEntryPointRefusesATokenOnTheCommandLine(t *testing.T) {
-	for _, p := range []string{"linux/install.sh", "darwin/install.sh", "linux/its-agent-enroll"} {
+	for _, p := range []string{"linux/install.sh", "darwin/install.sh", "linux/novieri-agent-enroll"} {
 		text := read(t, p)
 		if !strings.Contains(text, "--token|--token=*)") {
 			t.Errorf("%s has no `--token` case in its argument loop; an operator who tries it "+
@@ -706,7 +706,7 @@ func TestEveryEntryPointRefusesATokenOnTheCommandLine(t *testing.T) {
 			t.Errorf("%s does not read the token from the environment", p)
 		}
 	}
-	for _, p := range []string{"windows/install.ps1", "windows/its-agent-enroll.ps1"} {
+	for _, p := range []string{"windows/install.ps1", "windows/novieri-agent-enroll.ps1"} {
 		text := read(t, p)
 		if !strings.Contains(text, "[string]$Token") {
 			t.Errorf("%s does not DECLARE -Token, so PowerShell answers with its own "+
@@ -724,7 +724,7 @@ func TestEveryEntryPointRefusesATokenOnTheCommandLine(t *testing.T) {
 	}
 }
 
-// ORDER, not presence. The previous version of its-agent-enroll.ps1 wrote the
+// ORDER, not presence. The previous version of novieri-agent-enroll.ps1 wrote the
 // enrollment token to disk and THEN checked whether the service existed, so on
 // a machine where install.ps1 had never succeeded -- exactly the machine a GPO
 // startup script meets, since the script runs at every boot including the ones
@@ -732,31 +732,31 @@ func TestEveryEntryPointRefusesATokenOnTheCommandLine(t *testing.T) {
 // nothing to spend it and nothing to remove it. On a fleet that is the token on
 // every machine the install missed.
 func TestTheWindowsEnrolHelperChecksTheServiceBeforeWritingTheToken(t *testing.T) {
-	text := read(t, "windows/its-agent-enroll.ps1")
+	text := read(t, "windows/novieri-agent-enroll.ps1")
 	check := strings.Index(text, "if (-not (Test-Path $serviceKey))")
 	// The token lands where the file is created (review I4: CreateNew, never
 	// WriteAllText into a file that may already exist).
 	write := strings.Index(text, "[System.IO.File]::Open($tokenFile, [System.IO.FileMode]::CreateNew")
 	if check < 0 {
-		t.Fatal("windows/its-agent-enroll.ps1 no longer checks that the service exists")
+		t.Fatal("windows/novieri-agent-enroll.ps1 no longer checks that the service exists")
 	}
 	if write < 0 {
-		t.Fatal("windows/its-agent-enroll.ps1 no longer writes the token file")
+		t.Fatal("windows/novieri-agent-enroll.ps1 no longer writes the token file")
 	}
 	if check > write {
-		t.Error("windows/its-agent-enroll.ps1 writes the enrollment token BEFORE it checks that " +
+		t.Error("windows/novieri-agent-enroll.ps1 writes the enrollment token BEFORE it checks that " +
 			"the service is installed; a machine where install.ps1 never ran is left holding " +
 			"a fleet credential it can never spend")
 	}
 	// The ACL must also be applied before the token lands, or the token is
 	// briefly readable through whatever ACL the directory inherited.
 	if acl := strings.Index(text, "Set-Acl -Path $DataDir"); acl < 0 || acl > write {
-		t.Error("windows/its-agent-enroll.ps1 writes the token before restricting the directory ACL")
+		t.Error("windows/novieri-agent-enroll.ps1 writes the token before restricting the directory ACL")
 	}
 }
 
 // Windows holds an open section on a running executable's image file, so
-// Copy-Item over its-agent.exe while the service runs fails with "The process
+// Copy-Item over novieri-agent.exe while the service runs fails with "The process
 // cannot access the file because it is being used by another process". The
 // previous version copied first and stopped second, which made every
 // upgrade-in-place fail -- and never a first install, which is why reading the
@@ -769,7 +769,7 @@ func TestTheWindowsInstallerStopsTheServiceBeforeReplacingTheBinary(t *testing.T
 		t.Fatalf("windows/install.ps1 no longer stops the service (%d) or copies the binary (%d)", stop, copyIdx)
 	}
 	if stop > copyIdx {
-		t.Error("windows/install.ps1 replaces its-agent.exe before stopping the service; " +
+		t.Error("windows/install.ps1 replaces novieri-agent.exe before stopping the service; " +
 			"a re-install over a running agent fails on a locked image file")
 	}
 }

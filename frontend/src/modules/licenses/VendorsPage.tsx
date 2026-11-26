@@ -11,14 +11,34 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { useCreateVendorMutation, useLicenses, useVendors } from "./api";
 import { LicensePageNav } from "./licenseNav";
-import { PageHead, Panel, QueryState } from "../../shell/components";
+import {
+  Btn,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 export function VendorsPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (the coordinator's ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("licenses.vendors.title"));
   const api = useApi();
-  const [creating, setCreating] = useState(false);
+  // ON THE LIST KIT (Receta L, a list that only searches; Task 10, 5.3): the
+  // search in `?q=` and New vendor from `?new=vendor`. Vendors are the
+  // organisation's, shared by licenses and subscriptions: no Client chip.
+  const filters = useUrlFilters(["q"] as const);
+  const newVendor = useNewParam("vendor");
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -34,7 +54,8 @@ export function VendorsPage() {
   // v3's row carries "4 products" under the vendor's name. The nearest fact
   // this API serves is how many licenses name the vendor; the list is already
   // fetched by the page next door, so it is one cached read here. A failed
-  // read shows no count rather than a count of nothing.
+  // read shows no count rather than a count of nothing. Read without a chip:
+  // the count is every license the vendor sold, as before.
   const licenses = useLicenses();
   const licenseCountByVendor = useMemo(() => {
     const counts = new Map<string, number>();
@@ -44,33 +65,42 @@ export function VendorsPage() {
     return counts;
   }, [licenses.data]);
   const items = vendors.data ?? [];
+  const needle = filters.values.q.trim().toLowerCase();
+  const shown = items.filter((vendor) => `${vendor.name} ${vendor.website ?? ""}`.toLowerCase().includes(needle));
+
+  const primary = canManage ? (
+    <Btn label={t("licenses.vendors.newVendor")} icon="plus" variant="primary" onClick={newVendor.start} />
+  ) : undefined;
 
   return (
     <div>
-      <PageHead
-        title={t("licenses.vendors.title")}
-        description={t("licenses.vendors.description")}
-        actions={
-          canManage ? (
-            <Button onClick={() => setCreating(true)}>
-              <Icon name="plus" size={14} />
-              {t("licenses.vendors.newVendor")}
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHead title={t("licenses.vendors.title")} description={t("licenses.vendors.description")} actions={primary} />
 
       <LicensePageNav canRead={canRead} />
 
       <Panel bare>
-        <QueryState
-          loading={vendors.isLoading}
-          error={vendors.error}
-          empty={items.length === 0}
-          emptyLabel={t("licenses.vendors.empty")}
-          emptyIcon="building"
-        >
-          <Table>
+        <ListToolbar
+          search={
+            <SearchField
+              placeholder={t("licenses.vendors.searchPlaceholder")}
+              aria-label={t("licenses.vendors.search")}
+              value={filters.values.q}
+              onChange={(event) => filters.set("q", event.target.value)}
+            />
+          }
+          end={vendors.data ? <ShowingCount shown={shown.length} total={items.length} /> : null}
+        />
+        <QueryState loading={vendors.isLoading} error={vendors.error} empty={false} emptyLabel="">
+          {shown.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("licenses.vendors.empty")}
+              action={primary}
+              icon="building"
+            />
+          ) : (
+          <Table label={t("licenses.vendors.title")}>
             <thead>
               <tr>
                 <Th>{t("licenses.vendors.colName")}</Th>
@@ -79,7 +109,7 @@ export function VendorsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((vendor) => {
+              {shown.map((vendor) => {
                 const count = licenses.data ? (licenseCountByVendor.get(vendor.id) ?? 0) : null;
                 return (
                   <tr key={vendor.id}>
@@ -101,10 +131,12 @@ export function VendorsPage() {
               })}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
-      <NewVendorDialog open={creating} onClose={() => setCreating(false)} />
+      {/* Mounted only while open: each opening starts from an empty form. */}
+      {canManage && newVendor.open ? <NewVendorDialog open onClose={newVendor.close} /> : null}
     </div>
   );
 }
@@ -118,6 +150,11 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
   // Populated ON SUBMIT, never while typing; worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const create = useCreateVendorMutation();
+  // A CHANGE IN THE FORM ASKS BEFORE IT IS LEFT (coordinator's ruling on the
+  // wave reviews): `?new=vendor` holds the form. Mounted only while open, so
+  // every opening starts from an empty form.
+  const dirty = name !== "" || website !== "";
+  const { guard, release } = useUnsavedGuard(dirty, { search: ["new"] });
 
   function reset() {
     setName("");
@@ -125,9 +162,7 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
     setAttempt(null);
   }
 
-  // VendorsPage keeps this dialog mounted and toggles `open`, so without
-  // clearing the mutation a failure from one attempt would still be on screen
-  // the next time the form opens, describing a request nobody made.
+  // Clearing the mutation on close keeps a failure from one attempt off the next.
   function close() {
     create.reset();
     setAttempt(null);
@@ -137,12 +172,19 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
   function submit() {
     const next: Attempt = { rules: vendorRules, values: { name } };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      create.reset();
+      return;
+    }
 
     create.mutate(
       { name: name.trim(), website: website.trim() || null },
       {
         onSuccess: () => {
+          // Saved: closing leaves without asking (useUnsavedGuard's release).
+          release();
           reset();
           close();
         },
@@ -151,6 +193,7 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
   }
 
   return (
+    <>
     <Dialog open={open} onClose={close} title={t("licenses.vendors.newTitle")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
@@ -186,5 +229,9 @@ function NewVendorDialog({ open, onClose }: { open: boolean; onClose: () => void
         </div>
       </Form>
     </Dialog>
+    {/* After the dialog, so the question paints on top of it: both are
+        `.modal`s at one z-index (coordinator's ruling 3a). */}
+    {guard}
+    </>
   );
 }

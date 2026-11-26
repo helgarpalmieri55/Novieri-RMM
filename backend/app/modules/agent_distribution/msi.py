@@ -241,7 +241,9 @@ def build_error_text(exc: msi_build.MsiBuildError) -> str:
                 files=p.get("files"),
             )
         case "no_service_stop":
-            return tr("the built MSI does not stop the its-agent service on install and removal")
+            return tr(
+                "the built MSI does not stop the novieri-agent service on install and removal"
+            )
         case "wrong_template":
             return tr("the built MSI is not marked {template}", template=p.get("template"))
         case "no_arch":
@@ -287,9 +289,9 @@ class BuiltMsi:
 
 
 def msi_file_name(host_part: str, arch: str) -> str:
-    """`ITMS-Agent-<host>[@<port>]-<arch>.msi` (spec §2.1). The name is only a
+    """`NovieriRMM-Agent-<host>[@<port>]-<arch>.msi` (spec §2.1). The name is only a
     label here: the console the agent joins is inside the MSI."""
-    return f"ITMS-Agent-{host_part}-{arch}.msi"
+    return f"NovieriRMM-Agent-{host_part}-{arch}.msi"
 
 
 def console_origin(console: str | None) -> tuple[str, str]:
@@ -306,7 +308,7 @@ def console_origin(console: str | None) -> tuple[str, str]:
                 "ITS_PUBLIC_CONSOLE_URL is not set. The MSI takes the address computers "
                 "join from it, never from the browser's request, because the file goes to "
                 "every computer in the domain. Set it to the console's https address, such "
-                "as https://itms.example.com."
+                "as https://rmm.example.com."
             ),
         )
     parts = urlsplit(configured)
@@ -314,7 +316,7 @@ def console_origin(console: str | None) -> tuple[str, str]:
         raise MsiRefused(
             409,
             tr(
-                "ITS_PUBLIC_CONSOLE_URL must be an https address, such as https://itms.example.com."
+                "ITS_PUBLIC_CONSOLE_URL must be an https address, such as https://rmm.example.com."
             ),
         )
     if parts.path not in ("", "/") or parts.query or parts.fragment:
@@ -322,7 +324,7 @@ def console_origin(console: str | None) -> tuple[str, str]:
             409,
             tr(
                 "ITS_PUBLIC_CONSOLE_URL must be the console's bare https address, with no "
-                "path, query or fragment, such as https://itms.example.com."
+                "path, query or fragment, such as https://rmm.example.com."
             ),
         )
     if parts.username is not None:
@@ -330,7 +332,7 @@ def console_origin(console: str | None) -> tuple[str, str]:
             409,
             tr(
                 "ITS_PUBLIC_CONSOLE_URL must not carry a user name, such as "
-                "https://itms.example.com."
+                "https://rmm.example.com."
             ),
         )
     host_part = console_host_part(configured)
@@ -338,7 +340,7 @@ def console_origin(console: str | None) -> tuple[str, str]:
         raise MsiRefused(
             409,
             tr(
-                "The MSI needs ITMS to be reached by a DNS name, such as itms.example.com, "
+                "The MSI needs Novieri RMM to be reached by a DNS name, such as rmm.example.com, "
                 "not an IP address. Set ITS_PUBLIC_CONSOLE_URL to that name."
             ),
         )

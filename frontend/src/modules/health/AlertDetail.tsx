@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError } from "../../components/form";
+import { NoValue } from "../../components/emptystate";
 import { Badge, Button, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
@@ -174,7 +175,10 @@ export function AlertDetail({
             k: t("health.detail.factDevice"),
             v: <Link to={`/devices/${data.device_id}`}>{data.device_hostname || data.device_id}</Link>,
           },
-          { k: t("health.detail.factProfile"), v: data.profile_name || "—" },
+          {
+            k: t("health.detail.factProfile"),
+            v: data.profile_name || <NoValue label={t("health.detail.factProfileNone")} />,
+          },
           {
             // The label leads; the key stays beneath it because it is what
             // an operator searches a log or the API for.
@@ -193,7 +197,10 @@ export function AlertDetail({
           { k: t("health.detail.factLastSeen"), v: formatDateTime(data.last_seen_at, zone) },
           { k: t("health.detail.factOccurrences"), v: String(data.occurrence_count) },
           { k: t("health.detail.factEscalated"), v: formatDateTime(data.escalated_at, zone) },
-          { k: t("health.detail.factTicket"), v: data.ticket_number ?? "—" },
+          {
+            k: t("health.detail.factTicket"),
+            v: data.ticket_number ?? <NoValue label={t("health.detail.factTicketNone")} />,
+          },
           { k: t("health.detail.factMutedUntil"), v: formatDateTime(data.muted_until, zone) },
           { k: t("health.detail.factAcknowledged"), v: formatDateTime(data.acknowledged_at, zone) },
         ]}
@@ -343,7 +350,7 @@ export function describeApprovalSubject(
   const parts: string[] = [action.approved_action_key || action.kind];
   if (action.approved_action_name) parts.push(action.approved_action_name);
   if (action.script_name) parts.push(`${action.script_name} v${action.script_version}`);
-  return parts.join(" — ");
+  return parts.join(" · ");
 }
 
 /** "Re-opened after a previous alert from <when> (ticket <number>)", without the full stop. */

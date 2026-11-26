@@ -47,6 +47,7 @@ from app.core.health.heartbeat import (
     write_heartbeat,
 )
 from app.core.health.types import Status
+from tests.redis_support import TEST_REDIS_URL
 
 
 class _FakeRedis:
@@ -132,7 +133,7 @@ def _api_settings(tmp_path):
         database_admin_url="postgresql+asyncpg://user:pass@localhost:59999/nonexistent",
         ca_dir=tmp_path / "ca",
         signing_key_path=tmp_path / "job-signing.key",
-        redis_url="redis://localhost:6379/9",
+        redis_url=TEST_REDIS_URL,
     )
 
 

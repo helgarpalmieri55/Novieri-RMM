@@ -26,6 +26,7 @@ from app.core.logging import (
     request_id_var,
 )
 from app.modules.sla.errors import UnsatisfiableCalendar
+from tests.redis_support import TEST_REDIS_URL
 
 
 def _record(
@@ -1839,7 +1840,7 @@ def test_unsatisfiable_calendar_round_trips_through_the_backends_own_serializer(
 
     from app.modules.sla.errors import UnsatisfiableCalendar
 
-    app = Celery("test-fixwave8", broker="redis://localhost:6379/9")
+    app = Celery("test-fixwave8", broker=TEST_REDIS_URL)
     assert app.backend.serializer == "json", (
         "this test must exercise the JSON path -- the one create_celery() actually uses"
     )

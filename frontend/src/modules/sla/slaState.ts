@@ -182,7 +182,8 @@ export function validateWindows(windows: ReadonlyArray<WindowIn>): string[] {
 // as durations; "480" tells a reader nothing about whether it is the four
 // hours they configured.
 export function formatMinutes(minutes: number): string {
-  if (!Number.isFinite(minutes)) return "—";
+  // Not a duration: the kit's absent mark (n/a, n/d), never a dash.
+  if (!Number.isFinite(minutes)) return translate("shell.viz.na");
   const whole = Math.floor(Math.abs(minutes));
   const sign = minutes < 0 ? "-" : "";
   if (whole === 0) return translate("sla.duration.zero");

@@ -57,8 +57,9 @@ from app.models import LicenseComplianceSnapshot, Organization, User
 from app.modules.licenses.reporting import compliance_summary, reported_clients
 from app.modules.licenses.service import create_product
 from tests.conftest import PgCluster
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 
 

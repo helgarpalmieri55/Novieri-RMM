@@ -10,6 +10,8 @@ export const auth = {
     working: "Working…",
     startOver: "Start again",
     backToSignIn: "Back to sign-in",
+    // Between two ways through one step: the password and Microsoft, a passkey and a password.
+    or: "or",
     tooMany: "Too many attempts. Wait a minute and try again.",
     wait: {
       one: "Too many attempts. Wait {count} second and try again.",
@@ -22,6 +24,11 @@ export const auth = {
     intro: "Use the email address and password of your account. Your second factor comes next.",
     submit: "Continue",
     rejected: "That email address and password do not match an account here.",
+    // Continue pressed with a field empty (coordinator ruling 8a: the button stays on): only
+    // the field that is empty is named, and both only when both are.
+    missing: "Enter your email address and your password.",
+    missingEmail: "Enter your email address.",
+    missingPassword: "Enter your password.",
     forgot: "Forgot your password?",
   },
   portalSignIn: {
@@ -114,7 +121,6 @@ export const auth = {
     introContact: "You were invited to the support portal as <b>{email}</b>. Choose a password, or use a passkey.",
     usePasskey: "Use a passkey instead",
     passkeyName: "Name for this passkey",
-    or: "or",
     // A technician's invitation with Microsoft (operator decision C3).
     microsoftWithPassword:
       "Or accept with your Microsoft account. Choose the password above as well: it is your way back if Microsoft ever stops working.",
@@ -187,12 +193,12 @@ export const auth = {
   consent: {
     loading: "Checking the request…",
     title: "Connect the app at {host}",
-    intro: "It asks to use ITMS as you.",
+    intro: "It asks to use Novieri RMM as you.",
     calledItself: "It calls itself “{name}”.",
     unnamed: "It gave no name.",
     selfRegistered: "It registered itself here, and any app can register with any name: trust the address, not the name.",
     grants:
-      "If you approve, it can act as you in ITMS: everything your role allows, including running actions on managed computers.",
+      "If you approve, it can act as you in Novieri RMM: everything your role allows, including running actions on managed computers.",
     lasts:
       "The connection lasts while the app uses it and ends after 30 days unused. You can end it at any time in Settings → AI connections.",
     account: "You are signed in as {email}.",

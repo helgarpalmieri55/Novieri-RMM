@@ -14,10 +14,10 @@ import (
 
 // THE GROUP POLICY MSI'S INSTALL MODE (docs/superpowers/specs/
 // 2026-09-30-gpo-msi-and-subnet-push-design.md §2.3). Windows Installer copies
-// its-agent.exe and msi-enroll.json into %ProgramFiles%\ITSuite, then runs
+// novieri-agent.exe and msi-enroll.json into %ProgramFiles%\NovieriRMM, then runs
 // ONE deferred custom action as SYSTEM, with no impersonation and no desktop:
 //
-//	"%ProgramFiles%\ITSuite\its-agent.exe" --msi-install
+//	"%ProgramFiles%\NovieriRMM\novieri-agent.exe" --msi-install
 //
 // The code is never on that command line: it is in msi-enroll.json, which
 // this mode reads, hands to the link installer's own sequence (the token
@@ -37,7 +37,7 @@ const MsiSettingsFile = "msi-enroll.json"
 // maxMsiSettingsBytes bounds the settings read: two short strings.
 const maxMsiSettingsBytes = 4096
 
-// MsiLogFile is the MSI's diagnostics, in %ProgramData%\ITSuite: one line per
+// MsiLogFile is the MSI's diagnostics, in %ProgramData%\NovieriRMM: one line per
 // run of --msi-install or --msi-uninstall, for the operator whose Group
 // Policy install did not happen (deploy/WINDOWS-PUSH.md §7). The uninstall
 // capability writes the same file (uninstall.MsiLogFile).
@@ -62,7 +62,7 @@ func msiLogLine(now time.Time, mode string, err error) string {
 	return now.UTC().Format(time.RFC3339) + " " + mode + " " + outcome
 }
 
-// msiLogDir is %ProgramData%\ITSuite: the data directory's parent, which the
+// msiLogDir is %ProgramData%\NovieriRMM: the data directory's parent, which the
 // install secures before anything inside it is created.
 func msiLogDir(programData string) string {
 	d := NewPlan("", programData, "").DataDir
@@ -142,7 +142,7 @@ func msiInstall(sys msiSystem, exe, programFiles, programData string) error {
 	// to ask on: no question, only the privilege check.
 	if !sys.Elevated() {
 		return errors.New("--msi-install must run as SYSTEM or an elevated administrator; " +
-			"it is the ITMS MSI's install step")
+			"it is the Novieri RMM MSI's install step")
 	}
 	p := NewPlan(programFiles, programData, "")
 	if !strings.EqualFold(exe, p.Target) {

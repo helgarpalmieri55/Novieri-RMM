@@ -11,7 +11,7 @@
  *    clients model (spec §2.1); it is a CLIENT now, or every client.
  */
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -47,6 +47,16 @@ async function openUsers() {
   renderSettings();
   await user.click(await screen.findByRole("tab", { name: "Users" }));
   return user;
+}
+
+/**
+ * Opens the invitation. RE-POINTED (redesign plan, Task 12, 7.1; Receta L):
+ * inviting is a dialog the list's "Invite a person" opens (`?new=user`), no
+ * longer a panel under the list; the dialog carries the same name.
+ */
+async function openInvite(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await user.click(await screen.findByRole("button", { name: "Invite a person" }));
+  return screen.getByRole("dialog", { name: "Invite a person" });
 }
 
 /**
@@ -105,7 +115,7 @@ describe("Settings — Users tab", () => {
    */
   it("invites a person with a role on one client and a role on every client", async () => {
     const user = await openUsers();
-    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    const invite = await openInvite(user);
     await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
     await user.type(within(invite).getByLabelText("Display name"), "New Bie");
 
@@ -136,8 +146,11 @@ describe("Settings — Users tab", () => {
       ],
     });
     expect(await screen.findByRole("status")).toHaveTextContent("An invitation was emailed to newbie@example.com.");
-    expect(within(invite).getByLabelText<HTMLInputElement>("Email")).toHaveValue("");
-  });
+    // Sent: the dialog closes, and the next invitation starts empty.
+    expect(screen.queryByRole("dialog", { name: "Invite a person" })).toBeNull();
+    expect(within(await openInvite(user)).getByLabelText<HTMLInputElement>("Email")).toHaveValue("");
+    // Two grants picked through two pickers, then the dialog opened again.
+  }, 15_000);
 
   /**
    * RE-POINTED from "a failed enrolment email is reported, not swallowed":
@@ -151,7 +164,7 @@ describe("Settings — Users tab", () => {
       invite_link: "https://itms.example.test/invite#one-time-token",
     });
     const user = await openUsers();
-    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    const invite = await openInvite(user);
     await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
     await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
 
@@ -175,7 +188,7 @@ describe("Settings — Users tab", () => {
     });
     const user = userEvent.setup();
     const { queryClient } = renderSettings("/settings?tab=users");
-    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    const invite = await openInvite(user);
     await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
     await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
     const shown = await screen.findByRole("region", { name: "Invitation link for newbie@example.com" });
@@ -200,13 +213,78 @@ describe("Settings — Users tab", () => {
 
   it("does not send an access chosen and not added", async () => {
     const user = await openUsers();
-    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    const invite = await openInvite(user);
     await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
     await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
 
-    expect(within(invite).getByRole("button", { name: "Add this access" })).toBeDisabled();
+    // RE-POINTED (coordinator ruling 8; O7 review, S2) from "Add this access
+    // is disabled": the button stays pressable and, pressed with half a pair,
+    // says which half is missing instead of doing nothing silently.
+    await user.click(within(invite).getByRole("button", { name: "Add this access" }));
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    expect(within(invite).queryAllByRole("listitem")).toHaveLength(0);
     expect(within(invite).getByRole("button", { name: "Send invitation" })).toBeDisabled();
     expect(within(invite).getByText("Add the access you chose, or clear it, before sending.")).toBeInTheDocument();
+    expect(calls.inviteUser).not.toHaveBeenCalled();
+  });
+
+  // A DISABLED CONTROL SHOWS ITS REASON ON SCREEN (coordinator ruling 8; O7
+  // review, S2). "Add this access" used to sit disabled until a role and a
+  // client were both chosen, with nothing saying so; now it is pressable and
+  // names what is missing, and the sentence goes once the pair is complete.
+  it("names what is missing when Add this access is pressed without a whole pair", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    const add = within(invite).getByRole("button", { name: "Add this access" });
+    expect(add).toBeEnabled();
+
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+    expect(within(invite).queryAllByRole("listitem")).toHaveLength(0);
+
+    await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+
+    await user.click(within(invite).getByLabelText(/client/i));
+    await user.click(await within(invite).findByRole("option", { name: /Warehouse/ }));
+    await user.click(add);
+    expect(within(invite).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(invite).queryByRole("alert")).toBeNull();
+    expect(calls.inviteUser).not.toHaveBeenCalled();
+  });
+
+  // O7 RE-REVIEW, N1: the sentence "Add this access" leaves is an answer to
+  // that press, not a standing state. The next change to the pair clears it --
+  // choosing a role, or typing in the client box -- and so does sending the
+  // invitation without an access.
+  it("clears the missing-access sentence on the next change to the pair", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    const add = within(invite).getByRole("button", { name: "Add this access" });
+
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+    await user.selectOptions(await within(invite).findByLabelText("Role"), AUDITOR_ROLE.id);
+    expect(within(invite).queryByRole("alert")).toBeNull();
+
+    await user.click(add);
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    await user.type(within(invite).getByLabelText(/client/i), "Wa");
+    expect(within(invite).queryByRole("alert")).toBeNull();
+  });
+
+  it("clears the missing-access sentence when the invitation is sent without an access", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    await user.click(within(invite).getByRole("button", { name: "Add this access" }));
+    expect(within(invite).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
+    // What the send was refused for is said; what "Add this access" was
+    // refused for is not said again.
+    expect(within(invite).getByRole("alert")).toHaveTextContent(/^Email is required\.$/);
+    expect(within(invite).queryByText(/Role is required/)).toBeNull();
     expect(calls.inviteUser).not.toHaveBeenCalled();
   });
 
@@ -293,7 +371,12 @@ describe("Settings — Users tab", () => {
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
     const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
     await user.selectOptions(within(panel).getByLabelText("Role"), AUDITOR_ROLE.id);
-    expect(within(panel).getByRole("button", { name: "Assign role" })).toBeDisabled();
+    // RE-POINTED (coordinator ruling 8; O7 re-review, S3) from "disabled": the
+    // button stays pressable and, pressed without a scope, says so and sends
+    // nothing.
+    await user.click(within(panel).getByRole("button", { name: "Assign role" }));
+    expect(within(panel).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    expect(calls.assignUserRole).not.toHaveBeenCalled();
   });
 
   it("typed text that is not a chosen client cannot assign", async () => {
@@ -304,10 +387,12 @@ describe("Settings — Users tab", () => {
     const field = within(panel).getByLabelText(/client/i);
 
     // Typed, never clicked: nothing is chosen, so nothing can be assigned.
+    // RE-POINTED (O7 re-review, S3) from "disabled": pressed, it names the
+    // missing client and sends nothing.
     await user.type(field, "Ware");
     const assign = within(panel).getByRole("button", { name: /^Assign role/ });
-    expect(assign).toBeDisabled();
     await user.click(assign);
+    expect(within(panel).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
     expect(calls.assignUserRole).not.toHaveBeenCalled();
 
     // A client chosen, then other text typed over it: still not a choice.
@@ -317,7 +402,10 @@ describe("Settings — Users tab", () => {
     expect(within(panel).getByRole("button", { name: "Assign role on Warehouse" })).toBeEnabled();
     await user.clear(field);
     await user.type(field, "Toe");
-    expect(within(panel).getByRole("button", { name: /^Assign role/ })).toBeDisabled();
+    // RE-POINTED (O7 re-review, S3) from "disabled": the button no longer
+    // names Warehouse while the box says "Toe" -- pressing it would name the
+    // missing client (the test above), never send Warehouse.
+    expect(within(panel).getByRole("button", { name: "Assign role" })).toBeEnabled();
     await user.click(await within(panel).findByRole("option", { name: /Toeshee Group/ }));
     await user.click(within(panel).getByRole("button", { name: "Assign role on Toeshee Group" }));
 
@@ -325,6 +413,42 @@ describe("Settings — Users tab", () => {
     expect(calls.assignUserRole).toHaveBeenCalledWith(OPERATOR_USER.id, {
       role_id: AUDITOR_ROLE.id,
       client_id: "org-1",
+    });
+  });
+
+  // A DISABLED CONTROL SHOWS ITS REASON ON SCREEN (coordinator ruling 8; O7
+  // re-review, S3). "Assign role" sat disabled until a role and a scope were
+  // both chosen, with nothing on screen saying so. It is pressable now (but
+  // for a reader, and while sending), names what the pair lacks, and still
+  // never takes typed text for a client (T11R-I1).
+  it("names what a grant is missing when Assign role is pressed early, and sends nothing", async () => {
+    const user = await openUsers();
+    await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
+    const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
+    const assign = () => within(panel).getByRole("button", { name: /^Assign role/ });
+    const field = within(panel).getByLabelText(/client/i);
+    expect(assign()).toBeEnabled();
+
+    await user.click(assign());
+    expect(within(panel).getByRole("alert")).toHaveTextContent("Role is required. Client is required.");
+    // The next change to the pair clears the sentence (N1's rule, here too).
+    await user.selectOptions(within(panel).getByLabelText("Role"), AUDITOR_ROLE.id);
+    expect(within(panel).queryByRole("alert")).toBeNull();
+
+    await user.type(field, "Ware");
+    await user.click(assign());
+    expect(within(panel).getByRole("alert")).toHaveTextContent(/^Client is required\.$/);
+    expect(calls.assignUserRole).not.toHaveBeenCalled();
+
+    await user.click(field);
+    await user.click(await within(panel).findByRole("option", { name: /Warehouse/ }));
+    expect(within(panel).queryByRole("alert")).toBeNull();
+    await user.click(within(panel).getByRole("button", { name: "Assign role on Warehouse" }));
+    await waitFor(() => expect(calls.assignUserRole).toHaveBeenCalledTimes(1));
+    // The request is the one it always was.
+    expect(calls.assignUserRole).toHaveBeenCalledWith(OPERATOR_USER.id, {
+      role_id: AUDITOR_ROLE.id,
+      client_id: "44444444-4444-4444-8444-444444444444",
     });
   });
 
@@ -380,9 +504,10 @@ describe("Settings — Users tab", () => {
    */
   it("shows humanized role names in the invitation's role select and the grant select, not the raw wire value", async () => {
     const user = await openUsers();
-    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    const invite = await openInvite(user);
     expect(await within(invite).findByRole("option", { name: "Auditor" })).toBeInTheDocument();
     expect(within(invite).queryByRole("option", { name: "auditor" })).not.toBeInTheDocument();
+    await user.click(within(invite).getByRole("button", { name: "Cancel" }));
 
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
     const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
@@ -870,8 +995,10 @@ describe("Settings — Users tab", () => {
     // this test itself pins below.
     await openMoreActions(user, row);
 
-    // RE-POINTED (design §7): "Create user" is "Send invitation".
-    expect(screen.getByRole("button", { name: "Send invitation" }), "Send invitation").toBeDisabled();
+    // RE-POINTED (design §7): "Create user" is "Send invitation"; and again
+    // (redesign plan, Task 12, 7.1): the invitation is a dialog, so the write
+    // a reader cannot make is the "Invite a person" that opens it.
+    expect(screen.getByRole("button", { name: "Invite a person" }), "Invite a person").toBeDisabled();
     for (const name of [
       "Disable operator@example.com",
       "Delete operator@example.com",
@@ -1050,7 +1177,7 @@ describe("Settings — Users tab, a recent second factor", () => {
   it("asks for it before an invitation, then sends the same invitation once more", async () => {
     calls.inviteUser.mockRejectedValueOnce(stepUpRequired()).mockResolvedValueOnce({ user_id: INVITED_USER.id, invite_link: null });
     const user = await openUsers();
-    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    const invite = await openInvite(user);
     await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
     await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
 
@@ -1145,7 +1272,7 @@ describe("Settings — Users tab, a recent second factor", () => {
   it("sends nothing more when the confirmation is closed, and says nothing changed", async () => {
     calls.inviteUser.mockRejectedValue(stepUpRequired());
     const user = await openUsers();
-    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    const invite = await openInvite(user);
     await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
     await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
     const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
@@ -1153,5 +1280,102 @@ describe("Settings — Users tab, a recent second factor", () => {
 
     expect(await screen.findByText("Nothing was changed: the confirmation was closed.")).toBeInTheDocument();
     expect(calls.inviteUser).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The list pattern (redesign plan, Task 12, 7.1; Receta L; decisions D8, D16):
+// the directory's search and status chips live in the URL, the empty list says
+// its cause, and inviting is a dialog with its own URL (`?new=user`) that
+// starts empty every time it opens and asks before a half-written invitation
+// is dropped.
+// ---------------------------------------------------------------------------
+
+describe("Settings — Users on the list pattern", () => {
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, CASEY_USER, INVITED_USER] });
+    const user = userEvent.setup();
+    const { router } = renderSettings("/settings?tab=users&status=invited");
+    const chips = await screen.findByRole("group", { name: "Status" });
+    expect(within(chips).getByRole("button", { name: /Invitation pending/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("row", { name: /invitee@example\.com/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /operator@example\.com/ })).toBeNull();
+    await user.click(within(chips).getByRole("button", { name: /Active/ }));
+    expect(router.state.location.search).toContain("status=active");
+    expect(router.state.location.search).toContain("tab=users");
+    expect(await screen.findByRole("row", { name: /operator@example\.com/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /invitee@example\.com/ })).toBeNull();
+  });
+
+  it("keeps its search in the URL, so a reload finds the same rows", async () => {
+    const user = userEvent.setup();
+    const { router } = renderSettings("/settings?tab=users");
+    await screen.findByRole("row", { name: /casey@example\.com/ });
+    await user.type(screen.getByRole("searchbox", { name: "Search people" }), "casey");
+    expect(router.state.location.search).toBe("?tab=users&q=casey");
+    expect(screen.queryByRole("row", { name: /operator@example\.com/ })).toBeNull();
+    expect(screen.getByText("Showing 1 of 2")).toBeInTheDocument();
+    await act(() => router.navigate("/settings?tab=users&q=casey"));
+    expect(screen.getByRole("searchbox", { name: "Search people" })).toHaveValue("casey");
+  });
+
+  it("says why the list is empty", async () => {
+    renderSettings("/settings?tab=users&status=deleted");
+    expect(await screen.findByText("Nothing matches these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("says when nobody is listed yet, and offers the invitation", async () => {
+    calls.listUsers.mockResolvedValue({ users: [] });
+    renderSettings("/settings?tab=users");
+    expect(await screen.findByText("No users in this organization yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Invite a person" }).length).toBeGreaterThan(0);
+  });
+
+  it("opens the invitation from its URL, and Invite a person writes that URL", async () => {
+    const user = userEvent.setup();
+    const { router } = renderSettings("/settings?tab=users");
+    await user.click(await screen.findByRole("button", { name: "Invite a person" }));
+    expect(router.state.location.search).toBe("?tab=users&new=user");
+    expect(screen.getByRole("dialog", { name: "Invite a person" })).toBeInTheDocument();
+  });
+
+  it("starts the invitation empty every time it opens, Back and Forward included", async () => {
+    const user = userEvent.setup();
+    const { router } = renderSettings("/settings?tab=users&new=user");
+    const dialog = await screen.findByRole("dialog", { name: "Invite a person" });
+    await user.type(within(dialog).getByLabelText("Email"), "half@example.com");
+    // Closing with a change asks first; leaving drops it.
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const leave = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    await user.click(within(leave).getByRole("button", { name: "Leave without saving" }));
+    await waitFor(() => expect(router.state.location.search).toBe("?tab=users"));
+    await act(() => router.navigate("/settings?tab=users&new=user"));
+    expect(within(screen.getByRole("dialog", { name: "Invite a person" })).getByLabelText("Email")).toHaveValue("");
+  });
+
+  it("asks before Back drops a half-written invitation", async () => {
+    const user = userEvent.setup();
+    const { router } = renderSettings("/settings?tab=users");
+    await user.click(await screen.findByRole("button", { name: "Invite a person" }));
+    await user.type(within(screen.getByRole("dialog", { name: "Invite a person" })).getByLabelText("Email"), "half@example.com");
+    void router.navigate(-1);
+    expect(await screen.findByRole("dialog", { name: "Leave without saving?" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?tab=users&new=user");
+  });
+});
+
+// Coordinator ruling 8a (2026-11-25): a form with more than one box keeps its
+// send enabled and says what is missing on submit; it is never a dead button.
+describe("Settings — Users, the invitation's missing address", () => {
+  it("says the address is required on submit, and sends nothing", async () => {
+    const user = await openUsers();
+    const invite = await openInvite(user);
+    const send = within(invite).getByRole("button", { name: "Send invitation" });
+    expect(send).toBeEnabled();
+    await user.click(send);
+    expect(await within(invite).findByRole("alert")).toHaveTextContent("Email is required");
+    expect(calls.inviteUser).not.toHaveBeenCalled();
   });
 });

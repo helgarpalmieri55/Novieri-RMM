@@ -65,7 +65,7 @@ func TestMsiInstallWindows(t *testing.T) {
 	t.Cleanup(func() { plat.uninstall(t, repoRoot) })
 
 	work := t.TempDir()
-	agentExe := filepath.Join(work, "its-agent.exe")
+	agentExe := filepath.Join(work, "novieri-agent.exe")
 	copyFileT(t, filepath.Join(binDir, "A"+exe()), agentExe)
 	codeFile := filepath.Join(work, "code")
 	if err := os.WriteFile(codeFile, []byte(code), 0o600); err != nil {
@@ -90,29 +90,29 @@ func TestMsiInstallWindows(t *testing.T) {
 	settings := filepath.Join(filepath.Dir(plat.target()), "msi-enroll.json")
 
 	// INSTALL, as Group Policy does it: msiexec as SYSTEM, no UI.
-	first := build("ITMS-Agent-first-amd64.msi")
+	first := build("NovieriRMM-Agent-first-amd64.msi")
 	if rc, log := msiexecAsSystem(t, `/i "`+first+`"`, filepath.Join(work, "install.log")); rc != 0 {
 		t.Fatalf("msiexec /i exited %d\n%s", rc, log)
 	} else if strings.Contains(log, code) {
 		t.Fatal("the msiexec log carries the code")
 	}
 	if n := productCount(t); n != 1 {
-		t.Fatalf("%d ITMS Agent products registered after one install, want 1", n)
+		t.Fatalf("%d Novieri RMM Agent products registered after one install, want 1", n)
 	}
 	if _, err := os.Stat(settings); !os.IsNotExist(err) {
 		t.Fatalf("msi-enroll.json survived the install: %v", err)
 	}
-	pathName := ps(t, "(Get-CimInstance Win32_Service -Filter \"Name='its-agent'\").PathName")
+	pathName := ps(t, "(Get-CimInstance Win32_Service -Filter \"Name='novieri-agent'\").PathName")
 	if strings.TrimSpace(pathName) != `"`+plat.target()+`"` {
 		t.Fatalf("service command line = %q; it must be the quoted path and nothing else", pathName)
 	}
-	env := ps(t, "(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\its-agent').Environment -join '|'")
+	env := ps(t, "(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\novieri-agent').Environment -join '|'")
 	if !strings.Contains(env, "ITS_AGENT_ENROLL_URL="+enroll.url) || strings.Contains(env, code) {
 		t.Fatalf("service environment = %q", env)
 	}
 	assertOwnedSDDL(t, "data directory", plat.dataDir())
 	assertOwnedSDDL(t, "data directory's parent", filepath.Dir(plat.dataDir()))
-	// DIAGNOSTICS: one line per run in %ProgramData%\ITSuite\msi.log, and
+	// DIAGNOSTICS: one line per run in %ProgramData%\NovieriRMM\msi.log, and
 	// never the code or the settings.
 	suite := filepath.Dir(plat.dataDir())
 	msiLog := filepath.Join(suite, "msi.log")
@@ -130,7 +130,7 @@ func TestMsiInstallWindows(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(plat.dataDir(), "enroll-token")); !os.IsNotExist(err) {
 		t.Fatalf("the token file survived enrollment: %v", err)
 	}
-	lines := ps(t, "Get-CimInstance Win32_Process -Filter \"Name='its-agent.exe'\" | ForEach-Object { $_.CommandLine }")
+	lines := ps(t, "Get-CimInstance Win32_Process -Filter \"Name='novieri-agent.exe'\" | ForEach-Object { $_.CommandLine }")
 	if strings.Contains(lines, code) {
 		t.Fatalf("a running agent carries the code in its command line: %s", lines)
 	}
@@ -142,12 +142,12 @@ func TestMsiInstallWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := build("ITMS-Agent-second-amd64.msi")
+	second := build("NovieriRMM-Agent-second-amd64.msi")
 	if rc, log := msiexecAsSystem(t, `/i "`+second+`"`, filepath.Join(work, "upgrade.log")); rc != 0 {
 		t.Fatalf("msiexec /i (upgrade) exited %d\n%s", rc, log)
 	}
 	if n := productCount(t); n != 1 {
-		t.Fatalf("%d ITMS Agent products registered after an upgrade, want 1", n)
+		t.Fatalf("%d Novieri RMM Agent products registered after an upgrade, want 1", n)
 	}
 	again, err := os.ReadFile(filepath.Join(plat.dataDir(), "identity.json"))
 	if err != nil || string(again) != string(identity) {
@@ -166,7 +166,7 @@ func TestMsiInstallWindows(t *testing.T) {
 	if rc, log := msiexecAsSystem(t, `/x "`+second+`"`, filepath.Join(work, "remove.log")); rc != 0 {
 		t.Fatalf("msiexec /x exited %d\n%s", rc, log)
 	}
-	if svc := strings.TrimSpace(ps(t, "(Get-Service -Name its-agent -ErrorAction SilentlyContinue).Name")); svc != "" {
+	if svc := strings.TrimSpace(ps(t, "(Get-Service -Name novieri-agent -ErrorAction SilentlyContinue).Name")); svc != "" {
 		t.Fatalf("the service survived msiexec /x: %q", svc)
 	}
 	for _, path := range []string{plat.target(), plat.dataDir(), msiLog} {
@@ -174,7 +174,7 @@ func TestMsiInstallWindows(t *testing.T) {
 			t.Fatalf("%s survived msiexec /x: %v", path, err)
 		}
 	}
-	// %ProgramData%\ITSuite goes too, unless something that is not the MSI's
+	// %ProgramData%\NovieriRMM goes too, unless something that is not the MSI's
 	// is in it (another test's leftovers on the runner, say).
 	if entries, err := os.ReadDir(suite); err == nil {
 		if len(entries) == 0 {
@@ -187,7 +187,7 @@ func TestMsiInstallWindows(t *testing.T) {
 		t.Fatalf("read %s after msiexec /x: %v", suite, err)
 	}
 	if n := productCount(t); n != 0 {
-		t.Fatalf("%d ITMS Agent products registered after removal, want 0", n)
+		t.Fatalf("%d Novieri RMM Agent products registered after removal, want 0", n)
 	}
 }
 
@@ -251,11 +251,11 @@ func assertMsiLog(t *testing.T, path, code, console string, installs int) {
 	}
 }
 
-// productCount is how many installed products are named "ITMS Agent".
+// productCount is how many installed products are named "Novieri RMM Agent".
 func productCount(t *testing.T) int {
 	t.Helper()
 	out := strings.TrimSpace(ps(t, "@(Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall' | "+
-		"Get-ItemProperty -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'ITMS Agent' }).Count"))
+		"Get-ItemProperty -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Novieri RMM Agent' }).Count"))
 	n, err := strconv.Atoi(out)
 	if err != nil {
 		t.Fatalf("product count %q", out)
@@ -267,12 +267,12 @@ func waitServiceRunning(t *testing.T, d time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(d)
 	for {
-		status := strings.TrimSpace(ps(t, "(Get-Service -Name its-agent -ErrorAction SilentlyContinue).Status"))
+		status := strings.TrimSpace(ps(t, "(Get-Service -Name novieri-agent -ErrorAction SilentlyContinue).Status"))
 		if status == "Running" {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the its-agent service is %q, not Running, %s after the upgrade", status, d)
+			t.Fatalf("the novieri-agent service is %q, not Running, %s after the upgrade", status, d)
 		}
 		time.Sleep(2 * time.Second)
 	}

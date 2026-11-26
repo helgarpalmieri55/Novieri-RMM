@@ -23,7 +23,6 @@ import { ConfirmDialog } from "../../components/confirm";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
-import { useSearchParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
@@ -44,24 +43,36 @@ import { OffsiteReadiness } from "./BackupReadiness";
 import type { Repository } from "./types";
 import {
   Btn,
-  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlFilters,
 } from "../../shell/components";
+import { useRecordTitle } from "../../shell/title";
 
 export function RepositoriesPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("backup.repositories.title"));
   const api = useApi();
-  const [createOpen, setCreateOpen] = useState(false);
+  // New repository opens from `?new=repository` (decision D8), so the New
+  // menu and a link reach it.
+  const create = useNewParam("repository");
   // The state filter lives in the URL so the "Active"/"Retired" tiles can
-  // hand over the exact rows they counted; the select below is the same
+  // hand over the exact rows they counted; the chips below are the same
   // vocabulary, so a reader who arrives by tile can see and clear it.
-  const [params, setParams] = useSearchParams();
-  const stateFilter = params.get("state") ?? "";
+  const filters = useUrlFilters(["state"] as const);
+  const stateFilter = filters.values.state;
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -78,6 +89,9 @@ export function RepositoriesPage() {
 
   const repositories = useBackupRepositories();
   const items = repositories.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !repositories.data;
   const activeCount = items.filter((repo) => repo.state === "active").length;
   const retiredCount = items.filter((repo) => repo.state === "retired").length;
   const visible =
@@ -106,7 +120,7 @@ export function RepositoriesPage() {
         description={t("backup.repositories.description")}
         actions={
           canManage ? (
-            <Btn label={t("backup.repositories.newRepository")} icon="plus" variant="primary" onClick={() => setCreateOpen(true)} />
+            <Btn label={t("backup.repositories.newRepository")} icon="plus" variant="primary" onClick={create.start} />
           ) : undefined
         }
       />
@@ -124,6 +138,7 @@ export function RepositoriesPage() {
         <StatCard
           label={t("backup.repositories.tileRepositories")}
           value={String(items.length)}
+          pending={noData}
           icon="database"
           to="/backup/repositories"
           tone="neutral"
@@ -132,6 +147,7 @@ export function RepositoriesPage() {
         <StatCard
           label={t("backup.repositories.tileActive")}
           value={String(activeCount)}
+          pending={noData}
           icon="circle-check"
           to="/backup/repositories?state=active"
           tone="green"
@@ -140,6 +156,7 @@ export function RepositoriesPage() {
         <StatCard
           label={t("backup.repositories.tileRetired")}
           value={String(retiredCount)}
+          pending={noData}
           icon="minus"
           to="/backup/repositories?state=retired"
           tone="gold"
@@ -148,36 +165,39 @@ export function RepositoriesPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={stateFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              if (event.target.value === "") next.delete("state");
-              else next.set("state", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("backup.repositories.filterAria")}
-          >
-            <option value="">{t("backup.repositories.allRepositories")}</option>
-            <option value="active">{t("backup.repositories.tileActive")}</option>
-            <option value="retired">{t("backup.repositories.tileRetired")}</option>
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={repositories.isLoading}
-          error={repositories.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0
-              ? t("backup.repositories.emptyNone")
-              : t("backup.repositories.emptyFiltered")
+        <ListToolbar
+          chips={
+            // `GET /backup/repositories` answers every repository at once, so
+            // these counts are the whole list's, never a page's.
+            <FilterChips
+              label={t("backup.repositories.filterAria")}
+              options={[
+                { value: "", label: t("backup.repositories.allRepositories"), count: repositories.data ? items.length : undefined },
+                { value: "active", label: t("backup.repositories.tileActive"), count: repositories.data ? activeCount : undefined },
+                { value: "retired", label: t("backup.repositories.tileRetired"), count: repositories.data ? retiredCount : undefined },
+              ]}
+              value={stateFilter}
+              onChange={(value) => filters.set("state", value)}
+            />
           }
-          emptyIcon="database"
-        >
-          <Table>
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={repositories.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        <QueryState loading={repositories.isLoading} error={repositories.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("backup.repositories.emptyNone")}
+              icon="database"
+              action={
+                canManage ? (
+                  <Btn label={t("backup.repositories.newRepository")} icon="plus" small onClick={create.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("backup.repositories.title")}>
             <thead>
               <tr>
                 <Th>{t("backup.repositories.colName")}</Th>
@@ -224,6 +244,7 @@ export function RepositoriesPage() {
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
         {retire.isError ? (
           <p role="alert" className="form-error">
@@ -251,10 +272,12 @@ export function RepositoriesPage() {
           component is never unmounted (only `Dialog` returns null when
           closed), so a failed create left its alert sitting there for the
           next opening, describing a request the operator had abandoned. */}
+      {/* Open only for someone who may manage policies, whatever the URL
+          asks: a courtesy, the server checks the code (invariant 6). */}
       <CreateRepositoryDialog
-        key={createOpen ? "open" : "closed"}
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        key={create.open && canManage ? "open" : "closed"}
+        open={create.open && canManage}
+        onClose={create.close}
       />
     </div>
   );
@@ -268,6 +291,8 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
   const t = useT();
   const create = useCreateBackupRepositoryMutation();
   const [name, setName] = useState("");
+  // ONE GUARD FOR THE FORM IN `?new=repository` (general ruling 3).
+  const { guard, release } = useUnsavedGuard(open && name.trim() !== "", { search: ["new"] });
   // A repository is ONE client's: its key travels to every device that backs
   // up into it (MSP clients phase 2, Task 13). Nothing on this page is a row
   // to take it from, so it is the client chosen at the top, or with every
@@ -295,6 +320,8 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
       {
         onSuccess: () => {
           setName("");
+          // Saved: the close that follows is not a change being dropped.
+          release();
           onClose();
         },
       },
@@ -302,6 +329,8 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
   }
 
   return (
+    <>
+    {guard}
     <Dialog open={open} onClose={onClose} title={t("backup.repositories.dialogTitle")}>
       {/* A real <form>, so Enter in Name creates the repository. */}
       <Form onSubmit={submit}>
@@ -339,5 +368,6 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
         </div>
       </Form>
     </Dialog>
+    </>
   );
 }

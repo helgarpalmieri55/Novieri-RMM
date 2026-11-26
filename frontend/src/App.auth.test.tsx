@@ -447,6 +447,14 @@ describe("a refusal at `/me` (D1, Minor 7)", () => {
     await waitFor(() => expect(assign).toHaveBeenCalledExactlyOnceWith("/sign-in"));
   });
 
+  // A card in the sign-in frame: its action across the card (P3 adoption pass;
+  // the coordinator's answer to O8's Q3), the kit's `Btn wide`.
+  it("draws Sign out across the card", async () => {
+    stubServer(() => ({ status: 403, body: { detail: "This address may not sign in to the console." } }));
+    render(guarded().ui);
+    expect(await screen.findByRole("button", { name: "Sign out" })).toHaveClass("btn", "primary", "wide");
+  });
+
   it("says the session is still open when that sign-out never reached the server", async () => {
     vi.stubGlobal(
       "fetch",

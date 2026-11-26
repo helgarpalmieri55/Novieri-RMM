@@ -14,7 +14,7 @@ import (
 // 0600 token file in layout.UnixPushStagingDir and runs ONE fixed command
 // against the placed binary:
 //
-//	/opt/toeshee/agent.pkg install --token-file /opt/toeshee/enroll.token --enroll-url 'https://<console>'
+//	/opt/novieri/agent.pkg install --token-file /opt/novieri/enroll.token --enroll-url 'https://<console>'
 //
 // That is invariant 2a(b)'s shape: the only thing that executes on the target
 // is the published artefact, and what it does is compiled into it -- the job
@@ -56,32 +56,32 @@ type UnixLayout struct {
 // UnixLayoutFor is the layout for goos, or an error for a system with no
 // install mode.
 func UnixLayoutFor(goos string) (UnixLayout, error) {
-	const dataDir = "/var/lib/its-agent"
+	const dataDir = "/var/lib/novieri-agent"
 	switch goos {
 	case "linux":
 		return UnixLayout{
 			GOOS:        "linux",
 			BinDir:      "/usr/local/bin",
-			Binary:      "/usr/local/bin/its-agent",
+			Binary:      "/usr/local/bin/novieri-agent",
 			DataDir:     dataDir,
 			TokenPath:   dataDir + "/enroll-token",
-			ConfDir:     "/etc/its-agent",
-			EnvFile:     "/etc/its-agent/agent.env",
+			ConfDir:     "/etc/novieri-agent",
+			EnvFile:     "/etc/novieri-agent/agent.env",
 			ServiceDir:  "/etc/systemd/system",
-			ServiceFile: "/etc/systemd/system/its-agent.service",
-			Service:     "its-agent",
+			ServiceFile: "/etc/systemd/system/novieri-agent.service",
+			Service:     "novieri-agent",
 		}, nil
 	case "darwin":
 		return UnixLayout{
 			GOOS:        "darwin",
 			BinDir:      "/usr/local/libexec",
-			Binary:      "/usr/local/libexec/its-agent",
+			Binary:      "/usr/local/libexec/novieri-agent",
 			DataDir:     dataDir,
 			TokenPath:   dataDir + "/enroll-token",
-			LogDir:      "/var/log/its-agent",
+			LogDir:      "/var/log/novieri-agent",
 			ServiceDir:  "/Library/LaunchDaemons",
-			ServiceFile: "/Library/LaunchDaemons/com.toeshee.itsagent.plist",
-			Service:     "com.toeshee.itsagent",
+			ServiceFile: "/Library/LaunchDaemons/com.novieri.rmm.agent.plist",
+			Service:     "com.novieri.rmm.agent",
 		}, nil
 	}
 	return UnixLayout{}, fmt.Errorf("there is no install mode for %q; it runs on Linux and macOS", goos)
@@ -274,9 +274,9 @@ func linuxInstall(sys unixSystem, l UnixLayout, enrollURL, token, exe string) er
 	return nil
 }
 
-// linuxEnvFile is what install.sh writes to /etc/its-agent/agent.env.
+// linuxEnvFile is what install.sh writes to /etc/novieri-agent/agent.env.
 func linuxEnvFile(l UnixLayout, enrollURL string) []byte {
-	return []byte("# Written by `its-agent install` (the SSH push), as agent/packaging/linux/install.sh\n" +
+	return []byte("# Written by `novieri-agent install` (the SSH push), as agent/packaging/linux/install.sh\n" +
 		"# writes it. Not a secret, and deliberately not where the enrollment token\n" +
 		"# lives -- that is " + l.TokenPath + ".\n" +
 		"ITS_AGENT_ENROLL_URL=" + enrollURL + "\n")
@@ -318,7 +318,7 @@ func darwinInstall(sys unixSystem, l UnixLayout, enrollURL, token, exe string) e
 // enrollURL has passed layout.CheckEnrollOrigin, so it holds no character XML
 // would read as markup.
 func darwinPlist(enrollURL string) []byte {
-	const anchor = "        <string>/var/lib/its-agent</string>\n"
+	const anchor = "        <string>/var/lib/novieri-agent</string>\n"
 	entry := "        <key>ITS_AGENT_ENROLL_URL</key>\n        <string>" + enrollURL + "</string>\n"
 	return []byte(strings.Replace(darwinPlistTemplate, anchor, anchor+entry, 1))
 }
@@ -326,7 +326,7 @@ func darwinPlist(enrollURL string) []byte {
 // isStagedBinary reports whether exe IS the push's staged copy, comparing
 // both sides with symlinks resolved (review Minor 5): os.Executable resolves
 // them, so on a host where /opt is a symlink (`/opt -> var/opt`) the running
-// staged binary reports /var/opt/toeshee/agent.pkg. A side that cannot be
+// staged binary reports /var/opt/novieri/agent.pkg. A side that cannot be
 // resolved is compared as given -- never guessed into a match.
 func isStagedBinary(sys unixSystem, exe string) bool {
 	if exe == layout.UnixStagedBinary {

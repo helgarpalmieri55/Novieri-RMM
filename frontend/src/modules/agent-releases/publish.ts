@@ -3,7 +3,7 @@
  * so every rule below is tested without a dialog in the way.
  *
  * WHAT THE INPUT IS. `.github/workflows/release-agent.yml` drafts a GitHub
- * release carrying six binaries named `its-agent-<os>-<arch>[.exe]` and a
+ * release carrying six binaries named `novieri-agent-<os>-<arch>[.exe]` and a
  * `SIGNATURES` file, one line per binary, written by
  * `agent/cmd/release-sign/main.go` as
  *
@@ -54,13 +54,13 @@ export interface Platform {
  * The platform a binary's name says it is for, or null.
  *
  * The same rule as `release-sign`'s `platformOf`: strip `.exe`, then exactly
- * `its-agent-<os>-<arch>` with both halves from the known sets. Anything else
+ * `novieri-agent-<os>-<arch>` with both halves from the known sets. Anything else
  * -- a browser's "(1)" suffix, an `x86_64` alias -- is left for the operator
  * to name rather than guessed at.
  */
 export function inferPlatform(filename: string): Platform | null {
   const parts = filename.replace(/\.exe$/, "").split("-");
-  if (parts.length !== 4 || parts[0] !== "its" || parts[1] !== "agent") return null;
+  if (parts.length !== 4 || parts[0] !== "novieri" || parts[1] !== "agent") return null;
   const [, , os, arch] = parts;
   if (!(RELEASE_OS as readonly string[]).includes(os!)) return null;
   if (!(RELEASE_ARCH as readonly string[]).includes(arch!)) return null;

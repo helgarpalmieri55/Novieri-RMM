@@ -103,14 +103,33 @@ describe("describeValue", () => {
     expect(describeValue("enabled", true)).toBe("Yes");
     expect(describeValue("enabled", false)).toBe("No");
   });
+
+  // An absent value is the kit's one absent mark, n/a, as NoValue draws it
+  // (P3 adoption pass; DESIGN.md: no em dash in UI text). It was "—".
+  it("draws an absent value as the kit's absent mark, never an em dash", () => {
+    expect(describeValue("fqdn", null)).toBe("n/a");
+    expect(describeValue("fqdn", undefined)).toBe("n/a");
+    expect(describeValue("addresses", [null, "10.0.0.1"])).toBe("n/a, 10.0.0.1");
+    expect(describeValue("nic", { name: null })).toBe("Name n/a");
+  });
+
+  it("draws it in the row, where the value would be", () => {
+    const { container } = render(<Attributes value={{ fqdn: null, cores: 4 }} empty="Nothing recorded" raw={false} />);
+    expect(container.querySelector(".attributes")?.textContent).toBe("Fqdn n/a · Cores 4");
+    expect(container).not.toHaveTextContent("—");
+  });
 });
 
 describe("NoValue", () => {
-  it("hides the dash from assistive tech and names the missing field", () => {
+  it("draws the kit's absent mark, hidden from assistive tech, and names the missing field", () => {
     // "Screen readers announce this as 'em dash' or skip it; sighted users
-    // cannot tell which field is empty."
+    // cannot tell which field is empty." The mark is the kit's one absent
+    // mark, n/a (kit requests batch 3, B3-9): DESIGN.md's Absent Zero Rule
+    // ("unmeasured is drawn as absent: n/a") and the global constraint (no em
+    // dash in the interface); it was "—".
     const { container } = render(<NoValue label="No FQDN recorded" />);
-    expect(container.querySelector('[aria-hidden="true"]')?.textContent).toBe("—");
+    expect(container.querySelector('[aria-hidden="true"]')?.textContent).toBe("n/a");
+    expect(container).not.toHaveTextContent("—");
     expect(screen.getByText("No FQDN recorded")).toBeInTheDocument();
   });
 });

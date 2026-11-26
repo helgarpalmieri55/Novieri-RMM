@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the Toeshee agent as a launchd system daemon on macOS.
+# Install the Novieri RMM agent as a launchd system daemon on macOS.
 #
 #   sudo ITS_AGENT_ENROLL_TOKEN=... ./install.sh --url https://control-plane.example
 #
@@ -16,9 +16,9 @@ set -euo pipefail
 DESTDIR=""
 BINDIR="/usr/local/libexec"
 PLISTDIR="/Library/LaunchDaemons"
-STATEDIR="/var/lib/its-agent"
-LOGDIR="/var/log/its-agent"
-LABEL="com.toeshee.itsagent"
+STATEDIR="/var/lib/novieri-agent"
+LOGDIR="/var/log/novieri-agent"
+LABEL="com.novieri.rmm.agent"
 BINARY=""
 URL="${ITS_AGENT_ENROLL_URL:-}"
 TOKEN_FROM_STDIN=0
@@ -37,13 +37,13 @@ Required:
       --token-stdin  with the token on stdin
 
 Options:
-  --binary PATH   The its-agent binary (default ../../dist/its-agent-darwin-arm64,
-                  then ../../dist/its-agent, then ./its-agent).
+  --binary PATH   The novieri-agent binary (default ../../dist/novieri-agent-darwin-arm64,
+                  then ../../dist/novieri-agent, then ./novieri-agent).
   --destdir DIR   Stage under DIR; nothing is loaded into launchd.
   --no-start      Install the plist but do not bootstrap it.
   -h, --help      This.
 
-The state dir is /var/lib/its-agent -- NOT ~/Library or /Library/Application
+The state dir is /var/lib/novieri-agent -- NOT ~/Library or /Library/Application
 Support. That is the agent binary's own default for every non-Windows platform
 (internal/config.defaultDataDir); the installer follows the binary rather than
 the platform convention, because a mismatch here is an agent that silently
@@ -78,10 +78,10 @@ done
 
 if [ -z "$BINARY" ]; then
   for candidate in \
-      "$here/../../dist/its-agent-darwin-arm64" \
-      "$here/../../dist/its-agent-darwin-amd64" \
-      "$here/../../dist/its-agent" \
-      "$here/its-agent" "./its-agent"; do
+      "$here/../../dist/novieri-agent-darwin-arm64" \
+      "$here/../../dist/novieri-agent-darwin-amd64" \
+      "$here/../../dist/novieri-agent" \
+      "$here/novieri-agent" "./novieri-agent"; do
     if [ -f "$candidate" ]; then BINARY="$candidate"; break; fi
   done
 fi
@@ -114,7 +114,7 @@ if [ -n "$TOKEN" ]; then
   note "the agent deletes it as soon as it has exchanged it for a certificate"
 fi
 
-install -m 0755 "$BINARY" "${DESTDIR}${BINDIR}/its-agent"
+install -m 0755 "$BINARY" "${DESTDIR}${BINDIR}/novieri-agent"
 
 install -d -m 0755 "${DESTDIR}${PLISTDIR}"
 plist="${DESTDIR}${PLISTDIR}/${LABEL}.plist"
@@ -172,7 +172,7 @@ fi
 
 cat <<EOF
 
-its-agent installed.
+novieri-agent installed.
 
   status   sudo launchctl print system/${LABEL}
   logs     tail -f ${LOGDIR}/agent.log

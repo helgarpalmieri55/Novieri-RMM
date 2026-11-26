@@ -39,8 +39,9 @@ from app.core.config import Settings, override_settings
 from app.jobs.registry import UnknownJobType
 from app.models import Organization
 from tests.conftest import PgCluster
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 
 

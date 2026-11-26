@@ -32,12 +32,7 @@
  * something to settle by picking the cheaper frontend hack.
  */
 
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -45,7 +40,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { humaniseEnum } from "../../lib/labels";
 
-import type { Device, DeviceListParams, DeviceProvenance, DeviceState, Me } from "../../lib/api";
+import type { Device, DeviceListParams, DevicePage, DeviceProvenance, DeviceState, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { RelTime } from "../../components/reltime";
 import { saveBlob } from "../../lib/download";
@@ -53,7 +48,30 @@ import { useLiveEvents } from "../../lib/ws";
 import { useClientScope } from "../../lib/clientScope";
 import { useClientName } from "../settings/api";
 import { useSitesOf } from "./siteNames";
-import { Btn, FilterBar, PageHead, Panel, QueryState, ResultCount, SearchField, StatCard, StatsGrid, StatusPill, TableFoot, TableWrap, Tabs, type Kind } from "../../shell/components";
+import {
+  Btn,
+  BulkBar,
+  ChipSelect,
+  ClientFilter,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Pager,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  TableWrap,
+  useNarrowedApi,
+  useNewParam,
+  useUrlFilters,
+  withClient,
+  type Kind,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ADD_COMPUTER_TO } from "../../shell/nav";
 import { OsIcon } from "../../shell/viz";
@@ -121,20 +139,7 @@ function provenanceLabel(device: Device): string {
   // An unknown value renders as itself rather than as a blank cell: a row this
   // page cannot classify is a fact worth seeing, not one worth hiding.
   if (PROVENANCE_KNOWN.has(device.provenance)) return humaniseEnum(device.provenance, "DeviceProvenance");
-  return device.provenance ?? "—";
-}
-
-/**
- * The search term, short enough to quote back inside a sentence.
- *
- * The audit pasted 500 characters into this box; echoing that verbatim into
- * the empty state would push the message — and the way out of it — off the
- * card. An ellipsis is not censorship here: the full value is still in the
- * input the user is looking at.
- */
-function shortTerm(term: string): string {
-  const trimmed = term.trim();
-  return trimmed.length > 60 ? `${trimmed.slice(0, 60)}…` : trimmed;
+  return device.provenance ?? translate("shell.viz.na");
 }
 
 /**
@@ -153,8 +158,13 @@ function rowKind(device: Device): Kind | undefined {
   return undefined;
 }
 
-/** `label` is a catalogue key, translated where the strip is drawn. */
-const TABS = [
+/**
+ * THE STATE FILTER, as chips (redesign Receta L, 5: a tab strip that filtered
+ * the list becomes `FilterChips` on the same `?state=`, so every link that
+ * carried one still opens the same rows). `label` is a catalogue key; `all`
+ * is the chip that writes nothing.
+ */
+const STATES = [
   { key: "all", label: "devices.tabs.all" },
   { key: "online", label: "devices.tabs.online" },
   { key: "offline", label: "devices.tabs.offline" },
@@ -165,11 +175,16 @@ const TABS = [
   { key: "assets", label: "devices.tabs.assets" },
   { key: "certs", label: "devices.tabs.certs" },
   // Machines that joined through the install link and wait for a person
-  // (install-link spec §1.5). They are ALSO in Online/Offline: the tabs were
-  // never a partition. This tab alone also lists a rejected machine whose
-  // agent may still be installed, until someone says they removed it.
+  // (install-link spec §1.5). They are ALSO in Online/Offline: the chips were
+  // never a partition. This one alone also lists a rejected machine whose
+  // agent may still be installed, until someone says they removed it. Drawn
+  // only when the server counts it (an older one omits `review`), or when the
+  // URL already asks for it, so it can be undone.
   { key: "review", label: "devices.tabs.review" },
 ] as const;
+
+/** The URL keys of this list's filters (Receta L: the ones it always used, plus the Client chip's). */
+const FILTER_KEYS = ["q", "state", "provenance", "site", "client"] as const;
 
 /**
  * How many rows one request asks for.
@@ -225,81 +240,83 @@ export function DevicesPage() {
     onSuccess: (blob) => saveBlob(blob, "devices.xlsx"),
   });
   /**
-   * THE FILTER STATE LIVES IN THE URL.
+   * THE FILTER STATE LIVES IN THE URL (redesign Receta L, 4: `useUrlFilters`).
    *
    * Auditor A: "[MEDIUM] Filter tabs do not change the URL, so filtered views
    * cannot be linked, bookmarked or restored … Reloading returns to 'All
    * devices'; the browser Back button does not undo the tab change." A fleet
    * console is a thing people paste at each other — "the four machines with
-   * certificate trouble" has to survive being sent to a colleague.
+   * certificate trouble" has to survive being sent to a colleague, and so
+   * does "the eleven machines nobody vouched for" (`?provenance=`).
    *
    * The search term REPLACES rather than pushes: one history entry per
    * keystroke would make Back useless for exactly the person trying to undo a
-   * filter.
+   * filter. EVERY FILTER RESETS THE OFFSET (the kit drops `offset` on every
+   * write): narrowing a 4 000-row estate to eleven rows while still asking for
+   * rows 150-200 of it returns an empty table, and an empty table is the one
+   * answer this page must never give by accident.
    */
+  const filters = useUrlFilters(FILTER_KEYS);
   const [params, setParams] = useSearchParams();
-  const tab = params.get("state") ?? "all";
-  const search = params.get("q") ?? "";
-  // IN THE URL like every other filter on this page, for the same reason:
-  // "the eleven machines nobody vouched for" is a thing one technician sends
-  // another, and a filter that lives in component state cannot be sent.
-  const provenance = params.get("provenance") ?? "";
-  // THE SITE FILTER (design §4.3), in the URL like every filter here. Sites are
-  // one client's, so it applies only with a client chosen above, and only to
-  // one of THAT client's sites (`siteFilter` below).
-  const site = params.get("site") ?? "";
+  // `?state=all` is what an older link carries for the chip that writes nothing.
+  const tab = filters.values.state === "" ? "all" : filters.values.state;
+  const search = filters.values.q;
+  const provenance = filters.values.provenance;
+  // THE SITE FILTER (design §4.3). Sites are one client's, so it applies only
+  // with one client decided -- chosen above, or in the Client chip -- and only
+  // to one of THAT client's sites (`siteFilter` below).
+  const site = filters.values.site;
+  /**
+   * THE CLIENT CHIP NARROWS THE LIST'S READ, AND ONLY THE READ (decision D6;
+   * Receta L, 6). `/devices?client=<id>` is the link the client 360 gives
+   * ("See every device of this client"): the list, its counts and its tiles
+   * are read through that client's narrowed API, keyed on it, and not before
+   * `/me` has said it is one of the person's. The three writes on this page
+   * (push install, Approve all, Run job) keep `useApi()`: the chip never
+   * changes where a write goes. `X-Client-Id` narrows and never widens; the
+   * database enforces it (invariant 5a).
+   */
+  const { api: narrowed, client, ready } = useNarrowedApi(filters.values.client);
   const { selected: chosenClient } = useClientScope();
+  const siteClient = chosenClient ?? client;
   const clientName = useClientName();
-  // The chosen client's sites: the filter's options, and what a `?site=` is
+  // The decided client's sites: the filter's options, and what a `?site=` is
   // checked against. `undefined` while they load, or when the person may not
   // read them (`useSitesOf`).
-  const chosenSiteNames = useSitesOf(chosenClient !== null ? [chosenClient] : []);
-  const chosenSites = chosenClient !== null ? chosenSiteNames.sitesOf(chosenClient) : undefined;
+  const siteNames = useSitesOf(siteClient !== null ? [siteClient] : []);
+  const clientSites = siteClient !== null ? siteNames.sitesOf(siteClient) : undefined;
   // IN THE URL for the same reason as everything else here, plus one of its
   // own: an operator who found a machine on page four and followed the row to
   // its detail page has to come BACK to page four.
   const offset = Number(params.get("offset") ?? 0) || 0;
+  const setOffset = (next: number) => {
+    const query = new URLSearchParams(params);
+    if (next === 0) query.delete("offset");
+    else query.set("offset", String(next));
+    setParams(query);
+  };
 
-  function update(patch: Record<string, string>, replace = false) {
-    const next = new URLSearchParams(params);
-    for (const [key, value] of Object.entries(patch)) {
-      // An empty value is ABSENT, not `?q=`: a URL carrying an empty filter
-      // reads as a filter that is set to nothing.
-      if (value === "") next.delete(key);
-      else next.set(key, value);
-    }
-    setParams(next, { replace });
-  }
-
-  // EVERY FILTER RESETS THE OFFSET. Narrowing a 4 000-row estate to eleven
-  // rows while still asking for rows 150-200 of it returns an empty table, and
-  // an empty table is the one answer this page must never give by accident.
-  const setTab = (key: string) => update({ state: key === "all" ? "" : key, offset: "" });
-  const setProvenance = (value: string) => update({ provenance: value, offset: "" });
-  const setSite = (value: string) => update({ site: value, offset: "" });
   /**
-   * A SITE IS SENT ONLY WHEN IT IS ONE OF THE CHOSEN CLIENT'S. Another client
+   * A SITE IS SENT ONLY WHEN IT IS ONE OF THE DECIDED CLIENT'S. Another client
    * chosen above drops the filter (plan decision) -- and the change itself is
    * never seen here: it starts this page again (`lib/clientScope.tsx`'s keyed
    * fragment) while the URL keeps its `?site=`, so what the new page finds is
    * a site its client does not have. Sending that would answer an empty fleet
-   * for a filter nobody set on this client. With every client chosen there is
-   * no site filter at all. Either way the stale `?site=` (and the offset it
-   * paged) leaves the URL; until the client's sites are known nothing is
-   * sent, so a bookmarked filter applies once they arrive.
+   * for a filter nobody set on this client. With every client and no chip
+   * there is no site filter at all. Either way the stale `?site=` (and the
+   * offset it paged) leaves the URL, in place; nothing is judged before the
+   * chip's client is decided, and until the client's sites are known nothing
+   * is sent, so a bookmarked filter applies once they arrive.
    */
-  const siteFilter =
-    site !== "" && (chosenSites ?? []).some((item) => item.id === site) ? site : "";
+  const siteFilter = site !== "" && (clientSites ?? []).some((item) => item.id === site) ? site : "";
   const staleSite =
     site !== "" &&
-    (chosenClient === null ||
-      (chosenSites !== undefined && !chosenSites.some((item) => item.id === site)));
+    ready &&
+    (siteClient === null || (clientSites !== undefined && !clientSites.some((item) => item.id === site)));
   useEffect(() => {
-    if (staleSite) update({ site: "", offset: "" }, true);
+    if (staleSite) filters.set("site", "", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only a stale site clears it
   }, [staleSite]);
-  const setSearch = (value: string) => update({ q: value, offset: "" }, true);
-  const setOffset = (next: number) => update({ offset: next === 0 ? "" : String(next) });
 
   /**
    * **THE SERVER FILTERS, PAGES AND COUNTS. THIS PAGE ASKS.**
@@ -314,7 +331,7 @@ export function DevicesPage() {
    * why none of them was ever reported as a bug.
    *
    * The response carries three things this page must NOT recompute: `items`
-   * (this page of the filtered set), `state_counts` (what each tab would show
+   * (this page of the filtered set), `state_counts` (what each chip would show
    * from this search) and `fleet` (the estate, unfiltered -- the stat tiles).
    */
   const query: DeviceListParams = {
@@ -328,14 +345,17 @@ export function DevicesPage() {
     limit: DEVICES_PAGE_SIZE,
     offset,
   };
-  const devices = useQuery({
-    queryKey: ["devices", query],
-    queryFn: () => api.listDevices(query),
+  const devices = useQuery<DevicePage>({
+    queryKey: ["devices", query, client],
+    queryFn: () => narrowed.listDevices(query),
+    enabled: ready,
     // The table keeps the rows it has while the next page loads. Without this
     // every keystroke in the search box blanks the table to "Loading…", which
     // on a filter people type into is a flicker, not feedback. The FIRST load
-    // still reports loading, because there is nothing to keep.
-    placeholderData: keepPreviousData,
+    // still reports loading, because there is nothing to keep -- and so does
+    // a change of chip: another client's rows are never kept on screen under
+    // this one's (Receta L, 6).
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === client ? previous : undefined),
   });
   // THE ZONE COMES FROM THE PROFILE, not from whichever machine the technician
   // happens to be sitting at (cycle 5). Same `["me"]` key and staleTime the
@@ -344,11 +364,15 @@ export function DevicesPage() {
   // "fall back to the browser".
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const zone = me.data?.timezone;
+  const permissions = me.data?.permissions ?? [];
   // Whether the "Assigned to" column and its search are offered. Cosmetic --
   // the server decides whether `assigned_to` is sent and searched at all.
-  const canReadPeople = (me.data?.permissions ?? []).includes("people.read");
+  const canReadPeople = permissions.includes("people.read");
   // Cosmetic: both review routes check `devices.review` themselves.
-  const canReview = (me.data?.permissions ?? []).includes(REVIEW_PERMISSION);
+  const canReview = permissions.includes(REVIEW_PERMISSION);
+  // "Add a computer" with the code the New menu shows it with (design §1.2):
+  // the journey reads `devices.read`, and each step names its own.
+  const canAddComputer = permissions.includes("devices.read");
   // The sentence a Reject returned. Held HERE, because the rejected row -- and
   // its actions -- leave the table the moment the list refreshes.
   //
@@ -371,9 +395,12 @@ export function DevicesPage() {
   // pages and filters -- ticking is the act, not the view -- and offered only
   // to a holder of `agent.push.run`. Cosmetic: the server checks that code,
   // `credentials.checkout`, every bound and the ceiling on each request.
-  const canPush = (me.data?.permissions ?? []).includes(AGENT_PUSH_RUN);
+  const canPush = permissions.includes(AGENT_PUSH_RUN);
   const [selected, setSelected] = useState<Device[]>([]);
-  const [pushing, setPushing] = useState(false);
+  // The chooser opens from `?new=push` (decision D8), so Push runs' empty list
+  // can lead to it; for a holder of `agent.push.run` only, whatever the URL asks.
+  const pushParam = useNewParam("push");
+  const pushing = pushParam.open && canPush;
   const isSelected = (device: Device) => selected.some((d) => d.id === device.id);
   function toggle(device: Device) {
     setSelected((current) =>
@@ -387,7 +414,7 @@ export function DevicesPage() {
   function unselect(id: string) {
     const next = selected.filter((d) => d.id !== id);
     setSelected(next);
-    if (next.length === 0) setPushing(false);
+    if (next.length === 0) pushParam.close();
   }
 
   useLiveEvents(() => {
@@ -400,8 +427,9 @@ export function DevicesPage() {
   // whole set -- which is the assumption this change exists to remove.
   const items = devices.data?.items ?? [];
   // THE COLUMNS OF MSP CLIENTS (design §3.4, §4.3): Client while every client
-  // is shown (the same column in every module), Site always. The names come
-  // from each row's client's sites, one read per client, shared by key.
+  // is shown (the same column in every module; with the chip on, it is what
+  // says whose each machine is), Site always. The names come from each row's
+  // client's sites, one read per client, shared by key.
   const showClient = chosenClient === null;
   const sites = useSitesOf(
     chosenClient !== null
@@ -411,19 +439,48 @@ export function DevicesPage() {
   // The stat cards stay FLEET-WIDE on purpose: "Managed endpoints" is a fact
   // about the estate, and a number that shrank as somebody typed in a search
   // box would be a different -- and much worse -- version of the same defect.
-  // `fleet` is counted with no filter applied at all.
+  // `fleet` is counted with no filter applied at all (but within the client
+  // the read is narrowed to: the chip decides whose estate this is).
   const fleet = devices.data?.fleet;
-  // What each tab would show FROM THIS SEARCH, counted in SQL. `total` is this
-  // object's entry for the active tab, by construction on the server, so the
-  // strip and the table under it cannot disagree.
-  const tabCounts = devices.data?.state_counts;
+  // The tiles' one condition (ruling 10a): no counts, pending or failed.
+  // StatCard's `pending` draws the kit's absent mark, so no figure is passed.
+  const noFleet = fleet === undefined;
+  // What each chip would show FROM THIS SEARCH, counted in SQL. `total` is this
+  // object's entry for the active chip, by construction on the server, so the
+  // chips and the table under them cannot disagree.
+  const stateCounts = devices.data?.state_counts;
   const total = devices.data?.total ?? 0;
   const lastOffset = Math.max(0, Math.ceil(total / DEVICES_PAGE_SIZE) - 1) * DEVICES_PAGE_SIZE;
+  const states = STATES.filter((item) => item.key !== "review" || stateCounts?.review !== undefined || tab === "review");
+  // THE TILES COUNT THE CHIP'S CLIENT'S MACHINES when the chip is set (the
+  // read is narrowed), so the list each one opens keeps that client: without
+  // it a tile counting Andes' offline machines opened every client's.
+  const tileTo = (state: string) => withClient(state ? `/devices?state=${state}` : "/devices", client);
+
+  // ONE "ADD A COMPUTER" ENTRY, the same page as the New menu's: the page
+  // offers the one-machine install first and the network sweep below it
+  // (`docs/modules/agent-distribution/spec-push-install.md` §10.2). The page's
+  // one primary action (Receta L, 1), and the empty fleet's way forward.
+  const addComputer = canAddComputer ? (
+    <Link className="btn primary" to={ADD_COMPUTER_TO}>
+      <Icon name="plus" size={15} />
+      <span>{t("devices.page.addComputer")}</span>
+    </Link>
+  ) : null;
+  // APPROVE ALL, with the Waiting for review chip on only: after a Group
+  // Policy rollout it holds hundreds of machines, one Approve each. Cosmetic
+  // like every gate here: the route checks `devices.review`, and the dialog
+  // confirms a named list.
+  const approveAll =
+    tab === "review" && canReview && (stateCounts?.review ?? 0) > 0 ? (
+      <Btn label={t("devices.filters.approveAll")} icon="check" small onClick={() => setApprovingAll(true)} />
+    ) : null;
 
   return (
     <>
       <PageHead
-        title={t("devices.page.title")}
+        // The page's name in the navigation (coordinator ruling, fix round 1: a page's h1 is its rail label).
+        title={t("shell.nav.item.devices")}
         description={t("devices.page.description")}
         actions={
           <>
@@ -437,28 +494,18 @@ export function DevicesPage() {
               onClick={() => exporter.mutate()}
               disabled={exporter.isPending}
             />
-            {/* ONE "ADD A COMPUTER" ENTRY, the same page as the top bar's. It
-                replaces "Enroll device" and "Add devices", which read as two
-                tasks and were one: the page offers the one-machine install
-                first and the network sweep below it
-                (`docs/modules/agent-distribution/spec-push-install.md` §10.2).
-                UNGATED: the page reads `devices.read`, which anyone here holds,
-                and each step names the permission its own destination needs. */}
             {/* PUSH INSTALL, TICKED OR BY SUBNET (design 2026-09-30 §1.1).
                 Offered to a holder of `agent.push.run`; cosmetic, because the
                 server checks that code and everything else on every request. */}
             {canPush ? (
               <>
-                <Btn label={t("devices.page.pushInstall")} icon="play" onClick={() => setPushing(true)} />
+                <Btn label={t("devices.page.pushInstall")} icon="play" onClick={pushParam.start} />
                 <Link className="btn" to="/devices/push-runs">
                   {t("devices.page.pushRuns")}
                 </Link>
               </>
             ) : null}
-            <Link className="btn primary" to={ADD_COMPUTER_TO}>
-              <Icon name="plus" size={15} />
-              <span>{t("devices.page.addComputer")}</span>
-            </Link>
+            {addComputer}
           </>
         }
       />
@@ -475,73 +522,73 @@ export function DevicesPage() {
         </p>
       )}
 
-      {/* EVERY TILE OPENS THE ROWS IT COUNTED. The filter already lives in the
-          URL (see `useSearchParams` above), so "Online now" and "Certificate
-          attention" hand over the exact tab their number was computed from —
-          the tile and the tab strip cannot drift apart, because the tile links
-          to the tab.
+      {/* EVERY TILE OPENS THE ROWS IT COUNTED. The filter lives in the URL, so
+          "Online now" and "Certificate attention" hand over the exact chip
+          their number was computed from -- the tile and the chips cannot drift
+          apart, because the tile links to the chip.
 
-          The first two are honest about a gap: there is no `managed`-only tab,
+          The first two are honest about a gap: there is no `managed`-only chip,
           and "Assets" is the whole estate, so both go to the unfiltered list.
-          That is not a no-op — arriving from `?state=certs` it is what clears
-          the filter — but it is the weakest link in this row, and inventing a
+          That is not a no-op -- arriving from `?state=certs` it is what clears
+          the filter -- but it is the weakest link in this row, and inventing a
           `?state=managed` the page does not read would have been worse.
 
           Only certificate attention is `urgent`: an expiring agent certificate
           is a machine about to fall off the fleet, and a revoked one is a
-          machine that already has. It was the one number here with a deadline
-          attached; it is now the one with a fact attached too. */}
+          machine that already has. */}
       {/* EVERY TILE CARRIES ITS BREAKDOWN, as v3's do ("272 of 286", "4
-          offline, 3 certs"). Until now only `zeroLabel` was passed, so a tile
-          said anything beyond its figure only in the one case where the figure
-          was zero -- a bare number and no denominator on every populated
-          fleet.
+          offline, 3 certs"). EACH FOOT IS TWO SERVER COUNTS OR NONE: `fleet`
+          is the estate, counted unfiltered in SQL beside the rows; a foot here
+          restates or subtracts those four numbers and derives nothing from the
+          page of rows on screen.
 
-          EACH FOOT IS TWO SERVER COUNTS OR NONE. `fleet` is the estate,
-          counted unfiltered in SQL beside the rows; a foot here restates or
-          subtracts those four numbers and derives nothing from the page of
-          rows on screen, which is the rule the header of this file sets and
-          the one a tile disagreeing with its own table would break.
-
-          NO SPARKLINE, and that is the same refusal the head of this file
-          records for the design's "↑ 12 vs last 7 days": `StatCard` accepts
-          `spark`, and every number that could fill it would have to be
-          invented. No endpoint serves a history of these four counts. An
-          absent trend is a gap; a drawn one would be a lie on the tile most
-          likely to be believed. */}
+          NO SPARKLINE: `StatCard` accepts `spark`, and every number that could
+          fill it would have to be invented. No endpoint serves a history of
+          these four counts. An absent trend is a gap; a drawn one would be a
+          lie on the tile most likely to be believed. */}
+      {/* NO NUMBER WITHOUT DATA (coordinator ruling 10a): until the list
+          answers -- while it is pending, while the Client chip's client is
+          undecided, or when it failed -- each tile draws the kit's absent
+          mark and no line under it, never a "0" with its zero sentence.
+          Every foot below already waits for `fleet`. */}
+      <h2 className="sr-only">{t("devices.page.fleetSummary")}</h2>
       <StatsGrid columns={4}>
         <StatCard
           label={t("devices.tiles.managed")}
-          value={String(fleet?.managed ?? 0)}
+          value={noFleet ? "" : String(fleet.managed)}
+          pending={noFleet}
           icon="devices"
-          to="/devices"
+          to={tileTo("")}
           tone="blue"
           zeroLabel={t("devices.tiles.managedZero")}
           foot={fleet && fleet.managed > 0 ? t("devices.tiles.managedFoot", { count: fleet.total }) : undefined}
         />
         <StatCard
           label={t("devices.tiles.assets")}
-          value={String(fleet?.total ?? 0)}
+          value={noFleet ? "" : String(fleet.total)}
+          pending={noFleet}
           icon="package"
-          to="/devices"
+          to={tileTo("")}
           tone="neutral"
           zeroLabel={t("devices.tiles.assetsZero")}
           foot={fleet && fleet.total > 0 ? t("devices.tiles.assetsFoot", { count: fleet.total - fleet.managed }) : undefined}
         />
         <StatCard
           label={t("devices.tiles.online")}
-          value={String(fleet?.online ?? 0)}
+          value={noFleet ? "" : String(fleet.online)}
+          pending={noFleet}
           icon="activity"
-          to="/devices?state=online"
+          to={tileTo("online")}
           tone="green"
           zeroLabel={t("devices.tiles.onlineZero")}
           foot={fleet && fleet.online > 0 ? t("devices.tiles.onlineFoot", { managed: fleet.managed }) : undefined}
         />
         <StatCard
           label={t("devices.tiles.cert")}
-          value={String(fleet?.cert_attention ?? 0)}
+          value={noFleet ? "" : String(fleet.cert_attention)}
+          pending={noFleet}
           icon="certificate"
-          to="/devices?state=certs"
+          to={tileTo("certs")}
           tone="gold"
           urgent
           /* "0 expiring" and "no certificate state recorded" are the same
@@ -556,136 +603,118 @@ export function DevicesPage() {
         />
       </StatsGrid>
 
-      {/* SECTION HEADINGS. Auditor A: "[LOW] Page has a single `<h1>` and no
-          section headings … Screen-reader users navigate by heading. With one
-          heading per page, the heading shortcut is useless and the page's
-          structure is invisible to assistive tech." `sr-only` because the
-          design gives these blocks no visible title and inventing two would be
-          a different page; what was missing is the structure. */}
       {pushing ? (
         <PushInstallChooser
           machines={selected}
           onRemove={unselect}
-          onClose={() => setPushing(false)}
+          onClose={pushParam.close}
         />
       ) : null}
 
-      <h2 className="sr-only">{t("devices.page.fleetSummary")}</h2>
+      {/* SECTION HEADINGS. Auditor A: "[LOW] Page has a single `<h1>` and no
+          section headings … Screen-reader users navigate by heading." `sr-only`
+          because the design gives these blocks no visible title and inventing
+          two would be a different page; what was missing is the structure. */}
       <h2 className="sr-only">{t("devices.page.deviceList")}</h2>
-      {/* THE TABS NOW NAME THE PANEL THEY SWITCH. Auditor A: "[MEDIUM] Tabs
-          are missing `aria-controls`/`tabpanel` wiring and roving tabindex …
-          no element on the page has `role='tabpanel'` (count = 0), every tab
-          has `aria-controls: null`". `Tabs` supplies the roving tabindex and
-          the arrow keys; the panel and its id have to come from the page,
-          because only the page knows what the strip actually filters. */}
-      <Tabs
-        items={TABS.map((item) => ({ key: item.key, label: t(item.label), count: tabCounts?.[item.key] ?? 0 }))}
-        active={tab}
-        onSelect={setTab}
-        panelId="devices-tabpanel"
-      />
-
       <Panel bare>
-        <div
-          id="devices-tabpanel"
-          role="tabpanel"
-          aria-label={t(TABS.find((item) => item.key === tab)?.label ?? "devices.tabs.all")}
-          tabIndex={-1}
-        >
-        <FilterBar>
-          <SearchField
-            placeholder={
-              canReadPeople
-                ? t("devices.filters.searchPeople")
-                : t("devices.filters.search")
-            }
-            /* BOUNDED. Auditor A: "[LOW] Search input has no maxlength and
-               accepts 500+ characters … unbounded input is passed to the
-               filter (and, in list views that search server-side, to the API).
-               Capping it prevents accidental paste of an entire document and
-               keeps the control legible." 128 is the audit's own suggestion. */
-            maxLength={128}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label={t("devices.filters.searchAria")}
-          />
-          {/* A WAY OUT OF A SEARCH THAT FOUND NOTHING. Auditor A: "[MEDIUM]
-              No-results empty state offers no way to clear the search … the
-              user must manually select the text and delete it. With a
-              500-character value the input scrolls horizontally and shows only
-              the trailing characters, making manual clearing harder still."
-              Rendered only when there is something to clear, so it is never a
-              dead control. */}
-          {search !== "" && (
-            <Btn label={t("devices.filters.clear")} icon="close" small onClick={() => setSearch("")} />
-          )}
-          {/* "WHICH OF THESE DID A PERSON VOUCH FOR?" as a control. With a
-              sweep recording everything it finds, that question is asked of
-              this table constantly and could not previously be asked at all.
-              The default is every row: a fleet list that quietly hid the
-              discovered half would be a different lie from the one this
-              answers. */}
-          <select
-            className="select-field"
-            value={provenance}
-            onChange={(event) => setProvenance(event.target.value)}
-            aria-label={t("devices.filters.provenanceAria")}
-          >
-            <option value="">{t("devices.filters.provenanceAny")}</option>
-            {PROVENANCE_OPTIONS.map((key) => (
-              <option key={key} value={key}>
-                {humaniseEnum(key, "DeviceProvenance")}
-              </option>
-            ))}
-          </select>
-          {/* BY SITE, with a client chosen above and a choice to make: more
-              than one site, or a site already chosen (so it can be undone). */}
-          {chosenClient !== null && ((chosenSites?.length ?? 0) > 1 || siteFilter !== "") ? (
-            <select
-              className="select-field"
-              value={siteFilter}
-              onChange={(event) => setSite(event.target.value)}
-              aria-label={t("devices.filters.siteAria")}
-            >
-              <option value="">{t("devices.filters.siteAny")}</option>
-              {(chosenSites ?? []).map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          <span className="filter-spacer" />
-        </FilterBar>
+        <ListToolbar
+          search={
+            <>
+              <SearchField
+                placeholder={canReadPeople ? t("devices.filters.searchPeople") : t("devices.filters.search")}
+                /* BOUNDED. Auditor A: "[LOW] Search input has no maxlength and
+                   accepts 500+ characters." 128 is the audit's own suggestion. */
+                maxLength={128}
+                value={search}
+                onChange={(event) => filters.set("q", event.target.value)}
+                aria-label={t("devices.filters.searchAria")}
+              />
+              {/* A WAY OUT OF A SEARCH. Auditor A: "[MEDIUM] No-results empty
+                  state offers no way to clear the search". Rendered only when
+                  there is something to clear, so it is never a dead control. */}
+              {search !== "" && (
+                <Btn label={t("devices.filters.clear")} icon="close" small onClick={() => filters.set("q", "")} />
+              )}
+            </>
+          }
+          chips={
+            <>
+              {/* COUNTED IN SQL (`state_counts`), against the active search:
+                  the chips and the table under them cannot disagree. Before
+                  the list has answered, no number at all (Absent Zero). */}
+              <FilterChips
+                label={t("devices.filters.stateLabel")}
+                options={states.map((item) => ({
+                  value: item.key === "all" ? "" : item.key,
+                  label: t(item.label),
+                  count: stateCounts?.[item.key],
+                }))}
+                value={tab === "all" ? "" : tab}
+                onChange={(value) => filters.set("state", value)}
+              />
+              {/* "WHICH OF THESE DID A PERSON VOUCH FOR?" as a control. With a
+                  sweep recording everything it finds, that question is asked
+                  of this table constantly. The default is every row: a fleet
+                  list that quietly hid the discovered half would be a
+                  different lie from the one this answers. No count: the server
+                  does not count by provenance, and a number counted over the
+                  page on screen would be a guess. */}
+              <FilterChips
+                label={t("devices.filters.provenanceAria")}
+                options={[
+                  { value: "", label: t("devices.filters.provenanceAny") },
+                  ...PROVENANCE_OPTIONS.map((key) => ({ value: key, label: humaniseEnum(key, "DeviceProvenance") })),
+                ]}
+                value={provenance}
+                onChange={(value) => filters.set("provenance", value)}
+              />
+              <ClientFilter filters={filters} />
+              {/* BY SITE, with one client decided (above or in the chip) and a
+                  choice to make: more than one site, or a site already chosen
+                  (so it can be undone). */}
+              {siteClient !== null && ((clientSites?.length ?? 0) > 1 || siteFilter !== "") ? (
+                <ChipSelect
+                  label={t("devices.table.site")}
+                  ariaLabel={t("devices.filters.siteAria")}
+                  options={[
+                    { value: "", label: t("devices.filters.siteAny") },
+                    ...(clientSites ?? []).map((item) => ({ value: item.id, label: item.name })),
+                  ]}
+                  value={siteFilter}
+                  onChange={(value) => filters.set("site", value)}
+                />
+              ) : null}
+            </>
+          }
+          end={
+            <>
+              {approveAll}
+              {/* No count before the list has answered: "Showing 0 of 0" would be an invented zero. */}
+              {devices.data ? <ShowingCount shown={items.length} total={total} /> : null}
+            </>
+          }
+        />
 
-        {canPush && selected.length > 0 ? (
-          <FilterBar>
+        {/* THE SELECTION, in the kit's bulk bar: only with a machine ticked,
+            so it is never a row of dead buttons. */}
+        {canPush ? (
+          <BulkBar
+            count={selected.length}
+            onClear={() => {
+              setSelected([]);
+              pushParam.close();
+            }}
+          >
             <p className="note" role="status">
               {t("devices.filters.selected", { count: selected.length, max: PUSH_BATCH_MAX })}
             </p>
             <Btn
               label={t("devices.filters.pushSelected", { count: selected.length })}
               icon="play"
-              onClick={() => setPushing(true)}
-            />
-            <Btn
-              label={t("devices.filters.clearSelection")}
               small
-              onClick={() => {
-                setSelected([]);
-                setPushing(false);
-              }}
+              onClick={pushParam.start}
             />
-          </FilterBar>
-        ) : null}
-        {/* APPROVE ALL, on the Waiting for review tab only: after a Group
-            Policy rollout the tab holds hundreds of machines, one Approve
-            each. Cosmetic like every gate here: the route checks
-            `devices.review`, and the dialog confirms a named list. */}
-        {tab === "review" && canReview && (tabCounts?.review ?? 0) > 0 ? (
-          <FilterBar>
-            <Btn label={t("devices.filters.approveAll")} icon="check" onClick={() => setApprovingAll(true)} />
-          </FilterBar>
+          </BulkBar>
         ) : null}
         <ApproveAllDialog
           open={approvingAll}
@@ -699,25 +728,33 @@ export function DevicesPage() {
               : approveAllMessage(reviewNotice.result, { capped: reviewNotice.capped })}
           </p>
         ) : null}
-        <QueryState
-          loading={devices.isLoading}
-          error={devices.error}
-          empty={items.length === 0}
-          emptyLabel={
-            // WHICH EMPTY THIS IS, and the distinction now comes from the
-            // server rather than from the length of a page. `fleet.total` is
-            // the estate with no filter applied, so zero there is a greenfield
-            // deployment; zero rows with a non-zero estate is a filter that
-            // matched nothing.
-            fleet?.total === 0
-              ? t("devices.empty.none")
-              : search !== ""
-                ? t("devices.empty.search", { term: shortTerm(search) })
-                : t("devices.empty.filter")
-          }
-        >
+        {/* `isPending`, NOT `isLoading` (coordinator ruling 10): while the chip's client is
+            undecided the read is disabled, which TanStack v5 does not call loading. Pending
+            is "no answer yet", whatever the reason, so no empty state is drawn before it. */}
+        <QueryState loading={devices.isPending} error={devices.error} empty={false} emptyLabel="">
+          {items.length === 0 ? (
+            /* WHICH EMPTY THIS IS, and the distinction comes from the server
+               rather than from the length of a page. `fleet.total` is the
+               estate with no filter applied, so zero there is a fleet with
+               nothing in it yet, whatever is typed; zero rows with a non-zero
+               estate is a filter that matched nothing, with the way out. */
+            <ListEmpty
+              filtered={filters.active && (fleet?.total ?? 0) > 0}
+              onClear={filters.clear}
+              nothingYet={t("devices.empty.yet")}
+              icon="devices"
+              action={
+                canAddComputer ? (
+                  // Secondary here: the head already carries the page's one primary.
+                  <Link className="btn" to={ADD_COMPUTER_TO}>
+                    {t("devices.page.addComputer")}
+                  </Link>
+                ) : undefined
+              }
+            />
+          ) : (
           <TableWrap>
-            <table>
+            <table aria-label={t("devices.page.deviceList")}>
               <thead>
                 <tr>
                   {/* Auditor A: "[LOW] Table header cells omit `scope='col'`
@@ -792,15 +829,10 @@ export function DevicesPage() {
                           FQDN. A switch or a boxed laptop has no OS family;
                           `OsIcon` names it "Unknown platform" rather than
                           painting a Windows glyph on a printer. */}
-                      {/* THE COLUMN STATES ITS MEASURE, and the review's I9 is
-                          why. At 1440 this column settled at ~230px while
-                          Operating system and Architecture -- both holding short
-                          values -- took width they had no use for, so every FQDN
-                          broke across two or three lines (`lis-ws-` /
-                          `041.corp.toeshee.example`). There was spare width in
-                          the row; nothing was asking for it. 300px, clipped, and
-                          the name and FQDN each read as one line; the full value
-                          is on the cell and the name is the link to the device. */}
+                      {/* THE COLUMN STATES ITS MEASURE (review I9): 300px,
+                          clipped, so the name and FQDN each read as one line;
+                          the full value is on the cell and the name is the
+                          link to the device. */}
                       <Td
                         lead={<OsIcon os={device.os_family ?? ""} />}
                         gutter={rowKind(device)}
@@ -865,8 +897,7 @@ export function DevicesPage() {
                             expiry date and nothing else, so on a revoked row it
                             reads `ok` -- a second pill saying the opposite of
                             the first, and the one an operator scanning the
-                            column would believe. What is true about this machine
-                            is that its certificate has been withdrawn. */}
+                            column would believe. */}
                         {device.cert_revoked ? (
                           <StatusPill value="revoked" />
                         ) : device.cert_state ? (
@@ -889,10 +920,9 @@ export function DevicesPage() {
                         <span className="note">{recordedByLabel(device, provenanceLabel(device))}</span>
                       </td>
                       <td>
-                        {/* `ariaLabel` is why this was once written by hand:
-                            two hundred rows whose every action reads "Run job"
-                            is two hundred identical buttons to a screen reader
-                            (Auditor A, [LOW]). Visible text unchanged.
+                        {/* `ariaLabel`: two hundred rows whose every action
+                            reads "Run job" is two hundred identical buttons to
+                            a screen reader (Auditor A, [LOW]).
 
                             NOT OFFERED ON A ROW WITH NO AGENT. A signed job
                             dispatches over the agent's own connection, and a
@@ -933,50 +963,27 @@ export function DevicesPage() {
               </tbody>
             </table>
           </TableWrap>
+          )}
         </QueryState>
 
-        {/* WHERE THIS PAGE SITS INSIDE THE WHOLE SET, ALWAYS -- not only once a
-            cap bites. The estate no longer fits on one page, and a table that
-            does not say so is a table an operator reads as complete: "no
-            devices match" and "no devices match ON THIS PAGE" were the same
-            pixels for as long as the filtering was local. `total` is the
-            server's count of the rows this tab and this search select, so the
-            sentence is the honest number and the buttons move through it.
-
-            Rendered whenever there are rows, even when there is only one page:
-            a note that appears only when something is missing teaches the
-            reader nothing about the times it is absent. */}
-        {/* `TableFoot`, NOT `Pager`: the kit's pager hides itself on a
-            single-page list, and the paragraph above is the argument for why
-            this count must not. */}
+        {/* WHERE THIS PAGE SITS INSIDE THE WHOLE SET, and the way through it:
+            the kit's `Pager`, with the range in words. `total` is the server's
+            count of the rows this chip and this search select. On a single page
+            the pager draws nothing (the wave's critique, P1): two disabled
+            buttons there are dead controls, and "Showing x of y" in the toolbar
+            already says the list is complete. */}
         {items.length > 0 && (
-          <TableFoot>
-            <span className="filter-spacer" />
-            {/* NOT `.mono`. A result count is a sentence with figures in it,
-                not a code sample: in the mono face this one broke across three
-                lines at 390 beside the pager, where every comparable count in
-                the console ("7 of 7", "4 shown") sits inline. `ResultCount`
-                keeps the page's own face and makes only the figures tabular.
-                The pattern was seeded by `Pager` itself, which wrapped its own
-                count this way; it no longer does. */}
-            <ResultCount>
-              {t("devices.foot.showing", { from: offset + 1, to: offset + items.length, total, count: total })}
-            </ResultCount>
-            <Btn
-              label={t("devices.foot.previous")}
-              small
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - DEVICES_PAGE_SIZE))}
-            />
-            <Btn
-              label={t("devices.foot.next")}
-              small
-              disabled={offset >= lastOffset}
-              onClick={() => setOffset(offset + DEVICES_PAGE_SIZE)}
-            />
-          </TableFoot>
+          <Pager
+            page={Math.floor(offset / DEVICES_PAGE_SIZE)}
+            pageCount={lastOffset / DEVICES_PAGE_SIZE + 1}
+            onPrevious={() => setOffset(Math.max(0, offset - DEVICES_PAGE_SIZE))}
+            onNext={() => setOffset(Math.min(lastOffset, offset + DEVICES_PAGE_SIZE))}
+            previousLabel={t("devices.foot.previous")}
+            nextLabel={t("devices.foot.next")}
+          >
+            {t("devices.foot.showing", { from: offset + 1, to: offset + items.length, total, count: total })}
+          </Pager>
         )}
-        </div>
       </Panel>
 
       <DispatchJobDialog device={target} onClose={() => setTarget(null)} />

@@ -18,7 +18,7 @@ import (
 // and O_EXCL); the install-link e2e reads the owner and the DACL back on a real
 // Windows runner. The data directory's PARENT gets the same: parent_test.go.
 func TestWindowsTokenWritersOwnTheDataDirectoryAndCreateTheTokenFileFresh(t *testing.T) {
-	for _, rel := range []string{"windows/install.ps1", "windows/its-agent-enroll.ps1"} {
+	for _, rel := range []string{"windows/install.ps1", "windows/novieri-agent-enroll.ps1"} {
 		text := read(t, rel)
 		owner := strings.Index(text, "$acl.SetOwner((New-Object System.Security.Principal.NTAccount('BUILTIN\\Administrators')))")
 		setACL := strings.Index(text, "Set-Acl -Path $DataDir -AclObject $acl")

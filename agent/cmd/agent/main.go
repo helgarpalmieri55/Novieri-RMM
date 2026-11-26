@@ -1,4 +1,4 @@
-// Command agent is the Toeshee endpoint agent: one static binary, one
+// Command agent is the Novieri RMM endpoint agent: one static binary, one
 // long-lived outbound mTLS WebSocket, one timer wheel, and a registry of
 // capabilities that stay dormant until a signed job for them arrives.
 //
@@ -138,7 +138,7 @@ func currentIdentity(cfg config.Config, fallback *enroll.Identity) *enroll.Ident
 // installerRequested is the ONE question the service path asks about the
 // Windows self-installer (install-link spec §1.3), and it is answered HERE,
 // from two constants, without calling into internal/install -- so the service,
-// which is `its-agent.exe` started with no arguments, never initialises or
+// which is `novieri-agent.exe` started with no arguments, never initialises or
 // runs any of it (idle budget).
 //
 // Installer mode is: no arguments (a double-click), or exactly ElevatedArg
@@ -161,7 +161,7 @@ func installerRequested(args []string, exe string) bool {
 
 // pushInstallRequested is the one question the service path asks about the
 // Linux and macOS install mode the SSH push runs against the binary it placed
-// (`its-agent install --token-file <0600 file> --enroll-url <https origin>`).
+// (`novieri-agent install --token-file <0600 file> --enroll-url <https origin>`).
 // Like installerRequested it compares a constant and calls nothing in
 // internal/install: the service is started with no arguments.
 func pushInstallRequested(args []string) bool {
@@ -209,7 +209,7 @@ func main() {
 	if msiInstallRequested(os.Args[1:]) {
 		exe, err := os.Executable()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "its-agent --msi-install: cannot locate this binary:", err)
+			fmt.Fprintln(os.Stderr, "novieri-agent --msi-install: cannot locate this binary:", err)
 			os.Exit(1)
 		}
 		os.Exit(install.RunMsi(exe))
@@ -229,7 +229,7 @@ func main() {
 	if pushInstallRequested(os.Args[1:]) {
 		exe, err := os.Executable()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "its-agent install: cannot locate this binary:", err)
+			fmt.Fprintln(os.Stderr, "novieri-agent install: cannot locate this binary:", err)
 			os.Exit(1)
 		}
 		os.Exit(install.RunPush(os.Args[2:], exe))
@@ -272,7 +272,7 @@ func run(ctx context.Context) int {
 		return 2
 	}
 
-	log.Info("its-agent starting",
+	log.Info("novieri-agent starting",
 		"version", version,
 		"data_dir", cfg.DataDir,
 		"enrolled", cfg.Enrolled(),
@@ -606,6 +606,6 @@ func run(ctx context.Context) int {
 		log.Error("gateway", "err", err)
 		return 4
 	}
-	log.Info("its-agent stopped")
+	log.Info("novieri-agent stopped")
 	return 0
 }

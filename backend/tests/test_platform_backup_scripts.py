@@ -16,6 +16,7 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
@@ -296,6 +297,171 @@ def test_a_backup_without_it_restores_without_touching_it(tmp_path: Path) -> Non
     assert restored.returncode == 0, restored.stdout + restored.stderr
     assert "keycloak" not in (tmp_path / "calls").read_text()
     assert "keycloak.dump restored" not in restored.stdout
+
+
+# --- the object mirror on a new host (first-boot rehearsal, 2026-11-24) -------
+#
+# Finding F9 of the rehearsal of plan 2026-11-23, Task 12: the first backup of a
+# new host (deploy/README.md step 12; backup.conf says OBJECTS=all) failed with
+# `mc: <ERROR> Unable to stat source 'src/it-suite'. Bucket 'it-suite' does not
+# exist.` -- ObjectStore creates the bucket on first use, and nothing in first
+# boot stores an object. These run the real backup.sh with the fake database
+# tools above and a fake `docker` that runs the one-off minio container's
+# script here: the container's /out and /tmp/mc are directories of the test,
+# and a fake `mc` answers from FAKE_BUCKETS (each bucket holding one object).
+# Its bucket listing is `mc ls --json src`'s, as mc RELEASE.2025-08-13 prints
+# it (measured on the rehearsal's MinIO).
+
+_FAKE_COMPOSE_RUN = r"""#!/usr/bin/env bash
+out=""; script=""; envs=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v) case "$2" in *:/out) out="${2%:/out}" ;; esac; shift 2 ;;
+    -e) envs+=("$2"); shift 2 ;;
+    -c) script="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$script" ] && [ -n "$out" ] || exit 1
+script="${script//\/tmp\/mc/$FAKE_MC_DIR}"
+script="${script//\/out/$out}"
+env "${envs[@]}" MINIO_ROOT_USER="${FAKE_MINIO_USER-u}" \
+    MINIO_ROOT_PASSWORD="${FAKE_MINIO_PASSWORD-p}" sh -c "$script"
+"""
+
+_FAKE_MC = r"""#!/usr/bin/env bash
+echo "mc $*" >> "$FAKE_LOG"
+while [ "$1" = --config-dir ] || [ "$1" = --quiet ]; do
+  [ "$1" = --config-dir ] && shift; shift
+done
+has() { case " $FAKE_BUCKETS " in *" $1 "*) return 0 ;; esac; return 1; }
+case "$1" in
+  ls)
+    if [ "$2" = --json ] && [ "$3" = src ]; then
+      # mc --json writes its error to STDOUT, as this one does (measured on
+      # the rehearsal's MinIO with a wrong access key).
+      if [ "${FAKE_MC_LS:-ok}" = fail ]; then
+        cause="The Access Key Id you provided does not exist in our records."
+        e='"error":{"message":"Unable to list folder.","cause":{"message":"%s"}}'
+        printf "{\"status\":\"error\",$e}\n" "$cause"
+        exit 1
+      fi
+      for b in $FAKE_BUCKETS; do
+        printf '{"status":"success","type":"folder","size":0,"key":"%s/"}\n' "$b"
+      done
+    elif [ "$2" = --recursive ]; then
+      b="${3#src/}"; has "$b" || exit 1; echo "[2026-11-24 19:40:30 UTC]     2B obj1"
+    else
+      exit 1
+    fi ;;
+  mirror)
+    dst="${*: -1}"; src="${*: -2:1}"; b="${src#src/}"
+    if ! has "$b"; then
+      echo "mc: <ERROR> Unable to stat source \`$src\`. Bucket \`$b\` does not exist." >&2
+      exit 1
+    fi
+    mkdir -p "$dst" && echo x > "$dst/obj1" ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+def _objects(tmp_path: Path, buckets: str, **env: str) -> dict[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, text in (("docker", _FAKE_COMPOSE_RUN), ("mc", _FAKE_MC)):
+        (bin_dir / name).write_text(text)
+        (bin_dir / name).chmod(0o755)
+    (tmp_path / "mc").mkdir()
+    return {
+        **_pg(tmp_path, "itsuite"),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "FAKE_MC_DIR": str(tmp_path / "mc"),
+        "FAKE_BUCKETS": buckets,
+        "ITS_BACKUP_OBJECTS": "all",
+        "ITS_BACKUP_OBJECTS_DIR": str(tmp_path / "objects"),
+        **env,
+    }
+
+
+def _manifest(path: Path) -> dict[str, str]:
+    return dict(line.split("=", 1) for line in path.read_text().splitlines())
+
+
+def test_a_new_host_without_the_bucket_backs_up_nothing_and_succeeds(tmp_path: Path) -> None:
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, ""))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "the bucket it-suite does not exist yet" in run.stdout, run.stdout
+    assert _manifest(tmp_path / "bk/objects.manifest") == {
+        "mode": "all",
+        "bucket": "it-suite",
+        "source_objects": "0",
+        "mirrored_files": "0",
+    }
+    assert "mirror" not in (tmp_path / "calls").read_text()
+    assert (tmp_path / "bk/itsuite.dump").read_text() == "dump of itsuite\n"
+
+
+def test_an_existing_bucket_is_still_mirrored(tmp_path: Path) -> None:
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, "other it-suite"))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert (tmp_path / "objects/it-suite/obj1").read_text() == "x\n"
+    assert _manifest(tmp_path / "bk/objects.manifest")["source_objects"] == "1"
+    assert _manifest(tmp_path / "bk/objects.manifest")["mirrored_files"] == "1"
+
+
+def test_a_bucket_listing_that_fails_still_fails_the_backup(tmp_path: Path) -> None:
+    """A wrong credential or an unreachable store is not "no bucket", and the
+    nightly log says why: mc's error JSON (its URL and cause, never a key)
+    reaches stderr instead of staying in the file the listing went to."""
+    env = _objects(tmp_path, "it-suite", FAKE_MC_LS="fail")
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **env)
+    assert run.returncode != 0, run.stdout
+    assert "does not exist yet" not in run.stdout
+    assert "ERROR: cannot list the buckets:" in run.stderr, run.stderr
+    assert "The Access Key Id you provided does not exist in our records." in run.stderr
+    assert "mirror" not in (tmp_path / "calls").read_text()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("FAKE_MINIO_PASSWORD", 'pass"word-S3CR3T-7f3a'),
+        ("FAKE_MINIO_PASSWORD", "pass\\word-S3CR3T-7f3a"),
+        ("FAKE_MINIO_USER", "admin\nS3CR3T-7f3a"),
+        ("FAKE_MINIO_PASSWORD", "pass\x01word-S3CR3T-7f3a"),
+    ],
+)
+def test_a_credential_that_is_not_json_safe_is_refused_unprinted(
+    tmp_path: Path, key: str, value: str
+) -> None:
+    """Invariant 3. The credentials go into mc's config.json by printf; a `"`,
+    a `\\` or a control character would make that file malformed, and mc's
+    complaint about it -- copied to stderr when the listing fails -- could
+    carry a fragment of the credential. Refused before the file is written,
+    and the value is never echoed."""
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, "it-suite", **{key: value}))
+    assert run.returncode != 0, run.stdout
+    assert "the MinIO credential is not JSON-safe; refusing" in run.stderr, run.stderr
+    assert "S3CR3T" not in run.stdout + run.stderr
+    assert not (tmp_path / "mc" / "config.json").exists()
+    assert not any(line.startswith("mc ") for line in (tmp_path / "calls").read_text().splitlines())
+
+
+def test_a_json_safe_credential_is_accepted(tmp_path: Path) -> None:
+    """The ones new-env.sh writes (hex) and .env.example's user name."""
+    env = _objects(
+        tmp_path, "it-suite", FAKE_MINIO_USER="its-minio", FAKE_MINIO_PASSWORD="0123456789abcdef"
+    )
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **env)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "not JSON-safe" not in run.stderr
+
+
+def test_another_bucket_whose_name_contains_it_is_not_it(tmp_path: Path) -> None:
+    run = _bash(f'"{BACKUP_SH}" "{tmp_path}/bk"', **_objects(tmp_path, "it-suite-old xit-suite"))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "the bucket it-suite does not exist yet" in run.stdout, run.stdout
 
 
 # --- the timers ---------------------------------------------------------------

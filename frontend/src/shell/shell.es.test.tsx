@@ -40,7 +40,7 @@ const EVERYTHING = [
 
 // Words the shell shows verbatim in both languages: product, brand and
 // operator-supplied names (the fixture's org, person and role).
-const ALLOW = ["ITMS", "Operations", "Alex Morgan", "Administrator"];
+const ALLOW = ["Novieri", "Operations", "Alex Morgan", "Administrator"];
 
 /** What `App.tsx`'s Shell does: the crumb and the page list are read from the
  *  nav model on every render, and `useT()` re-renders it on a language switch. */
@@ -56,6 +56,7 @@ function Page({ path, ...props }: { path: string } & Partial<React.ComponentProp
         sectionTo={crumb.sectionTo}
         title={crumb.title}
         badges={{ "/health": 3 }}
+        newMenu={[{ kind: "device", to: "/devices/onboard", icon: "plus" }]}
         health={{ openAlerts: 3, platform: "degraded" }}
         user={{ name: "Alex Morgan", email: "alex@toeshee.com", role: "Administrator" }}
         onSignOut={vi.fn()}
@@ -84,23 +85,38 @@ describe("the shell in Spanish", () => {
   it("draws the whole chrome, with the Admin area open, in Spanish", () => {
     const { container } = renderInSpanish(shell("/jobs"));
 
-    const rail = screen.getByRole("navigation", { name: "Principal" });
-    expect(within(rail).getByText("Día a día")).toBeInTheDocument();
-    expect(within(rail).getByRole("link", { name: /Dispositivos/ })).toBeInTheDocument();
-    expect(within(rail).getByRole("link", { name: /Copias de seguridad/ })).toBeInTheDocument();
-    expect(within(rail).getByText("Gobernanza")).toBeInTheDocument();
-    expect(within(rail).getByText("Activos y gasto")).toBeInTheDocument();
-    // The Admin area is open (the route is under it), with its section headings.
-    expect(within(rail).getByText("Mesa de ayuda")).toBeInTheDocument();
-    expect(within(rail).getByRole("link", { name: /Historial de tareas/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Añadir un equipo" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Preguntar al Asistente" })).toBeInTheDocument();
+    // RE-POINTED (redesign plan, Task 4: decisions D10, D11, D12). On an Admin
+    // page the rail is the Admin panel, with its way back and its sections
+    // folded; the Assistant is anchored at the rail's foot and is the round
+    // button; "Add a computer" lives in New.
+    const admin = screen.getByRole("navigation", { name: "Administración" });
+    expect(within(admin).getByRole("button", { name: "Volver al menú" })).toBeInTheDocument();
+    expect(within(admin).getByRole("button", { name: /Mesa de ayuda/ })).toBeInTheDocument();
+    expect(within(admin).getByRole("link", { name: /Historial de tareas/ })).toHaveAttribute("aria-current", "page");
+    const anchored = screen.getByRole("navigation", { name: "Asistente y Administración" });
+    expect(within(anchored).getByRole("link", { name: "Asistente" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nuevo" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Añadir un equipo" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Preguntar al Asistente" })).toHaveClass("assistant-fab");
     expect(screen.getByRole("navigation", { name: "Ruta de navegación" })).toHaveTextContent("Administración");
     // RE-POINTED: the session notice left the chrome (operator decision 3);
     // its Spanish is held by `./SessionEnded.test.tsx`.
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Contraer la barra lateral" })).toBeInTheDocument();
-    expect(document.title).toBe("Historial de tareas · ITMS");
+    expect(document.title).toBe("Historial de tareas · Novieri RMM");
+    expectNoEnglish(container, ALLOW);
+  });
+
+  it("draws the rail in the Atera order, in Spanish (decisions D9 and D13)", () => {
+    const { container } = renderInSpanish(shell("/dashboard"));
+    const rail = screen.getByRole("navigation", { name: "Principal" });
+    expect(within(rail).getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
+    for (const name of ["Equipos", "Documentación", "Copias de seguridad"]) {
+      expect(within(rail).getByRole("link", { name })).toBeInTheDocument();
+    }
+    for (const name of ["Activos", "Más"]) {
+      expect(within(rail).getByRole("button", { name })).toBeInTheDocument();
+    }
     expectNoEnglish(container, ALLOW);
   });
 
@@ -117,7 +133,7 @@ describe("the shell in Spanish", () => {
     const field = screen.getByRole("combobox", { name: "Buscar o preguntar" });
     await user.click(field);
     expect(screen.getByRole("listbox", { name: "Resultados de la búsqueda" })).toBeInTheDocument();
-    expect(within(screen.getByRole("listbox")).getByRole("option", { name: /Dispositivos/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("listbox")).getByRole("option", { name: /Equipos/ })).toBeInTheDocument();
     expectNoEnglish(container, ALLOW);
 
     await user.type(field, "zzzz");
@@ -132,7 +148,7 @@ describe("the shell in Spanish", () => {
     expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
     act(() => setActiveLanguage("es"));
     expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Añadir un equipo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nuevo" })).toBeInTheDocument();
     expectNoEnglish(container, ALLOW);
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
@@ -146,8 +162,8 @@ describe("the shell in Spanish", () => {
     });
     expect(searchPrompt([], false).placeholder).toBe("Buscar páginas");
     expect(searchPrompt([], true).placeholder).toBe("Busca uno de tus tickets");
-    expect(crumbFor("/devices/onboard")).toEqual({ section: "Dispositivos", sectionTo: "/devices", title: "Añadir un equipo" });
-    expect(crumbFor("/profile")).toEqual({ section: "Tu cuenta", sectionTo: undefined, title: "ITMS" });
+    expect(crumbFor("/devices/onboard")).toEqual({ section: "Equipos", sectionTo: "/devices", title: "Añadir un equipo" });
+    expect(crumbFor("/profile")).toEqual({ section: "Tu cuenta", sectionTo: undefined, title: "Novieri RMM" });
     expect(portalCrumbFor("/portal/new").title).toBe("Nuevo ticket");
     expect(healthLabel({ openAlerts: 0, platform: null })).toBe("Estado de salud y alertas, sin alertas abiertas");
     expect(healthLabel({ openAlerts: 1, platform: "down" })).toBe(
@@ -170,8 +186,10 @@ describe("the shell in Spanish", () => {
     );
     expect(await screen.findByRole("heading", { name: "Administración", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Configura cómo funciona la consola para tu organización.")).toBeInTheDocument();
-    expect(await screen.findByRole("table", { name: "Mesa de ayuda" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Abrir Registro de auditoría" })).toBeInTheDocument();
+    // RE-POINTED (redesign plan, Task 4): each section is a card named by its
+    // heading, and each page a plain link.
+    expect(await screen.findByRole("heading", { name: "Mesa de ayuda", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Registro de auditoría" })).toHaveAttribute("href", "/audit");
     expect(screen.getByText("Quién hizo qué y cuándo.")).toBeInTheDocument();
     expectNoEnglish(container, ALLOW);
   });

@@ -67,7 +67,7 @@ describe("Settings — Sessions tab", () => {
     const idle = await screen.findByLabelText("Sign out after inactivity");
     await user.clear(idle);
     await user.type(idle, "45");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.putSessionSettings).toHaveBeenCalledTimes(1));
     expect(calls.putSessionSettings).toHaveBeenCalledWith({
@@ -87,7 +87,13 @@ describe("Settings — Sessions tab", () => {
     await user.clear(idle);
     await user.type(idle, "3");
     expect(screen.getByText("Each value has to be within the range shown under it.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22: the kit's `SaveBar`): a value to
+    // correct keeps Save enabled and is said on submit, never by a dead
+    // button; the bar's `blockedReason` is a permission, not input. What is
+    // pinned is unchanged: nothing reaches the server, and the reason is said.
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const bar = screen.getByRole("region", { name: "Unsaved changes" });
+    expect(within(bar).getByRole("alert")).toHaveTextContent("Each value has to be within the range shown under it.");
     expect(calls.putSessionSettings).not.toHaveBeenCalled();
   });
 
@@ -96,7 +102,7 @@ describe("Settings — Sessions tab", () => {
     await user.click(await screen.findByRole("switch", { name: REMEMBER }));
     expect(screen.getByLabelText("Remember a device for")).toBeDisabled();
     expect(screen.getByLabelText("Longest session on a remembered device")).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.putSessionSettings).toHaveBeenCalledTimes(1));
     expect(calls.putSessionSettings.mock.calls[0]?.[0]).toMatchObject({
@@ -110,12 +116,14 @@ describe("Settings — Sessions tab", () => {
     const days = await screen.findByLabelText("Remember a device for");
     await user.clear(days);
     await user.type(days, "999");
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    // RE-POINTED (decision D22): the range is said by the form, not by a
+    // disabled Save.
+    expect(screen.getByText("Each value has to be within the range shown under it.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("switch", { name: REMEMBER }));
 
     expect(screen.queryByText("Each value has to be within the range shown under it.")).not.toBeInTheDocument();
-    const save = screen.getByRole("button", { name: "Save changes" });
+    const save = screen.getByRole("button", { name: "Save" });
     expect(save).toBeEnabled();
     await user.click(save);
     await waitFor(() => expect(calls.putSessionSettings).toHaveBeenCalledTimes(1));
@@ -136,7 +144,11 @@ describe("Settings — Sessions tab", () => {
     await openSessions();
     expect(await screen.findByLabelText("Sign out after inactivity")).toBeDisabled();
     expect(screen.getByRole("switch", { name: REMEMBER })).toBeDisabled();
+    // The reason is a notice above the fields now, and there is no bar: a
+    // person who cannot edit makes no change to save (decision D22).
     expect(screen.getByText(/requires the orgs\.manage permission on every client/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
   it("says the settings are not available when the server refuses them", async () => {
@@ -153,7 +165,7 @@ describe("Settings — Sessions tab", () => {
     const idle = await screen.findByLabelText("Sign out after inactivity");
     await user.clear(idle);
     await user.type(idle, "45");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
     await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");

@@ -580,7 +580,7 @@ describe("the Microsoft return page in Spanish", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Conectado como conectado@acme.test. Activa el buzón en Entrada de correo cuando quieras que su correo se convierta en tickets.",
     );
-    expect(screen.getByRole("button", { name: "Volver a Entrada de correo" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Volver a Entrada de correo" })).toHaveAttribute("href", "/email-intake");
     expectNoEnglish(container, ["conectado@acme.test"]);
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("status")).toHaveTextContent("Connected as conectado@acme.test. Switch the mailbox on in Email intake");

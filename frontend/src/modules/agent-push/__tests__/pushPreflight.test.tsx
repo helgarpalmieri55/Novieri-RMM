@@ -255,7 +255,7 @@ describe("a Windows target (WinRM, Kerberos only) — never a host key to confir
     const table = await screen.findByRole("table", { name: /windows targets/i });
     const row = within(table).getByText("10.0.5.1").closest("tr")!;
     expect(
-      within(row).getByText(/not found via DNS — fine if the credential names a domain controller/),
+      within(row).getByText(/not found via DNS \(fine if the credential names a domain controller\)/),
     ).toBeInTheDocument();
     const installBtn = screen.getByRole("button", { name: /push install/i });
     await waitFor(() => expect(installBtn).toBeEnabled());

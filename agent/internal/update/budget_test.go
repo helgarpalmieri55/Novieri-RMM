@@ -25,9 +25,9 @@ func TestFalsifier_ResumeWithNoStateFileIsIdle(t *testing.T) {
 	// A production-length data directory that holds no update. t.TempDir()
 	// is far longer on macOS and Windows and would measure the test runner's
 	// path, not the agent.
-	dir := "/var/lib/its-agent-budget-probe"
+	dir := "/var/lib/novieri-agent-budget-probe"
 	if runtime.GOOS == "windows" {
-		dir = `C:\ProgramData\ITSuite\agent-budget-probe`
+		dir = `C:\ProgramData\NovieriRMM\agent-budget-probe`
 	}
 	clock := &countingClock{}
 	r := budget.Measure("resume without state", func() func() {

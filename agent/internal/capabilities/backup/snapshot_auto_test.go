@@ -133,13 +133,13 @@ func TestAutoPicksAMechanismPerRootAndFallsBackToLive(t *testing.T) {
 	if snap.Translate(plain) != plain {
 		t.Error("a live root is not read in place")
 	}
-	if got := snap.Translate(bt); got != filepath.Join(bt, ".itms-snap-T") {
+	if got := snap.Translate(bt); got != filepath.Join(bt, ".novieri-snap-T") {
 		t.Errorf("btrfs root reads from %s", got)
 	}
-	if got := snap.Translate(zf); got != filepath.Join(zf, ".zfs", "snapshot", "itms-T") {
+	if got := snap.Translate(zf); got != filepath.Join(zf, ".zfs", "snapshot", "novieri-snap-T") {
 		t.Errorf("zfs root reads from %s", got)
 	}
-	for _, c := range []string{"lvcreate -s", "btrfs subvolume snapshot -r " + bt, "zfs snapshot -r tank/data@itms-T"} {
+	for _, c := range []string{"lvcreate -s", "btrfs subvolume snapshot -r " + bt, "zfs snapshot -r tank/data@novieri-snap-T"} {
 		if !a.called(c) {
 			t.Errorf("%q never ran", c)
 		}
@@ -147,8 +147,8 @@ func TestAutoPicksAMechanismPerRootAndFallsBackToLive(t *testing.T) {
 	if err := snap.Release(); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []string{"lvremove -f vg0/", "btrfs subvolume delete " + filepath.Join(bt, ".itms-snap-T"),
-		"zfs destroy -r tank/data@itms-T"} {
+	for _, c := range []string{"lvremove -f vg0/", "btrfs subvolume delete " + filepath.Join(bt, ".novieri-snap-T"),
+		"zfs destroy -r tank/data@novieri-snap-T"} {
 		if !a.called(c) {
 			t.Errorf("release did not run %q", c)
 		}
@@ -200,13 +200,13 @@ func TestBtrfsSnapshotsNestedSubvolumesSweepsOrphansAndRedirects(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(root, ".itms-snap-crashed"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(root, ".novieri-snap-crashed"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	a := newAutoRunner()
 	a.mounts[root] = fsFacts{source: "/dev/sdb", fstype: "btrfs", fsroot: "/@data"}
 	a.btrfsL[root] = "ID 258 gen 12 top level 256 path @data/vm/images\n" +
-		"ID 259 gen 12 top level 256 path @data/.itms-snap-crashed\n" +
+		"ID 259 gen 12 top level 256 path @data/.novieri-snap-crashed\n" +
 		"ID 260 gen 12 top level 5 path @elsewhere/x\n"
 	withInodes(t, root, nested)
 
@@ -215,16 +215,16 @@ func TestBtrfsSnapshotsNestedSubvolumesSweepsOrphansAndRedirects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer snap.Release() //nolint:errcheck
-	if !a.called("btrfs subvolume delete " + filepath.Join(root, ".itms-snap-crashed")) {
+	if !a.called("btrfs subvolume delete " + filepath.Join(root, ".novieri-snap-crashed")) {
 		t.Error("an orphan from a crashed run was not reclaimed")
 	}
 	for _, sv := range []string{root, nested} {
-		if !a.called("btrfs subvolume snapshot -r " + sv + " " + filepath.Join(sv, ".itms-snap-T")) {
+		if !a.called("btrfs subvolume snapshot -r " + sv + " " + filepath.Join(sv, ".novieri-snap-T")) {
 			t.Errorf("subvolume %s was not snapshotted; it would read as an empty directory", sv)
 		}
 	}
 	r, ok := snap.(snapshotRedirector).redirect(nested)
-	if !ok || r != filepath.Join(nested, ".itms-snap-T") {
+	if !ok || r != filepath.Join(nested, ".novieri-snap-T") {
 		t.Errorf("redirect(nested) = %q, %v", r, ok)
 	}
 }
@@ -265,14 +265,14 @@ func TestZFSSnapshotsRecursivelyDestroysOnlyItsOwnAndMapsChildren(t *testing.T) 
 	root := t.TempDir()
 	a := newAutoRunner()
 	a.mounts[root] = fsFacts{source: "tank/data", fstype: "zfs", fsroot: "/"}
-	a.zfsSn = "tank/data@itms-1234\ntank/data@daily-2026-09-22\ntank/data/child@itms-99\n"
+	a.zfsSn = "tank/data@novieri-snap-1234\ntank/data@daily-2026-09-22\ntank/data/child@novieri-snap-99\n"
 	a.zfsFs = "tank/data\t" + root + "\ntank/data/child\t" + filepath.Join(root, "child") +
 		"\ntank/data/legacy\tlegacy\n"
 	snap, err := openAuto(context.Background(), a.run, "T", []string{root}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []string{"zfs destroy tank/data@itms-1234", "zfs destroy tank/data/child@itms-99"} {
+	for _, c := range []string{"zfs destroy tank/data@novieri-snap-1234", "zfs destroy tank/data/child@novieri-snap-99"} {
 		if !a.called(c) {
 			t.Errorf("orphan not reclaimed: %q", c)
 		}
@@ -281,10 +281,10 @@ func TestZFSSnapshotsRecursivelyDestroysOnlyItsOwnAndMapsChildren(t *testing.T) 
 		t.Fatal("a snapshot this agent did not create was destroyed")
 	}
 	r, ok := snap.(snapshotRedirector).redirect(filepath.Join(root, "child"))
-	if !ok || r != filepath.Join(root, "child", ".zfs", "snapshot", "itms-T") {
+	if !ok || r != filepath.Join(root, "child", ".zfs", "snapshot", "novieri-snap-T") {
 		t.Errorf("child dataset redirect = %q, %v", r, ok)
 	}
-	if err := snap.Release(); err != nil || !a.called("zfs destroy -r tank/data@itms-T") {
+	if err := snap.Release(); err != nil || !a.called("zfs destroy -r tank/data@novieri-snap-T") {
 		t.Errorf("release: %v", err)
 	}
 }

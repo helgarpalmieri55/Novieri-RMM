@@ -8,8 +8,9 @@
  * already reads.
  *
  * `null` is "All my clients": no header, no `?client=`, the person's whole
- * scope. Kept in `localStorage["itms.client"]` as the id or `all`; project 4's
- * rename of the brand renames it with `itms.sidebar.collapsed`.
+ * scope. Kept in `localStorage["itms.client"]` as the id or `all`. The key keeps its
+ * old prefix on purpose: it is an identifier nobody sees (project 4's rule, its
+ * design §1.2), and the harmony gate and the a11y pass write it by that name.
  *
  * ONLY AN ID IS READ BACK. The server answers a malformed `X-Client-Id` with
  * 400 on every route, `/me` included (`backend/app/api/deps.py`), so a stored

@@ -10,6 +10,9 @@ frontend/node_modules
 .mypy_cache/
 .ruff_cache/
 .env
+# What deploy/scripts/new-env.sh writes before it links it to deploy/.env:
+# four fresh secrets, left behind only by a SIGKILL or a power cut.
+deploy/.env.new.*
 node_modules/
 dist/
 frontend/dist/
@@ -25,13 +28,11 @@ frontend/.harmony/
 # Redis snapshot — redis-server writes this into whatever cwd it was launched from
 dump.rdb
 
-# Operator TLS material for the Traefik :443 entrypoint (deploy/certs/).
-# The deployment is a `git pull` on the host, so this directory is a bind
-# mount the operator drops real certificates into -- they must never be
-# committed. deploy/certs/.gitkeep keeps the directory itself in the tree so
-# a fresh clone has somewhere to put them.
-deploy/certs/*
-!deploy/certs/.gitkeep
+# Operator TLS material that a host deployed before 2026-11-23 copied into
+# deploy/certs/ by hand. Nothing reads the directory since Traefik asks
+# Let's Encrypt itself (design 2026-11-23-vps-y-marca-novieri §2), but a
+# private key left there must still never be committed.
+deploy/certs/
 
 # Agent skills installed with `npx skills add` (2026-09-07, operator's call).
 #

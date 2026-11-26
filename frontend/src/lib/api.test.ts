@@ -197,7 +197,7 @@ describe("ApiClient", () => {
       new Response("MSI", {
         status: 200,
         headers: {
-          "Content-Disposition": 'attachment; filename="ITMS-Agent-itms.example.com-amd64.msi"',
+          "Content-Disposition": 'attachment; filename="NovieriRMM-Agent-itms.example.com-amd64.msi"',
           "X-Content-SHA256": "ab".repeat(32),
         },
       }),
@@ -217,7 +217,7 @@ describe("ApiClient", () => {
     expect(new Headers(init.headers).has("Authorization")).toBe(false);
     expect(new Headers(init.headers).get("X-ITMS-Request")).toBe("1");
     expect(init.credentials).toBe("same-origin");
-    expect(msi.filename).toBe("ITMS-Agent-itms.example.com-amd64.msi");
+    expect(msi.filename).toBe("NovieriRMM-Agent-itms.example.com-amd64.msi");
     expect(msi.sha256).toBe("ab".repeat(32));
     expect(await msi.blob.text()).toBe("MSI");
   });

@@ -50,7 +50,7 @@ type SelfTestFunc func(ctx context.Context, binary string) error
 // tempPathFor is the one name the target directory ever holds besides the
 // target itself, for the length of one swap.
 func tempPathFor(target string) string {
-	name := ".its-agent.new"
+	name := ".novieri-agent.new"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}

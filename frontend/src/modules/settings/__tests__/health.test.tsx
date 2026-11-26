@@ -87,7 +87,7 @@ describe("Settings — Health tab", () => {
       default_alert_queue_id: QUEUE_FIXTURE.id,
     });
 
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateHealthSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateHealthSettings).toHaveBeenCalledWith({
@@ -120,7 +120,7 @@ describe("Settings — Health tab", () => {
       new ApiError(400, JSON.stringify({ detail: "offline_after_s must be between 300 and 86400" })),
     );
 
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("offline_after_s must be between 300 and 86400");
@@ -135,8 +135,13 @@ describe("Settings — Health tab", () => {
     const offline = await screen.findByLabelText<HTMLInputElement>("Mark a device offline after");
     await user.clear(offline);
 
-    expect(screen.getByRole("button", { name: "Save health settings" })).toBeDisabled();
     expect(screen.getByText(/Not a whole number: offline_after_s/)).toBeInTheDocument();
+    // RE-POINTED (redesign, decision D22: the kit's `SaveBar`): input to
+    // correct keeps Save enabled and is refused on submit, said in the bar.
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("alert"),
+    ).toHaveTextContent(/Not a whole number: offline_after_s/);
     expect(calls.updateHealthSettings).not.toHaveBeenCalled();
   });
 
@@ -154,29 +159,32 @@ describe("Settings — Health tab", () => {
     await openTab();
     expect(await screen.findByLabelText("Mark a device offline after")).toBeDisabled();
     expect(screen.getByLabelText(/Auto-resolve alert tickets/)).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save health settings" })).toBeDisabled();
+    // RE-POINTED (decision D22): the reason is a notice above the form, and
+    // there is no bar: nothing can change, so there is nothing to save.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.getByText(/requires the health\.admin permission/i)).toBeInTheDocument();
   });
 });
 
 /**
  * The two id fields that decide whether an alert can become a ticket are
- * `Alerting`; the deep-link template is `Monitoring`. Both `h3` under the
- * panel's "Endpoint health" `h2`.
+ * `Alerting`; the deep-link template is `Monitoring`. RE-POINTED (redesign,
+ * Receta FO): both are `FormSection`s, `h2` under the page's `h1` (they were
+ * `h3` under the panel's "Endpoint health" `h2`).
  */
 describe("Settings — Health tab, grouped", () => {
   it("groups the alerting ids and the monitoring link by what they are for", async () => {
     renderSettings();
     await openTab();
 
-    const alerting = (await screen.findByRole("heading", { name: "Alerting", level: 3 })).closest(
+    const alerting = (await screen.findByRole("heading", { name: "Alerting", level: 2 })).closest(
       "section",
     ) as HTMLElement;
     expect(within(alerting).getByLabelText(/Default alert queue/)).toBeInTheDocument();
     expect(within(alerting).getByLabelText(/Default ticket category/)).toBeInTheDocument();
 
     const monitoring = (
-      await screen.findByRole("heading", { name: "Monitoring", level: 3 })
+      await screen.findByRole("heading", { name: "Monitoring", level: 2 })
     ).closest("section") as HTMLElement;
     expect(within(monitoring).getByLabelText("Monitoring deep-link template")).toBeInTheDocument();
   });
@@ -187,7 +195,7 @@ describe("Settings — Health tab, grouped", () => {
     renderSettings();
     await openTab();
 
-    const alerting = (await screen.findByRole("heading", { name: "Alerting", level: 3 })).closest(
+    const alerting = (await screen.findByRole("heading", { name: "Alerting", level: 2 })).closest(
       "section",
     ) as HTMLElement;
     expect(within(alerting).getByLabelText(/Default alert queue/)).toBeDisabled();
@@ -202,7 +210,7 @@ describe("Settings — Health tab, grouped", () => {
     await openTab();
 
     const timing = (
-      await screen.findByRole("heading", { name: "Timing and thresholds", level: 3 })
+      await screen.findByRole("heading", { name: "Timing and thresholds", level: 2 })
     ).closest("section") as HTMLElement;
     for (const label of [
       "Mark a device offline after",
@@ -236,30 +244,29 @@ describe("Settings — Health tab, grouped", () => {
    * `HealthTab` shipped grouped 3-of-11 as a result. A hardcoded list here
    * would have the same blind spot. So this queries every labelled control
    * the tab actually rendered and asserts each one sits inside a
-   * `section.field-group` — it goes red on the next field nobody grouped.
+   * `section.form-section` (a `section.field-group` until the redesign's
+   * Receta FO made each group a `FormSection`) — it goes red on the next field
+   * nobody grouped.
    */
-  it("keeps every labelled control of the tab inside a group, with one documented exception", async () => {
+  it("keeps every labelled control of the tab inside a group, the auto-resolve switch included", async () => {
     renderSettings();
     await openTab();
 
     const panel = screen.getByRole("tabpanel");
-    // "Auto-resolve alert tickets when the alert recovers" is a bare
-    // checkbox `<label>`, not a `Field` inside a `FieldGroup` — the one
-    // control `HealthTab` intentionally leaves outside every group. Named
-    // here, by reference to the element itself, so a NEXT ungrouped control
-    // still fails below instead of being silently absorbed into this
-    // allowlist.
+    // RE-POINTED (redesign, Receta FO): "Auto-resolve alert tickets when the
+    // alert recovers" was the one control `HealthTab` left outside every
+    // group, a documented exception. It sits in Alerting now, with the alert
+    // tickets it decides, so the exception is gone and the guard covers it.
     const autoResolve = await screen.findByLabelText(/Auto-resolve alert tickets/);
-    expect(autoResolve.closest("section.field-group")).toBeNull();
+    const alerting = (await screen.findByRole("heading", { name: "Alerting", level: 2 })).closest("section");
+    expect(autoResolve.closest("section.form-section")).toBe(alerting);
 
     const controls = within(panel).getAllByLabelText(/.+/);
-    const checked = controls.filter((control) => control !== autoResolve);
-    // More than just the documented exception, or the loop below proves nothing.
-    expect(checked.length).toBeGreaterThan(0);
-    for (const control of checked) {
+    expect(controls.length).toBeGreaterThan(1);
+    for (const control of controls) {
       expect(
-        control.closest("section.field-group"),
-        `${describeControl(control)} is not inside any field-group`,
+        control.closest("section.form-section"),
+        `${describeControl(control)} is not inside any form section`,
       ).not.toBeNull();
     }
 
@@ -270,16 +277,13 @@ describe("Settings — Health tab, grouped", () => {
     // raw `.field`/`.field-wrap` shape a couple of other tabs use for a
     // caption-only control) is what every control on this tab renders
     // through regardless of whether it carries a name, so this checks it
-    // directly. The auto-resolve checkbox needs no exclusion here: its
-    // wrapping `<label>` carries no `.field`/`.field-wrap` class (it is a
-    // bare `flex items-center gap-2` label), so it is not among the
-    // elements this loop finds in the first place.
+    // directly.
     const wrapped = Array.from(panel.querySelectorAll(".field, .field-wrap"));
     expect(wrapped.length).toBeGreaterThan(0);
     for (const el of wrapped) {
       expect(
-        el.closest("section.field-group"),
-        `${describeControl(el)} is not inside any field-group`,
+        el.closest("section.form-section"),
+        `${describeControl(el)} is not inside any form section`,
       ).not.toBeNull();
     }
   });
@@ -351,8 +355,9 @@ describe("Settings — Health tab, duration control", () => {
     // 900 seconds, now shown in seconds.
     expect(screen.getByLabelText<HTMLInputElement>("Mark a device offline after")).toHaveValue(900);
     // A pure unit switch redisplays the value; it is not an edit, so Save
-    // must not light up over it.
-    expect(screen.getByRole("button", { name: "Save health settings" })).toBeDisabled();
+    // must not light up over it. (RE-POINTED, decision D22: with no change the
+    // kit draws no bar at all, so "not lit" is "not there".)
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(calls.updateHealthSettings).not.toHaveBeenCalled();
   });
 
@@ -372,7 +377,7 @@ describe("Settings — Health tab, duration control", () => {
     await user.clear(window);
     await user.type(window, "90");
 
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.updateHealthSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateHealthSettings).toHaveBeenCalledWith(
       expect.objectContaining({ flap_window_s: 5400 }),
@@ -395,12 +400,12 @@ describe("Settings — Health tab, duration control", () => {
     // Bounds are an affordance, not a validation (`types.ts`'s own comment
     // on `SETTING_BOUNDS`) -- nothing about the duration control disables
     // Save for an out-of-bounds value.
-    expect(screen.getByRole("button", { name: "Save health settings" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
 
     calls.updateHealthSettings.mockRejectedValue(
       new ApiError(400, JSON.stringify({ detail: "offline_after_s must be between 300 and 86400" })),
     );
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.updateHealthSettings).toHaveBeenCalledTimes(1));
     // The typed value reached the server exactly as typed -- not clamped, not
@@ -462,7 +467,7 @@ describe("Settings — Health tab, queue and category pickers", () => {
       screen.getByLabelText<HTMLInputElement>("Default alert queue"),
     ).toHaveValue("Escalations");
 
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.updateHealthSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateHealthSettings).toHaveBeenCalledWith(
       expect.objectContaining({ default_alert_queue_id: QUEUE_FIXTURE.id }),
@@ -482,7 +487,7 @@ describe("Settings — Health tab, queue and category pickers", () => {
     await user.click(await screen.findByLabelText("Default alert queue"));
     await user.click(await screen.findByRole("option", { name: "No default queue" }));
 
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.updateHealthSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateHealthSettings).toHaveBeenCalledWith(
       expect.objectContaining({ default_alert_queue_id: null }),
@@ -507,7 +512,7 @@ describe("Settings — Health tab, queue and category pickers", () => {
     await user.clear(offline);
     await user.type(offline, "20");
 
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.updateHealthSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateHealthSettings).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -554,7 +559,7 @@ describe("Settings — Health tab, queue and category pickers", () => {
     await user.click(await screen.findByLabelText("Default ticket category"));
     await user.click(await screen.findByRole("option", { name: /Incident/ }));
 
-    await user.click(screen.getByRole("button", { name: "Save health settings" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls.updateHealthSettings).toHaveBeenCalledTimes(1));
     expect(calls.updateHealthSettings).toHaveBeenCalledWith(
       expect.objectContaining({ default_ticket_category_id: CATEGORY_FIXTURE.id }),

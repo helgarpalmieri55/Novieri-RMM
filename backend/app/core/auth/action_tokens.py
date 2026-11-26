@@ -108,6 +108,20 @@ async def issue(
     return token
 
 
+async def start_clock(session: AsyncSession, token: str, ttl: timedelta) -> None:
+    """A MAILED LINK'S LIFETIME STARTS WHEN THE RELAY HAS TAKEN THE MAIL
+    (design 2026-11-23-vps-y-marca-novieri §6). `issue` dates the link when it
+    is minted, before the send; a relay that answers slowly -- the SMTP
+    timeout is long -- spent that time out of the link's lifetime before
+    anybody could read it. Called right after a delivery that succeeded,
+    in the same transaction; a link already used or replaced does not move."""
+    await session.execute(
+        update(AuthActionToken)
+        .where(AuthActionToken.token_hash == _digest(token), AuthActionToken.used_at.is_(None))
+        .values(expires_at=datetime.now(UTC) + ttl)
+    )
+
+
 def digest(token: str) -> bytes:
     """What the database keeps of a link: its SHA-256. Public since phase 2:
     a Microsoft invitation keeps only this while the browser is away (Task 9)."""

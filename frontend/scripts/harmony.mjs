@@ -39,8 +39,11 @@
  * EXIT 1 on any stray value, any horizontal overflow, a top bar
  * `chromeProblems` refuses, any serious or critical axe violation, any route
  * that fails to load (a client viewport whose selector does not show the
- * client chosen counts as one) -- and, with `--strict-fixtures`, any fixture
- * miss. Without that flag a miss is
+ * client chosen counts as one, and so does a console route that draws no
+ * shell: `missingShell`), any 5xx the dev server answers for one of the
+ * page's own files and any page file that never loads (`servedError`,
+ * `failedLoad`) -- and, with `--strict-fixtures`, any fixture miss.
+ * Without that flag a miss is
  * reported and tolerated, which is the Phase A state: the gate runs and
  * names what each module still owes.
  *
@@ -58,7 +61,8 @@
  * a global install, the same way that script does it.
  */
 
-import { spawn } from "node:child_process";
+import { spawnGroup } from "./devServer.mjs";
+import { isEntryPoint } from "./entryPoint.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createRequire } from "node:module";
@@ -66,7 +70,7 @@ import { createServer as createNetServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CHOSEN_CLIENT, OPEN_DISCLOSURES, ROUTES, patternOf } from "./routes.mjs";
+import { CHOSEN_CLIENT, FRAMELESS, OPEN_DISCLOSURES, ROUTES, patternOf } from "./routes.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = resolve(HERE, "..");
@@ -122,7 +126,8 @@ function parseArgs(argv) {
  * - 390 COARSE: the phone's top bar, which marks the chosen client in the
  *   drawer toggle (operator decision 4, 2026-11-02);
  * - 641: the first width above the handset's, where the desktop selector sits
- *   in the bar beside the labelled "Add a computer" -- the band up to 1024 px
+ *   in the bar (beside the labelled "Add a computer" when this was written; the
+ *   labelled control is New now, left of the search) -- the band up to 1024 px
  *   that nothing measured before.
  *
  * A native <select> is as wide as its longest option whichever is chosen, so
@@ -159,6 +164,52 @@ const CHROME_IN_PAGE = () => {
     selected: selector ? selector.value : null,
   };
 };
+
+/**
+ * WHAT A RUN REFUSES EVEN WHEN EVERY MEASUREMENT PASSES (redesign plan,
+ * pre-flight C1, reproduced 2026-11-24). Two harmony runs whose Vite servers
+ * shared one `node_modules/.vite` rewrote it under each other; a page never
+ * loaded, drew no shell, measured clean, and the run printed "ok". An empty
+ * frame has no stray value, no overflow and nothing for axe to object to, so
+ * these are what fail it:
+ *
+ * - `servedError`: the dev server answered 5xx for a file the page asked
+ *   for ("504 (Outdated Optimize Dep)" is how a shared cache shows).
+ * - `failedLoad`: a file the page asked for got no answer at all.
+ *   `/api/` is left out of both: the fixtures replace the backend
+ *   (`?__fixtures`), nothing listens behind Vite's proxy, and a page that
+ *   reached past its fixtures is already `__fixtureMisses`' to name.
+ * - `missingShell`: a console route that drew no top bar. The routes with
+ *   no console shell of their own are `FRAMELESS` (`./routes.mjs`).
+ */
+function pathOf(url) {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+}
+
+export function servedError(status, url) {
+  if (status < 500) return null;
+  const path = pathOf(url);
+  return path.startsWith("/api/") ? null : `the dev server answered ${status} for ${path}`;
+}
+
+export function failedLoad(url, errorText) {
+  const path = pathOf(url);
+  return path.startsWith("/api/") ? null : `${path} never loaded (${errorText})`;
+}
+
+/** A URL the dev server already answered 5xx for is not reported again as a failed load (Chromium aborts it too). */
+export function alreadyServed(served, url) {
+  const path = pathOf(url);
+  return served.some((entry) => entry.endsWith(` for ${path}`));
+}
+
+export function missingShell(route, probe) {
+  return !FRAMELESS.has(route.split("?")[0]) && !(probe && probe.topbar);
+}
 
 /**
  * Whether the viewport draws the client mark in the drawer toggle: a client
@@ -538,10 +589,15 @@ async function startVite() {
     return { url: process.env.HARMONY_URL.replace(/\/$/, ""), stop: async () => {} };
   }
   const port = await freePort();
-  const child = spawn("npx", ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"], {
-    cwd: FRONTEND,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // IN A PROCESS GROUP OF ITS OWN, stopped whole (`devServer.mjs`): signalling
+  // `npx` alone left its `vite` running on the worktree's cache.
+  const server = spawnGroup(
+    "npx",
+    ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"],
+    { cwd: FRONTEND, stdio: ["ignore", "pipe", "pipe"] },
+    { what: "vite" },
+  );
+  const { child } = server;
   let log = "";
   await new Promise((ok, fail) => {
     const timer = setTimeout(() => fail(new Error(`vite did not start on ${port} within 60s\n${log}`)), 60_000);
@@ -559,8 +615,13 @@ async function startVite() {
       clearTimeout(timer);
       fail(new Error(`vite exited with ${code}\n${log}`));
     });
+  }).catch(async (err) => {
+    await server.stop().catch(() => {});
+    throw err;
   });
-  return { url: `http://127.0.0.1:${port}`, stop: async () => child.kill("SIGTERM") };
+  // `stop()` rejects when a process of the group survives it: the walk then
+  // fails rather than leave a server behind for the next pass.
+  return { url: `http://127.0.0.1:${port}`, stop: () => server.stop() };
 }
 
 /** The prototype, served from disk so the browser sees a real origin. */
@@ -638,6 +699,8 @@ async function walkApp(args, browser, server, allow) {
         widths: null,
         chrome: null,
         chromeProblems: [],
+        // What the dev server failed to serve this page (`servedError`, `failedLoad`).
+        served: [],
       };
       results.push(result);
 
@@ -668,6 +731,15 @@ async function walkApp(args, browser, server, allow) {
       page.on("console", (msg) => {
         if (msg.type() === "error") result.errors.push(`console: ${msg.text().slice(0, 200)}`);
       });
+      page.on("response", (response) => {
+        const served = servedError(response.status(), response.url());
+        if (served && !result.served.includes(served)) result.served.push(served);
+      });
+      page.on("requestfailed", (request) => {
+        if (alreadyServed(result.served, request.url())) return;
+        const failed = failedLoad(request.url(), request.failure()?.errorText ?? "failed");
+        if (failed && !result.served.includes(failed)) result.served.push(failed);
+      });
 
       try {
         await page.goto(`${server.url}${withFixtures(route)}`, { waitUntil: "networkidle", timeout: 60_000 });
@@ -696,6 +768,7 @@ async function walkApp(args, browser, server, allow) {
         // the selector is drawn (the bar, or a handset's drawer) it shows the
         // choice; a page with no top bar has no selector to ask.
         result.chrome = await page.evaluate(CHROME_IN_PAGE);
+        if (missingShell(route, result.chrome)) throw new Error("drew no shell: a console route with no top bar");
         const expected = vp.client ? CHOSEN_CLIENT : "all";
         if (result.chrome.topbar && result.chrome.selected !== expected) {
           throw new Error(`the top bar shows client "${result.chrome.selected}", not "${expected}"`);
@@ -866,6 +939,7 @@ function printAppTable(results, args) {
     for (const problem of r.chromeProblems) lines.push(`top bar: ${problem}`);
     for (const v of r.axe) lines.push(`axe ${v.id} [${v.impact}]  ${v.target}  ${v.help}`);
     if (r.misses.length) lines.push(`misses: ${r.misses.join(", ")}`);
+    for (const served of r.served) lines.push(`served: ${served}`);
     for (const e of r.errors.slice(0, 5)) lines.push(`error: ${e}`);
     if (r.errors.length > 5) lines.push(`      (+${r.errors.length - 5} more errors)`);
     if (lines.length) {
@@ -993,6 +1067,7 @@ async function main() {
     const bad = r.axe.filter(serious).length;
     if (bad) failures.push(`${where}: ${bad} serious/critical axe violation(s)`);
     if (args.strictFixtures && r.misses.length) failures.push(`${where}: ${r.misses.length} fixture miss(es)`);
+    for (const served of r.served ?? []) failures.push(`${where}: ${served}`);
   }
   const routesWalked = new Set(results.map((r) => r.route)).size;
   console.log(
@@ -1008,8 +1083,9 @@ async function main() {
   process.exit(0);
 }
 
-// Only run when executed directly, so the pure helpers above can be imported by a test.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Only run when executed directly (by any path to it, a symlink included:
+// ./entryPoint.mjs), so the pure helpers above can be imported by a test.
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   main().catch((err) => {
     console.error(err instanceof Error ? err.stack || err.message : String(err));
     process.exit(1);

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient, MeClient } from "../../../lib/api";
 import { ApiError } from "../../../lib/api";
 import { ClientNotChosen } from "../../../lib/clientSelection";
+import { renderPage as renderRouted } from "../../../test/renderPage";
 import { PushAuthorizationsPage } from "../PushAuthorizationsPage";
 import { PushCredentialScopesPage } from "../PushCredentialScopesPage";
 import { PUSH_PLATFORMS } from "../PushReadiness";
@@ -52,11 +53,11 @@ const SITE_READ = "site.read";
 const RELEASE_READ = "agent.release.read";
 const PUSH_RUN = "agent.push.run";
 
-function renderWithProviders(node: React.ReactNode) {
+function renderWithProviders(node: React.ReactNode, path = "/agent-push/authorizations") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/agent-push/authorizations"]}>{node}</MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -182,12 +183,13 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("says an IPAM scan authorization grants nothing here", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // The assumption most likely to be made, and exactly wrong: authorizing an
     // ICMP echo is not authorizing an administrative login. It is stated on
     // the grant form -- the control that acts on the assumption -- rather than
     // in the page description it used to trail.
     stubApi();
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     expect(
       await screen.findByText(
         /IPAM scan authorization over the same prefix authorizes nothing here/i,
@@ -217,7 +219,8 @@ describe("PushAuthorizationsPage", () => {
     // fails.
     stubApi();
     renderWithProviders(<PushAuthorizationsPage />);
-    await screen.findByRole("heading", { name: "Push authorizations" });
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    await screen.findByRole("heading", { level: 1, name: "Push install" });
     expect(document.body.textContent).toMatch(
       /Nothing on these screens dispatches a push/i,
     );
@@ -269,10 +272,11 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("previews what a grant would open before it is made", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // Deny-by-default only helps if the person granting knows what they are
     // opening. The preview is sized from what is typed, before any round trip.
     stubApi();
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.0.0.0/8");
     await waitFor(() =>
@@ -284,11 +288,12 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("authorizes the prefix in the client chosen at the top", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // A prefix is one client's network (MSP clients phase 2, Task 12). The
     // grant is the client chosen at the top's: here the internal one, `o1`.
     const createPushAuthorization = vi.fn().mockResolvedValue(grant());
     stubApi({ createPushAuthorization });
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.4.7.0/24");
     await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
@@ -303,11 +308,12 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("sends no grant before its client is known", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     const createPushAuthorization = vi.fn().mockResolvedValue(grant());
     // `/me` has not answered: the selector cannot say whose the grant is yet.
     mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
     stubApi({ createPushAuthorization });
-    renderWithProviders(<PushAuthorizationsPage />);
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.4.7.0/24");
     await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
@@ -316,14 +322,16 @@ describe("PushAuthorizationsPage", () => {
   });
 
   it("refuses to preview something that is not a prefix", async () => {
-    stubApi();
-    renderWithProviders(<PushAuthorizationsPage />);
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
+    const api = stubApi();
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "server-17.corp.example");
     await waitFor(() => expect(screen.getByText(/That is not a prefix/)).toBeTruthy());
-    expect((screen.getByRole("button", { name: "Authorize" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    // Authorize stays enabled (coordinator clarification 8a: a form of several
+    // inputs reports on submit); the attempt sends nothing.
+    await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
+    expect(api.createPushAuthorization).not.toHaveBeenCalled();
   });
 });
 
@@ -339,10 +347,11 @@ describe("PushCredentialScopesPage", () => {
   });
 
   it("names the permission in words, never as its code", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // Stated on the bind form -- the control the permission gates -- and in
     // the words an administrator finds on the role screen.
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     const stated = await screen.findByText(/Binding and unbinding need/);
     expect(stated.textContent).toContain("permission to manage push install scopes");
     expect(stated.textContent).toContain("separate from permission to run a push");
@@ -350,23 +359,26 @@ describe("PushCredentialScopesPage", () => {
   });
 
   it("says the credential should not be a domain admin, where the choice is made", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // The platform cannot check what rights an account holds in somebody
     // else's directory. It can refuse to pretend the choice does not matter.
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/not Domain Admin/i)).toBeTruthy();
   });
 
   it("explains an empty picker instead of leaving a blank dropdown", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // "There are no push credentials yet" and "you cannot read the vault" are
     // different facts with different remedies, and a bare empty select says
     // neither.
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     expect(await screen.findByText(/No push credential exists yet/i)).toBeTruthy();
   });
 
   it("offers only push credentials in the picker", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // The server refuses any other type. A picker listing the domain
     // remote-control account would teach an operator that the dedication rule
     // is an obstacle rather than the point. A Windows domain account is a push
@@ -379,7 +391,7 @@ describe("PushCredentialScopesPage", () => {
         { id: "c3", name: "corp-push", type: "windows_domain", has_secret: true },
       ]),
     });
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     await screen.findByText(/Bind a credential to a prefix/);
     await waitFor(() => expect(screen.getByRole("option", { name: "branch-installer" })).toBeTruthy());
     expect(screen.getByRole("option", { name: /^corp-push · Windows domain/ })).toBeTruthy();
@@ -387,28 +399,39 @@ describe("PushCredentialScopesPage", () => {
     expect(screen.queryByText(/windows_domain/)).toBeNull();
   });
 
-  it("keeps Bind disabled until both a credential and a prefix are chosen", async () => {
+  it("sends no binding until both a credential and a prefix are chosen", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     // Both halves are the bound: a credential with no prefix binds nothing,
-    // and a prefix with no credential binds nothing to it.
+    // and a prefix with no credential binds nothing to it. Bind stays enabled
+    // and says what is missing (coordinator clarification 8a), where it was
+    // disabled with no reason on screen.
+    const bindPushCredentialScope = vi.fn().mockResolvedValue(scope());
     stubApi({
+      bindPushCredentialScope,
       listCredentials: vi
         .fn()
         .mockResolvedValue([
           { id: "c1", name: "branch-installer", type: "push_install", has_secret: true },
         ]),
     });
-    renderWithProviders(<PushCredentialScopesPage />);
-    const button = (await screen.findByRole("button", { name: "Bind" })) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
+    const button = await screen.findByRole("button", { name: "Bind" });
     await userEvent.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
-    await waitFor(() => expect(button.disabled).toBe(true));
+    await userEvent.click(button);
+    expect(screen.getByRole("alert")).toHaveTextContent("Credential is required");
+    expect(bindPushCredentialScope).not.toHaveBeenCalled();
+    await screen.findByRole("option", { name: "branch-installer" });
     await userEvent.selectOptions(screen.getByRole("combobox"), "c1");
-    await waitFor(() => expect(button.disabled).toBe(false));
+    await userEvent.click(button);
+    await waitFor(() =>
+      expect(bindPushCredentialScope).toHaveBeenCalledWith({ credential_id: "c1", prefix: "10.4.7.0/24", note: "" }),
+    );
   });
 
   it("says binding authorizes nothing on its own", async () => {
+    // The form opens in a dialog from `?new=` (redesign Task 6, 1.9 and 1.10).
     stubApi();
-    renderWithProviders(<PushCredentialScopesPage />);
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.4.7.0/24");
     await waitFor(() =>
@@ -441,7 +464,8 @@ describe("PushNav", () => {
     // open in a new tab.
     stubApi();
     renderWithProviders(<PushAuthorizationsPage />);
-    await screen.findByRole("heading", { name: "Push authorizations" });
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    await screen.findByRole("heading", { level: 1, name: "Push install" });
 
     expect(screen.queryByRole("tablist")).toBeNull();
     const strip = screen.getByRole("navigation", { name: "Push install" });
@@ -460,7 +484,8 @@ describe("PushNav", () => {
     // then strip.
     stubApi();
     const { container } = renderWithProviders(<PushCredentialScopesPage />);
-    const heading = await screen.findByRole("heading", { name: "Credential scopes" });
+    // A sub-page without a rail entry takes its own name as h1 (ruling 1b).
+    const heading = await screen.findByRole("heading", { level: 1, name: "Credential scopes" });
     const strip = screen.getByRole("navigation", { name: "Push install" });
     expect(
       heading.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -748,7 +773,7 @@ describe("Before a push can run: Windows over WinRM", () => {
     expect(item(WINRM).textContent).toContain("deploy/WINDOWS-PUSH.md");
     expect(item(KDC).textContent).toContain("deploy/WINDOWS-PUSH.md");
     // Review I2: advisory, and says why.
-    expect(item(KDC).textContent).toMatch(/not found via DNS — fine if the credential names a domain controller/);
+    expect(item(KDC).textContent).toMatch(/not found via DNS \(fine if the credential names a domain controller\)/);
     // The item rendered in the missing state, not as uncheckable or pending.
     expect(item(WINRM).getAttribute("aria-current")).toBe("step");
     expect(item(KDC).getAttribute("aria-current")).toBe("step");
@@ -812,5 +837,208 @@ describe("Before a push can run: Windows over WinRM", () => {
     const detail = await screen.findByText(/^1 credential is saved for push install\./);
     expect(detail.textContent).toMatch(/Domain Admin/);
     expect(detail.textContent).toMatch(/compromised domain/);
+  });
+});
+
+/* --- the list kit (redesign plan Task 6, 1.9 and 1.10; Receta L) ------------------- */
+
+describe("Push authorizations on the list kit", () => {
+  it("opens New authorization from its button and from ?new=authorization, with its safety text", async () => {
+    stubApi();
+    const { router } = renderRouted("/agent-push/authorizations", <PushAuthorizationsPage />);
+    // The h1 is the area's name in the navigation (coordinator ruling, fix round 1).
+    const head = (await screen.findByRole("heading", { level: 1, name: "Push install" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New authorization" }));
+    expect(router.state.location.search).toBe("?new=authorization");
+    const dialog = await screen.findByRole("dialog", { name: "Authorize a prefix" });
+    // The safety text of the grant form (invariant 2a) stays with the form.
+    expect(within(dialog).getByText(/IPAM scan authorization over the same prefix authorizes nothing here/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/separate from permission to run a push/)).toBeInTheDocument();
+  });
+
+  it("opens the dialog from a link that carries ?new=authorization", async () => {
+    stubApi();
+    renderRouted("/agent-push/authorizations?new=authorization", <PushAuthorizationsPage />);
+    expect(await screen.findByRole("dialog", { name: "Authorize a prefix" })).toBeInTheDocument();
+  });
+
+  it("keeps the inactive chip in the URL, and asks the server for those rows", async () => {
+    const listPushAuthorizations = vi.fn().mockResolvedValue([grant()]);
+    stubApi({ listPushAuthorizations });
+    const { router } = renderRouted("/agent-push/authorizations?inactive=1", <PushAuthorizationsPage />);
+    expect(await screen.findByRole("button", { name: "Including revoked and expired" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(listPushAuthorizations).toHaveBeenCalledWith(true));
+    await userEvent.click(screen.getByRole("button", { name: "In force" }));
+    expect(router.state.location.search).toBe("");
+    expect(await screen.findByText("Showing 1 of 1")).toBeInTheDocument();
+  });
+});
+
+describe("Credential scopes on the list kit", () => {
+  it("opens New scope from its button and from ?new=scope, with its safety text", async () => {
+    stubApi();
+    const { router } = renderRouted("/agent-push/credential-scopes", <PushCredentialScopesPage />);
+    // A sub-page without a rail entry takes its own name as h1 (ruling 1b).
+    const head = (await screen.findByRole("heading", { level: 1, name: "Credential scopes" })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New scope" }));
+    expect(router.state.location.search).toBe("?new=scope");
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    // The safety text of the binding form (invariant 2a(d)) stays with the form.
+    expect(within(dialog).getByText(/not Domain Admin/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Binding and unbinding need permission to manage push install scopes/)).toBeInTheDocument();
+  });
+
+  it("keeps the unbound chip in the URL, and it survives a reload", async () => {
+    const listPushCredentialScopes = vi.fn().mockResolvedValue([scope()]);
+    stubApi({ listPushCredentialScopes });
+    const { router } = renderRouted("/agent-push/credential-scopes?unbound=1", <PushCredentialScopesPage />);
+    expect(await screen.findByRole("button", { name: "Including unbound" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(listPushCredentialScopes).toHaveBeenCalledWith(true));
+    await act(() => router.navigate("/agent-push/credential-scopes?unbound=1"));
+    expect(screen.getByRole("button", { name: "Including unbound" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Bound now" }));
+    expect(router.state.location.search).toBe("");
+  });
+});
+
+/*
+ * A HALF-WRITTEN FORM ASKS BEFORE IT IS DROPPED (coordinator ruling 3, fix
+ * round 1 of wave O1). The grant and bind forms live in `?new=` dialogs, so
+ * Back, Close and Escape are all a change of `new`: each page's one guard
+ * names that key, and a form with something typed in it asks first. Under the
+ * data router the console runs on (`renderRouted`), which is the one that can
+ * block.
+ */
+describe("the grant and bind forms ask before Back drops them", () => {
+  async function openGrant() {
+    const { router } = renderRouted("/agent-push/authorizations", <PushAuthorizationsPage />);
+    const head = (await screen.findByRole("heading", { level: 1 })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New authorization" }));
+    const dialog = await screen.findByRole("dialog", { name: "Authorize a prefix" });
+    return { router, dialog };
+  }
+
+  it("asks before Close drops a grant with a prefix typed in it, and keeps what was typed", async () => {
+    stubApi();
+    const { router, dialog } = await openGrant();
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(router.state.location.search).toBe("?new=authorization");
+    expect(screen.getByPlaceholderText("10.4.7.0/24")).toHaveValue("10.4.7.0/24");
+  });
+
+  it("closes an untouched grant form without asking", async () => {
+    stubApi();
+    const { router, dialog } = await openGrant();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("closes without asking once the grant is made", async () => {
+    const createPushAuthorization = vi.fn().mockResolvedValue(grant());
+    stubApi({ createPushAuthorization });
+    const { router, dialog } = await openGrant();
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Authorize" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(createPushAuthorization).toHaveBeenCalledOnce();
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("asks before Close drops a binding with a prefix typed in it", async () => {
+    stubApi();
+    const { router } = renderRouted("/agent-push/credential-scopes", <PushCredentialScopesPage />);
+    const head = (await screen.findByRole("heading", { level: 1 })).closest("section") as HTMLElement;
+    await userEvent.click(await within(head).findByRole("button", { name: "New scope" }));
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(router.state.location.search).toBe("?new=scope");
+    expect(screen.getByPlaceholderText("10.4.7.0/24")).toHaveValue("10.4.7.0/24");
+  });
+
+  it("closes without asking once the binding is made", async () => {
+    const bindPushCredentialScope = vi.fn().mockResolvedValue(scope());
+    stubApi({
+      bindPushCredentialScope,
+      listCredentials: vi
+        .fn()
+        .mockResolvedValue([{ id: "c1", name: "branch-installer", type: "push_install", has_secret: true }]),
+    });
+    const { router } = renderRouted("/agent-push/credential-scopes?new=scope", <PushCredentialScopesPage />);
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await within(dialog).findByRole("option", { name: "branch-installer" });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "c1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Bind" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(bindPushCredentialScope).toHaveBeenCalledOnce();
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+/*
+ * A FORM OF SEVERAL INPUTS KEEPS ITS SUBMIT ENABLED AND SAYS WHAT IS MISSING ON
+ * SUBMIT (coordinator clarification 8a): only a single-input form may wait,
+ * disabled, on its one empty input. Authorize and Bind each have several, so
+ * they stay enabled, send nothing while something is missing, and say what.
+ */
+describe("Authorize and Bind say what is missing on submit (ruling 8a)", () => {
+  it("Authorize with no prefix sends nothing and names the prefix", async () => {
+    const createPushAuthorization = vi.fn();
+    stubApi({ createPushAuthorization });
+    renderWithProviders(<PushAuthorizationsPage />, "/agent-push/authorizations?new=authorization");
+    const dialog = await screen.findByRole("dialog", { name: "Authorize a prefix" });
+    const authorize = within(dialog).getByRole("button", { name: "Authorize" });
+    expect(authorize).toBeEnabled();
+    await userEvent.click(authorize);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Prefix is required");
+    expect(createPushAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("Bind with nothing chosen sends nothing and names the credential and the prefix", async () => {
+    const bindPushCredentialScope = vi.fn();
+    stubApi({ bindPushCredentialScope });
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    const bind = within(dialog).getByRole("button", { name: "Bind" });
+    expect(bind).toBeEnabled();
+    await userEvent.click(bind);
+    const alert = within(dialog).getByRole("alert");
+    expect(alert).toHaveTextContent("Credential is required");
+    expect(alert).toHaveTextContent("Prefix is required");
+    expect(bindPushCredentialScope).not.toHaveBeenCalled();
+  });
+
+  it("Bind with a prefix that does not parse sends nothing and says so", async () => {
+    const bindPushCredentialScope = vi.fn();
+    stubApi({
+      bindPushCredentialScope,
+      listCredentials: vi
+        .fn()
+        .mockResolvedValue([{ id: "c1", name: "branch-installer", type: "push_install", has_secret: true }]),
+    });
+    renderWithProviders(<PushCredentialScopesPage />, "/agent-push/credential-scopes?new=scope");
+    const dialog = await screen.findByRole("dialog", { name: "Bind a credential to a prefix" });
+    await within(dialog).findByRole("option", { name: "branch-installer" });
+    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "c1");
+    await userEvent.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "server-17");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Bind" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(/That is not a prefix/);
+    expect(bindPushCredentialScope).not.toHaveBeenCalled();
   });
 });

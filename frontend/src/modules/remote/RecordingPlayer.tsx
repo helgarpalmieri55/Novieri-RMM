@@ -1,12 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import Guacamole from "guacamole-common-js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { EmptyState } from "../../components/emptystate";
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
-import { Btn, PageHead, Panel } from "../../shell/components";
+import { Btn, DetailHead, Panel } from "../../shell/components";
+import { recordOnSubPage, useRecordTitle } from "../../shell/title";
+import { humaniseEnum } from "../../lib/labels";
+import { sessionKind } from "./sessionState";
+import { useSessionDevice } from "./useSessionDevice";
 import { recordingSource } from "./recordingSource";
 import { isRspRecording } from "./rsp";
 import { RspPlayback } from "./RspPlayback";
@@ -106,6 +110,28 @@ export function RecordingPlayer() {
   // retired recorded Guacamole (`.guac`). The file says which by its magic.
   const [format, setFormat] = useState<"unknown" | "rsp" | "guac">("unknown");
   const [rspBytes, setRspBytes] = useState<Uint8Array | null>(null);
+
+  // THE RECORD HEAD names the machine and the session's state (redesign
+  // plan, Receta F; O3 3.6), from the same two reads the live viewer makes.
+  const { session, deviceName } = useSessionDevice(sessionId);
+  // The machine, then that this is its recording (general ruling 1b): the
+  // live session's tab names the machine alone, and the two are different
+  // pages, so they never read the same.
+  useRecordTitle(recordOnSubPage(t("remote.recording.title"), deviceName ?? undefined));
+  const head = (actions?: ReactNode) => (
+    <DetailHead
+      back={{ to: "/remote", label: t("remote.screen.back") }}
+      title={deviceName ?? t("remote.recording.title")}
+      status={
+        session.data
+          ? { kind: sessionKind(session.data), label: humaniseEnum(session.data.state, "RemoteSessionState") }
+          : undefined
+      }
+      // What this page is, and what it cannot do: a stored file, nothing sent.
+      context={t("remote.recording.description")}
+      actions={actions}
+    />
+  );
 
   const recording = useQuery({
     queryKey: ["remote-recording", sessionId],
@@ -241,7 +267,7 @@ export function RecordingPlayer() {
   if (format === "rsp" && rspBytes) {
     return (
       <>
-        <PageHead title={t("remote.recording.title")} description={t("remote.recording.description")} />
+        {head()}
         <RspPlayback bytes={rspBytes} />
       </>
     );
@@ -249,10 +275,7 @@ export function RecordingPlayer() {
 
   return (
     <>
-      <PageHead
-        title={t("remote.recording.title")}
-        description={t("remote.recording.description")}
-        actions={
+      {head(
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span className="mono cell-sub" aria-label={t("remote.recording.position")}>
               {formatSeconds(position)} / {formatSeconds(duration)}
@@ -268,9 +291,8 @@ export function RecordingPlayer() {
                 else current.play();
               }}
             />
-          </div>
-        }
-      />
+          </div>,
+      )}
       {/* AUDIT CLASS (cycle 4): `String(recording.error)` printed "Error: "
           noise for an ordinary failure and NOTHING AT ALL for the bodyless 503
           `ApiError` -- an empty message stringifies to "ApiError: ", and a

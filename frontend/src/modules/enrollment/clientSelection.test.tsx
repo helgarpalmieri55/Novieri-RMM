@@ -146,7 +146,7 @@ describe("an enrollment token's site", () => {
   it("starts on the journey's site when opened from the add-a-computer journey (design §4.4)", async () => {
     selectClient("c-acme");
     const user = userEvent.setup();
-    renderPage("/enrollment?client=c-acme&site=site-a2");
+    renderPage("/enrollment?journey_client=c-acme&journey_site=site-a2");
     await user.click(await screen.findByRole("button", { name: "Create token" }));
     await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a2"));
     await user.type(screen.getByLabelText("Token name"), "lab");
@@ -161,7 +161,7 @@ describe("an enrollment token's site", () => {
 });
 
 describe("a tab clicked on a page opened from the journey (design §4.4)", () => {
-  // A tab is pushed into the URL (`?tab=`) with the journey's `client=` kept:
+  // A tab is pushed into the URL (`?tab=`) with the journey's `journey_client=` kept:
   // the same arrival, so the client the person chose since is not undone.
   const select = vi.fn();
   function scopeOn(selected: string | null): void {
@@ -172,7 +172,7 @@ describe("a tab clicked on a page opened from the journey (design §4.4)", () =>
   it("keeps «Todos mis clientes» chosen after the journey's client was adopted", async () => {
     scopeOn(null);
     const user = userEvent.setup();
-    const view = renderPage("/enrollment?client=c-acme&site=site-a2", ["/devices/onboard"]);
+    const view = renderPage("/enrollment?journey_client=c-acme&journey_site=site-a2", ["/devices/onboard"]);
     expect(select).toHaveBeenCalledWith("c-acme");
     // The console works on Acme: the page starts again.
     scopeOn("c-acme");
@@ -190,7 +190,7 @@ describe("a tab clicked on a page opened from the journey (design §4.4)", () =>
   it("keeps «Todos mis clientes» chosen after arriving on the journey's client", async () => {
     scopeOn("c-acme");
     const user = userEvent.setup();
-    const view = renderPage("/enrollment?client=c-acme&site=site-a2", ["/devices/onboard"]);
+    const view = renderPage("/enrollment?journey_client=c-acme&journey_site=site-a2", ["/devices/onboard"]);
     scopeOn(null);
     view.remount("every-client");
     await user.click(await screen.findByRole("tab", { name: "Certificates" }));

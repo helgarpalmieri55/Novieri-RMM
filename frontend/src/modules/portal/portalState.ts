@@ -26,6 +26,16 @@ export function portalTicketStatusVariant(status: string): BadgeVariant {
   return STATUS_VARIANTS[status] ?? "muted";
 }
 
+// The ticket core's TERMINAL statuses and the two that end a request's work
+// (resolved, fulfilled): what "My tickets" leaves out under its Open chip. A
+// status this list has not met counts as open, so an unknown state is shown
+// rather than hidden from the person who filed it.
+const DONE_STATUSES: ReadonlySet<string> = new Set(["resolved", "fulfilled", "closed", "cancelled", "rejected"]);
+
+export function isPortalTicketOpen(status: string): boolean {
+  return !DONE_STATUSES.has(status);
+}
+
 const PRIORITY_VARIANTS: Record<string, BadgeVariant> = {
   low: "muted",
   normal: "muted",

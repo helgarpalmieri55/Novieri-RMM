@@ -42,11 +42,17 @@ export type StepState = "done" | "partial" | "blocked" | "unknown";
 
 export type StepKey = "register" | "authorize" | "sweep" | "review" | "agent";
 
-/** The URL parameters that carry the journey's client and site (design §4.4). */
-export const JOURNEY_CLIENT_PARAM = "client";
-export const JOURNEY_SITE_PARAM = "site";
+/**
+ * The URL parameters that carry the journey's client and site (design §4.4).
+ * NOT `client` and `site` (redesign decision D20, 2026-11-24): across the
+ * console the `client` query key narrows a list to one client (the Client
+ * chip) and `site` is a list's site filter, while these two switch the
+ * console's client and seed a page's site. One key, one meaning.
+ */
+export const JOURNEY_CLIENT_PARAM = "journey_client";
+export const JOURNEY_SITE_PARAM = "journey_site";
 
-/** `client=…&site=…` (no `?`): what every page the journey opens is for. */
+/** `journey_client=…&journey_site=…` (no `?`): what every page the journey opens is for. */
 export function journeyQuery(client: string, site: string | null): string {
   const query = new URLSearchParams();
   query.set(JOURNEY_CLIENT_PARAM, client);
@@ -99,9 +105,9 @@ export interface JourneyInput {
   readonly releases: readonly { readonly has_artifact: boolean }[] | undefined;
   readonly now?: number;
   /**
-   * `client=…&site=…` (MSP clients phase 3, design §4.4), added to every
-   * step's destination so the page it opens works on that client and site.
-   * Absent or "" until both are known.
+   * `journey_client=…&journey_site=…` (MSP clients phase 3, design §4.4),
+   * added to every step's destination so the page it opens works on that
+   * client and site. Absent or "" until both are known.
    */
   readonly linkQuery?: string;
 }

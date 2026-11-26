@@ -11,14 +11,14 @@ Work top to bottom. Each item names the exact file or variable.
 
 ## 1. Secrets in `deploy/.env`
 
-`cp .env.example .env` leaves **six** values that must be replaced, and
-**all six are literally `change-me`** — verified against `.env.example`
-2026-08-16, which had said "five" here, and seven until own authentication
-phase 4 (2026-11-15) took the identity provider's admin password out. The
-distinction that matters is not which ones say `change-me`; it is *when* you
-can replace them: four are generated before you start anything, and the two
-OpenBao tokens do not exist until first boot has run (§3.2, §3.4), so they
-stay `change-me` for a few minutes by necessity.
+`./scripts/new-env.sh --host rmm.novieri.com` (`deploy/README.md` step 1)
+writes `.env` from `.env.example`, mode 600, and replaces four of the **six**
+values that must change — **all six are literally `change-me`** in
+`.env.example`. The distinction that matters is not which ones say
+`change-me`; it is *when* you can replace them: four are generated before you
+start anything, and the two OpenBao tokens do not exist until first boot has
+run (§3.2, §3.4), so they stay `change-me` for a few minutes by necessity.
+Written by hand instead (`cp .env.example .env`), these are the six:
 
 `./scripts/preflight.sh` checks all of this for you and refuses on anything
 left at a default. Run it before `docker compose up`, not after.
@@ -30,15 +30,18 @@ left at a default. Run it before `docker compose up`, not after.
 | `PORTAL_DB_PASSWORD` | `openssl rand -base64 24` | `portal_user` — the row-scoped end-user portal role |
 | `MINIO_ROOT_PASSWORD` | `openssl rand -base64 24` | also used as `ITS_S3_SECRET_KEY`, which signs every presigned URL the fleet is handed — see §3 |
 | `ITS_OPENBAO_TOKEN` | first boot step 3.4 | the **least-privilege `its-app`** token, never the root token |
-| `OPENBAO_TOKEN` | first boot step 3.2 | the **provisioning/root** token; blank it out again after first boot |
+| `OPENBAO_TOKEN` | first boot step 3.2 | the **provisioning/root** token; **must stay set**, every `up -d` runs `openbao-init` with it (see below) |
 
 **And one value that is not a secret but is not optional either:**
 
 | Variable | Set to | Notes |
 |---|---|---|
+| `ITS_PUBLIC_HOST` | the console's host, `rmm.novieri.com` | every `:443` router matches `Host()` on it, and Traefik asks Let's Encrypt for it (§3). `new-env.sh --host` writes it |
+| `ITS_ACME_EMAIL` | the Let's Encrypt account's contact address | asked for by `new-env.sh`; compose will not start Traefik without it (`${ITS_ACME_EMAIL:?}`). Let's Encrypt no longer mails expiry warnings nor keeps the address on the account |
+| `ITS_ACME_CA_SERVER` | Let's Encrypt's production directory | `new-env.sh --acme-ca-server` sets staging for a rehearsal, and CI sets Pebble |
 | `IT_SUITE_VERSION` | the short commit SHA, via `./scripts/build-images.sh` | `.env.example` ships `dev`. `:dev` names whatever was last built on the host, so it is not a deployable state and not a rollback target — a deployment left on it has nothing to roll back TO. Run `./scripts/build-images.sh` and set the line it prints. |
 
-Then:
+Either way:
 
 ```sh
 chmod 600 deploy/.env
@@ -50,11 +53,34 @@ chmod 600 deploy/.env
 git -C /opt/it-suite status --short deploy/.env    # must print nothing
 ```
 
-**Do not put the two OpenBao tokens in the same place.** `ITS_OPENBAO_TOKEN` is
+**The two OpenBao tokens are different values with different readers.** `ITS_OPENBAO_TOKEN` is
 read by every long-running backend container (`backup-replicator` included); `OPENBAO_TOKEN` is read by one
-short-lived provisioning container and can be emptied once `openbao-init` has
-run. Leaving the root token in `.env` permanently gives every application
-process the ability to delete the job-signing key.
+short-lived provisioning container, `openbao-init`.
+
+**`OPENBAO_TOKEN` must stay set in `.env`. Do not blank it.**
+`docker-compose.yml` declares `BAO_TOKEN: ${OPENBAO_TOKEN:?set in .env}` for
+`openbao-init`, Compose interpolates the whole file for every command, and
+`openbao-init` runs on every `up -d` as a dependency of `api`. With the value
+empty, every `docker compose` command (`up`, `ps`, `logs`, `config`) fails with
+`required variable OPENBAO_TOKEN is missing a value`.
+
+Treat it as a root-equivalent secret, because it is the OpenBao root token:
+
+- `.env` is mode 0600 and owned by the deploy user (`chmod 600 deploy/.env`,
+  above), and the token is never copied anywhere else: not into a shell
+  history, a ticket, a chat or a second file.
+- Keep it with the other key material, custody as in §6 (the OpenBao unseal
+  shares and root token are backed up off this host, never beside a copy of
+  `openbao-data`).
+- It is not read by api, gateway or worker, which hold only `ITS_OPENBAO_TOKEN`
+  (the least-privilege `its-app` token). That limits which processes read it
+  from `.env` by design; it does not make the file less sensitive.
+
+*Open decision for the operator:* taking the root token off the host
+altogether. It needs `openbao-init` to skip provisioning when no token is
+given, and a later upgrade that adds provisioning would then need the token put
+back for that run. Neither exists today; until it is decided and built, the
+token stays in `.env`.
 
 ## 2. The first administrator
 
@@ -84,29 +110,39 @@ console, its realm -- is gone with it.
 
 Two entirely separate certificate systems. Do not mix them.
 
-**`:443`, operator-facing — your real public certificate.**
+**`:443`, operator-facing — a Let's Encrypt certificate that Traefik obtains
+and renews itself** (since 2026-11-23; nothing is copied into `deploy/certs/`
+any more, and the directory is gone). Traefik's ACME resolver `le` asks for
+`ITS_PUBLIC_HOST` with the TLS-ALPN-01 challenge, which is answered on `:443`
+itself, so `:80` stays shut; it keeps the account and the certificate in the
+`traefik-acme` volume, and renews 30 days before expiry. It needs an `A`
+record for the host pointing at this machine, **no `AAAA` record** (this
+deployment is one IPv4 address, and nothing checks that it answers on IPv6;
+Let's Encrypt retries over IPv4 only on a connection timeout, so an `AAAA`
+that points at a host that answers but is wrong fails validation, see
+<https://letsencrypt.org/docs/ipv6-support/>), and `:443` reachable from the
+Internet. `./scripts/preflight.sh` checks the records against the public DNS.
+
+Traefik **silently serves its own self-signed certificate** while it has no
+other — it does not fail. Always verify:
 
 ```sh
-cp /etc/letsencrypt/live/itms.toeshee.com/fullchain.pem deploy/certs/fullchain.pem
-cp /etc/letsencrypt/live/itms.toeshee.com/privkey.pem   deploy/certs/privkey.pem
-chmod 600 deploy/certs/privkey.pem
-docker compose restart traefik
+./scripts/check-public-tls.sh
 ```
 
-`deploy/certs/` is a gitignored bind mount (`.gitkeep` keeps the directory).
-Traefik **silently falls back to a self-signed certificate** if either file is
-missing or unreadable — it does not fail. Always verify:
+`ok` names the issuer (Let's Encrypt), the name and the expiry. A `REFUSE`
+naming `TRAEFIK DEFAULT CERT` means Traefik has no certificate yet;
+`docker compose logs traefik | grep -i acme` says why. Every first start
+asks for a new certificate when the volume is new: Let's Encrypt issues at
+most 5 a week for the same name, so a rehearsal uses its staging directory
+(`deploy/README.md` step 1).
 
-```sh
-echo | openssl s_client -connect itms.toeshee.com:443 -servername itms.toeshee.com 2>/dev/null \
-  | openssl x509 -noout -issuer -subject -dates
-```
-
-`issuer=CN = TRAEFIK DEFAULT CERT` means it fell back and you are serving a
-self-signed certificate to your operators.
-
-Renewal is yours to automate (`certbot renew --deploy-hook` that copies the two
-files and runs `docker compose restart traefik`).
+Let's Encrypt is shortening its certificates (to 64 days from 2027-02-10, 45
+from 2028-02-16). Traefik renews 30 days before expiry whatever the lifetime,
+so neither needs a change here. Since Let's Encrypt no longer mails expiry
+warnings, `check-public-tls.sh` refuses a certificate with fewer than 28 days
+left (a renewal that keeps failing); an external certificate monitor that
+alerts you is worth having too.
 
 **`:8443`, agent-facing — the internal CA, never your public certificate.**
 The gateway terminates mutual TLS itself (Traefik is TCP passthrough), and
@@ -125,17 +161,17 @@ nothing on it is anonymously readable.** Before go-live, confirm all four:
 #    Expect: 403, and an <Error><Code>AccessDenied</Code> body from MinIO.
 #    A 404 or your SPA's HTML means the route is MISSING and every artifact
 #    download in the fleet is broken. A 200 is an emergency — see below.
-curl -sk https://itms.toeshee.com/it-suite/probe -w '\n%{http_code}\n'
+curl -s https://rmm.novieri.com/it-suite/probe -w '\n%{http_code}\n'
 
 # 2. Listing does not reach MinIO. Expect: 0.
 #    NOT a status check: everything the object route does not claim falls
 #    through to the frontend's catch-all, so this returns 200 and index.html.
 #    What must never appear is a bucket listing.
-curl -sk 'https://itms.toeshee.com/it-suite?list-type=2' | grep -c '<ListBucketResult'
+curl -s 'https://rmm.novieri.com/it-suite?list-type=2' | grep -c '<ListBucketResult'
 
 # 3. The MinIO console is not reachable. Expect: your SPA — never a MinIO
 #    login page, and never a <Error> body.
-curl -sk https://itms.toeshee.com/ | head -c 200
+curl -s https://rmm.novieri.com/ | head -c 200
 
 # 4. MinIO publishes no port of its own.
 docker compose ps minio        # PORTS column must be empty
@@ -214,47 +250,19 @@ scoped to the one bucket instead of an account root key.
 
 Issued by `deploy/scripts/issue-gateway-cert.py` for **365 days**, and **it
 does not renew itself**. Agent certificates rotate automatically at two-thirds
-of life; this one has no such machinery, so put it on a timer:
-
-```sh
-sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'
-[Unit]
-Description=Renew the it-suite gateway server certificate
-[Service]
-Type=oneshot
-WorkingDirectory=/opt/it-suite/deploy
-# The token arrives on STDIN from a 0600 file, never as an argument. The old
-# form was  -e BAO_TOKEN="$(grep ^OPENBAO_TOKEN= .env ...)"  [removed],
-# which put the ROOT token into the argv of `docker compose` -- world-readable
-# via /proc/<pid>/cmdline, i.e. `ps`, for as long as the container ran. `-T` is
-# what keeps stdin available to redirect.
-ExecStart=/bin/bash -lc 'docker compose run --rm --no-deps -T \
-  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py itms.toeshee.com \
-  < /etc/it-suite/gateway-issuer.token \
-  && docker compose restart gateway'
-EOF
-sudo tee /etc/systemd/system/its-gateway-cert.timer >/dev/null <<'EOF'
-[Unit]
-Description=Monthly it-suite gateway certificate renewal
-[Timer]
-OnCalendar=monthly
-Persistent=true
-[Install]
-WantedBy=timers.target
-EOF
-sudo systemctl enable --now its-gateway-cert.timer
-```
+of life; this one has no such machinery, so put it on a timer. The two systemd units and the command that enables
+them are in `deploy/README.md` step 6b, [Renew the gateway's certificate every
+month](README.md#step-6b--renew-the-gateways-certificate-every-month): that is
+the only copy, installed at first boot.
 
 This needs `/etc/it-suite/gateway-issuer.token` (mode 0600, root-owned) from
 first-boot step 3.4. It does **not** need `OPENBAO_TOKEN`, and that is the
 change worth noticing: the timer used to require the **root** token to stay on
-the host, which §1 asks you to blank out — so the runbook was asking you to
-choose between an unrenewed certificate and a permanently resident root
-credential. The `gateway-issuer` policy holds `update` on `pki/issue/gateway`
+the host — so the runbook was asking you to choose between an unrenewed
+certificate and a second reader of the resident root credential. The `gateway-issuer` policy holds `update` on `pki/issue/gateway`
 and nothing else, so the file this timer reads cannot re-key
 `transit/job-signing`, cannot re-mount the PKI, and cannot read any org's
-envelope key. Blank `OPENBAO_TOKEN` as §1 says.
+envelope key. `OPENBAO_TOKEN` stays in `.env` as §1 says: it is not blanked, because `openbao-init` needs it on every `up -d`.
 
 Rotate the `gateway-issuer` token on the same schedule as `ITS_OPENBAO_TOKEN`
 above; both are minted with a 10-year TTL and nothing in the stack renews
@@ -263,7 +271,7 @@ either.
 Check what is actually being served:
 
 ```sh
-echo | openssl s_client -connect itms.toeshee.com:8443 2>/dev/null \
+echo | openssl s_client -connect rmm.novieri.com:8443 2>/dev/null \
   | openssl x509 -noout -subject -dates
 ```
 
@@ -340,8 +348,10 @@ go somewhere other than the database backups.
   ticket and invoice attachments. The nightly timer mirrors it (`OBJECTS` in
   `backup.conf`); switch to `no-fleet-backups` once the off-site copy in §8
   protects fleet data.
-- **`deploy/.env` and `deploy/certs/`** — not in git by design, therefore not
-  in any git-based recovery.
+- **`deploy/.env`** — not in git by design, therefore not in any git-based
+  recovery. (The `:443` certificate is in the `traefik-acme` volume, which is
+  not backed up: losing it costs one new certificate, which Traefik obtains
+  at its next start.)
 
 Verify a restore before go-live, not after an incident. **The authoritative
 full-recovery procedure is `docs/07-backup-restore.md` §3** — key-material
@@ -417,7 +427,7 @@ wrote came back; nothing past that.
 - **Firewall.** Publish only `443` and `8443`. Postgres, Redis, MinIO and
   OpenBao have no published ports and must stay that way.
 - **`ITMS_BIND_IP`** — leave at `0.0.0.0` on a dedicated host. On a host that
-  already runs something else on `:443`, set it to the address ITMS answers on;
+  already runs something else on `:443`, set it to the address Novieri RMM answers on;
   leaving it wildcard there does not degrade gracefully, it stops traefik from
   starting at all ("address already in use"), because Linux refuses a wildcard
   bind for a port any specific address already holds. `./scripts/host-check.sh`
@@ -425,7 +435,7 @@ wrote came back; nothing past that.
   whether a second address is even available. The address you pick must be the
   one your DNS name resolves to and the one your `:443` certificate covers.
 - **Multi-homed host: read `host-network.md` §2 before touching routing.** If
-  ITMS answers on a NIC that is not the default route's, replies leave via the
+  Novieri RMM answers on a NIC that is not the default route's, replies leave via the
   wrong interface and get dropped as spoofed. It does not fail cleanly —
   handshakes succeed and sessions then stall, so it reads as an unreliable agent
   fleet and the gateway gets blamed while testing fine from every network you

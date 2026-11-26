@@ -19,13 +19,34 @@ services:
       - --entrypoints.websecure.address=:443
       - --entrypoints.gateway.address=:8443
       - --providers.file.filename=/etc/traefik/dynamic.yml
+      # LET'S ENCRYPT, ASKED FOR AND RENEWED BY TRAEFIK (design
+      # 2026-11-23-vps-y-marca-novieri §2, operator decision B3). One
+      # certificate, for the name every router on :443 names in its Host():
+      # ITS_PUBLIC_HOST. TLS-ALPN-01 is answered on :443 itself, so :80 stays
+      # shut ("Traefik must be reachable by Let's Encrypt through port 443",
+      # doc.traefik.io), and Traefik renews 30 days before expiry. The CA is
+      # production unless .env says otherwise: staging for a rehearsal --
+      # production allows 5 certificates a week for one name -- and Pebble
+      # in CI (ci/acme-pebble.yml). NOT THE GATEWAY'S: :8443 is TCP
+      # passthrough, and the gateway presents its own certificate from the
+      # internal CA, which agents pin (README step 6). While the gateway is
+      # absent or unhealthy Traefik terminates TLS on :8443 itself (the public
+      # certificate for the right SNI); agents refuse it, pinned to the internal CA.
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.email=${ITS_ACME_EMAIL:?set in .env (scripts/new-env.sh asks for it)}
+      - --certificatesresolvers.le.acme.storage=/etc/traefik/acme/acme.json
+      - --certificatesresolvers.le.acme.caserver=${ITS_ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+    environment:
+      # Read by traefik/dynamic.yml's `{{ env "ITS_PUBLIC_HOST" }}`.
+      ITS_PUBLIC_HOST: ${ITS_PUBLIC_HOST:?set in .env}
     # BIND ADDRESS, NOT JUST PORT. `"443:443"` binds 0.0.0.0 and holds :443 on
     # every interface -- which is right on a dedicated host and WRONG on a host
     # that already runs something else on :443. Linux refuses a wildcard bind
     # for a port any specific address already holds, so on a shared host
-    # `docker compose up` dies with EADDRINUSE and giving ITMS its own IP does
-    # not help until this is set. ITMS_BIND_IP is that setting: the address
-    # ITMS answers on, from .env, default 0.0.0.0 = today's behaviour.
+    # `docker compose up` dies with EADDRINUSE and giving Novieri RMM its own
+    # IP does not help until this is set. ITMS_BIND_IP is that setting: the
+    # address Novieri RMM answers on, from .env, default 0.0.0.0 = today's
+    # behaviour.
     #
     # It belongs here rather than in the console's settings screen: a value
     # compose reads to create the container cannot be changed by the
@@ -37,13 +58,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
-      # The operator's real certificate for the :443 entrypoint, as a BIND
-      # MOUNT of a gitignored directory in the working tree -- see
-      # traefik/dynamic.yml for the filenames and why this is not a named
-      # volume. (It replaces a `traefik-certs` named volume that nothing ever
-      # wrote to: there is no ACME resolver configured, so it only ever held
-      # nothing, and a `git pull` deployment cannot put a file inside it.)
-      - ./certs:/etc/traefik/certs:ro
+      # The ACME account key and the certificates Traefik obtained
+      # (acme.json, which Traefik writes 0600). A named volume, since
+      # 2026-11-23 in place of the hand-copied deploy/certs/: nothing on the
+      # host writes it, and losing it costs one new certificate, not data
+      # (GO-LIVE.md §6).
+      - traefik-acme:/etc/traefik/acme
     depends_on:
       - api
       - web
@@ -143,9 +163,9 @@ services:
       # is the console's consent page, served by `web`, because the
       # SameSite=Strict session cookie reaches the api only from a same-origin
       # fetch (plan D2).
-      traefik.http.routers.api.rule: PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`) || Path(`/.well-known/jwks.json`) || Path(`/oauth/token`) || Path(`/oauth/register`) || Path(`/oauth/revoke`)
+      traefik.http.routers.api.rule: Host(`${ITS_PUBLIC_HOST:?set in .env}`) && (PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`) || Path(`/.well-known/jwks.json`) || Path(`/oauth/token`) || Path(`/oauth/register`) || Path(`/oauth/revoke`))
       traefik.http.routers.api.entrypoints: websecure
-      traefik.http.routers.api.tls: "true"
+      traefik.http.routers.api.tls.certresolver: le
       traefik.http.services.api.loadbalancer.server.port: "8000"
     healthcheck:
       # /livez, not /readyz: it answers 200 whenever this process can answer
@@ -411,10 +431,10 @@ services:
       dockerfile: deploy/frontend.Dockerfile
     labels:
       traefik.enable: "true"
-      traefik.http.routers.web.rule: PathPrefix(`/`)
+      traefik.http.routers.web.rule: Host(`${ITS_PUBLIC_HOST:?set in .env}`) && PathPrefix(`/`)
       traefik.http.routers.web.priority: "1"
       traefik.http.routers.web.entrypoints: websecure
-      traefik.http.routers.web.tls: "true"
+      traefik.http.routers.web.tls.certresolver: le
       traefik.http.services.web.loadbalancer.server.port: "80"
     restart: unless-stopped
     healthcheck:
@@ -507,10 +527,10 @@ services:
       # dead on arrival. See ITS_S3_PUBLIC_ENDPOINT in .env.example.
       #
       # WHY A PATH PREFIX AND NOT A SUBDOMAIN. The operator has one hostname
-      # and one certificate; `objects.itms.toeshee.com` would need a new DNS
+      # and one certificate; `objects.rmm.novieri.com` would need a new DNS
       # record and a SAN. A prefix works here for one specific reason: the
       # prefix IS THE BUCKET NAME, so the public URL
-      # `https://itms.toeshee.com/it-suite/<key>` is already exactly S3
+      # `https://rmm.novieri.com/it-suite/<key>` is already exactly S3
       # path-style addressing. NOTHING IS REWRITTEN -- there is deliberately
       # no stripPrefix middleware. SigV4 signs the host and the full path, so
       # a stripped prefix would make MinIO recompute the signature over a
@@ -554,12 +574,13 @@ services:
       # folds into one line. A more-indented line would make YAML keep the
       # newlines literally and hand Traefik a multi-line rule.
       traefik.http.routers.minio.rule: >-
-        (PathPrefix(`/${ITS_S3_BUCKET:-it-suite}/`)
+        Host(`${ITS_PUBLIC_HOST:?set in .env}`)
+        && ((PathPrefix(`/${ITS_S3_BUCKET:-it-suite}/`)
         && !Path(`/${ITS_S3_BUCKET:-it-suite}/`)
         && (Method(`GET`) || Method(`HEAD`)))
-        || (Path(`/${ITS_S3_BUCKET:-it-suite}`) && Method(`POST`))
+        || (Path(`/${ITS_S3_BUCKET:-it-suite}`) && Method(`POST`)))
       traefik.http.routers.minio.entrypoints: websecure
-      traefik.http.routers.minio.tls: "true"
+      traefik.http.routers.minio.tls.certresolver: le
       # EXPLICIT, and not optional: the container exposes 9000 (S3 API) and
       # 9001 (console). Left to Traefik to guess, a two-port container is
       # ambiguous and the console is one of the candidates.
@@ -655,6 +676,9 @@ volumes:
   # one early firing of each periodic task, not data -- so it is deliberately
   # NOT in the backup set in docs/07-backup-restore.md §1.
   beat-schedule:
+  # Traefik's ACME account and certificates (design 2026-11-23 §2).
+  # Re-obtainable, so not in the backup set: GO-LIVE.md §6.
+  traefik-acme:
 
 # --- The container network ------------------------------------------------
 # PINNED, NOT LEFT TO DOCKER'S ALLOCATOR. Docker's default address pool is

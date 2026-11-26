@@ -218,7 +218,7 @@ REFUSAL_REASONS: dict[str, str] = {
 WINRM_PUSH_CAPABILITY = "agent.push_install.winrm"
 
 #: The capability a site server's agent advertises when its SSH push hands the
-#: placed binary its enroll URL (`its-agent install --enroll-url`, review Minor
+#: placed binary its enroll URL (`novieri-agent install --enroll-url`, review Minor
 #: 1). An agent without it runs the old command, which installs an agent that
 #: can never enroll, so for an `ssh` target it is skipped exactly as a site
 #: server without WINRM_PUSH_CAPABILITY is for a `winrm` one.

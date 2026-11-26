@@ -105,33 +105,33 @@ func TestPushInstallLinux(t *testing.T) {
 	if got := plat.configuredBinary(t); got != plat.target() {
 		t.Fatalf("unit ExecStart = %q, want %q", got, plat.target())
 	}
-	unit, err := os.ReadFile("/etc/systemd/system/its-agent.service")
+	unit, err := os.ReadFile("/etc/systemd/system/novieri-agent.service")
 	if err != nil {
 		t.Fatal(err)
 	}
-	shipped, err := os.ReadFile(filepath.Join(repoRoot, "agent/packaging/linux/its-agent.service"))
+	shipped, err := os.ReadFile(filepath.Join(repoRoot, "agent/packaging/linux/novieri-agent.service"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(unit) != string(shipped) {
-		t.Fatal("the installed unit is not agent/packaging/linux/its-agent.service")
+		t.Fatal("the installed unit is not agent/packaging/linux/novieri-agent.service")
 	}
 	// ITS_AGENT_ENROLL_URL where install.sh puts it: the unit's EnvironmentFile.
-	envFiles := run(t, "systemctl", "show", "its-agent", "-p", "EnvironmentFiles")
-	if !strings.Contains(envFiles, "/etc/its-agent/agent.env") {
+	envFiles := run(t, "systemctl", "show", "novieri-agent", "-p", "EnvironmentFiles")
+	if !strings.Contains(envFiles, "/etc/novieri-agent/agent.env") {
 		t.Fatalf("EnvironmentFiles = %q", envFiles)
 	}
-	env, err := os.ReadFile("/etc/its-agent/agent.env")
+	env, err := os.ReadFile("/etc/novieri-agent/agent.env")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(env), "\nITS_AGENT_ENROLL_URL="+enroll.url+"\n") || strings.Contains(string(env), token) {
 		t.Fatalf("agent.env = %q", env)
 	}
-	assertMode(t, "/etc/its-agent/agent.env", 0o600)
+	assertMode(t, "/etc/novieri-agent/agent.env", 0o600)
 	assertMode(t, plat.dataDir(), 0o700)
-	if active := strings.TrimSpace(run(t, "systemctl", "is-enabled", "its-agent")); active != "enabled" {
-		t.Fatalf("its-agent is %q, want enabled", active)
+	if active := strings.TrimSpace(run(t, "systemctl", "is-enabled", "novieri-agent")); active != "enabled" {
+		t.Fatalf("novieri-agent is %q, want enabled", active)
 	}
 
 	// The service enrolls with the token, reaches the gateway, and deletes

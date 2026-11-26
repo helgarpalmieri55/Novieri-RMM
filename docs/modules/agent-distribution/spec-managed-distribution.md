@@ -32,7 +32,7 @@ byte, behind a one-machine install command that is useless to them).
 |---|---|---|
 | 1 | The **artefact**, downloadable once and stageable to a distribution point | Presigned GET exists, but only inside a token-bearing install command |
 | 2 | A **silent, unattended install invocation** that installs the service and **does not enrol** | Does not exist. `install.ps1` takes a token or none, and **starts the service either way** — §5.1 |
-| 3 | A **separate enrolment step** the distribution channel can run with a credential it supplies out of band | Exists on Linux (`its-agent-enroll`), **does not exist on Windows** |
+| 3 | A **separate enrolment step** the distribution channel can run with a credential it supplies out of band | Exists on Linux (`novieri-agent-enroll`), **does not exist on Windows** |
 | 4 | An **enrolment credential a fleet can share** without becoming a standing secret | **This is the hard part.** §3 |
 
 This module builds 1–3 and answers 4 in the narrowest form that is defensible,
@@ -404,9 +404,9 @@ enrollment step into a restart loop that reads like a crash."* `install.ps1` now
 follows it — it registers the service and starts it only when the endpoint has
 a token to spend or an identity it already holds.
 
-### 5.2 `its-agent-enroll.ps1` — new, and it is step 3 of §1
+### 5.2 `novieri-agent-enroll.ps1` — new, and it is step 3 of §1
 
-Windows had no counterpart to `linux/its-agent-enroll`, so the only way to
+Windows had no counterpart to `linux/novieri-agent-enroll`, so the only way to
 enrol a Windows endpoint was to hand the token to `install.ps1`. Managed
 distribution needs the two steps separate: the package installs, the channel's
 own secret mechanism enrols.
@@ -446,7 +446,7 @@ Each is a test.
 3. **Expiry is unbounded.** Assert the hours ceiling is enforced.
 4. **The install or enrol invocation puts the token in argv.** The same rule
    `spec.md` §6.4 holds the one-machine command to, applied to both new
-   strings — and to `its-agent-enroll.ps1`, which must refuse `-Token`.
+   strings — and to `novieri-agent-enroll.ps1`, which must refuse `-Token`.
 5. **A route answers without a permission check.** `agent_releases` has no
    `org_id`; the existing completeness sweep must cover the new routes, and the
    package route must not require `enrollment.manage` while the token route

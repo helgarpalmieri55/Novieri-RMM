@@ -50,8 +50,9 @@ from app.modules.backup.handler import register_job_types as register_backup_job
 from app.modules.backup.repository import create_repository, open_repo_key
 from app.modules.backup.restore import seal_manifest
 from app.modules.backup.schema import BackupManifest, FiletreeStream, ManifestEntry
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 # The backup job-type registry is populated at app-startup time, not merely on
 # import. Register directly so this file's own fixtures/assertions don't depend

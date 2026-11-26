@@ -175,7 +175,7 @@ class EmailSettingsOut(BaseModel):
         default="",
         description=(
             "Where the console proposes sending a test: the caller's own address with "
-            "`+itms-test` before the @, which reaches the same inbox on Microsoft 365 and "
+            "`+novieri-test` before the @, which reaches the same inbox on Microsoft 365 and "
             "Gmail and is easy to find there. Empty when the caller's sign-in carries no "
             "usable address."
         ),
@@ -219,7 +219,7 @@ class TestSendIn(BaseModel):
 
 
 def suggested_test_recipient(email: str) -> str:
-    """`name+itms-test@domain` for the caller's own address, or "" if it is not
+    """`name+novieri-test@domain` for the caller's own address, or "" if it is not
     one plausible address. An existing tag is replaced, not stacked."""
     if email.count("@") != 1:
         return ""
@@ -227,7 +227,7 @@ def suggested_test_recipient(email: str) -> str:
     local = local.split("+", 1)[0]
     if not local or "." not in domain:
         return ""
-    return f"{local}+itms-test@{domain.lower()}"
+    return f"{local}+novieri-test@{domain.lower()}"
 
 
 class EmailSettingsIn(BaseModel):
@@ -545,10 +545,10 @@ async def send_test_message(
                 session,
                 org_id=ctx.org_id,
                 to=recipient,
-                subject=tr("ITMS test message"),
+                subject=tr("Novieri RMM test message"),
                 text=tr(
-                    "This is a test message from ITMS. It reached you, so this organization's "
-                    "account email (invitations and password resets) is working."
+                    "This is a test message from Novieri RMM. It reached you, so this "
+                    "organization's account email (invitations and password resets) is working."
                 ),
                 vault=state.vault,
                 actor_id=ctx.user_id,

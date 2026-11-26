@@ -166,7 +166,7 @@ describe("the preview harness", () => {
       // bundle whose only reference was dropped -- and it has no business being
       // in a production artifact regardless, and would be the first thing a
       // scanner flagged.
-      "__ITMS_XSS_EXECUTED",
+      "__XSS_PROBE_EXECUTED",
     ]) {
       expect(text, `${fixture} reached the production bundle`).not.toContain(fixture);
     }

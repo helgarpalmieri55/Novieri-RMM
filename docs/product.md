@@ -1,4 +1,4 @@
-# Product — what ITMS is, and what it does
+# Product — what Novieri RMM is, and what it does
 
 **Audience:** anyone who needs to understand the product without reading the
 code — a new engineer on day one, an evaluator, a buyer, an auditor.
@@ -27,7 +27,7 @@ web
 
 ## 1. In one paragraph
 
-ITMS is a self-hosted IT management platform. You install one
+Novieri RMM is a self-hosted IT management platform. You install one
 lightweight agent on every computer and server you manage; from a single web
 console your IT team inventories that fleet, patches it, deploys software to
 it, takes remote-control sessions on it, backs it up, documents it, and runs
@@ -237,14 +237,15 @@ fleet; they read output. It is why "0 breached" must never be able to mean
 
 ## 9. Brand commitments, and what is deliberately still open
 
-**`ITMS` IS A PLACEHOLDER. The product name has not been chosen.** Confirmed
-by the operator on 2026-08-21, when it was the visible name in 46 places
-across 18 frontend source files, in three files of the sign-in theme (which
-went with Keycloak in own authentication phase 4), and in `<title>`. Nothing
-may harden an identity around it — no wordmark built from those four letters,
-no logo whose meaning depends on them, no marketing surface that treats it as
-settled. When the name is chosen it is a rename, and the count above was the
-size of that job then.
+**The product is Novieri RMM** (operator, 2026-11-23, decision A3 of the
+console redesign): "Novieri" in the console's bar, "Page · Novieri RMM" in the
+browser tab, "Novieri RMM" in emails and on managed computers. `ITMS` was a
+placeholder from 2026-08-21 until then; the identity is direction A,
+"Cordillera" (`docs/design/marca/`), and `DESIGN.md` v4 is its system.
+`frontend/src/test/no-itms.test.ts` keeps the old name out of the console.
+The backend, the agent and `deploy/` carry the same name since project 4
+(`docs/superpowers/plans/2026-11-23-vps-y-marca-novieri.md`), which keeps
+them so with a guard of its own.
 
 **No user-visible string may name the identity vendor.** Enforced, not
 requested: `frontend/src/lib/noVendorNames.test.ts` scans string literals and
@@ -289,7 +290,7 @@ What holds it, today, in CI:
 | `frontend/src/test/contrast.test.ts` | Any token pair the console paints as small text falling under 4.5:1. The ratios are **computed** from the shipped tokens rather than transcribed, and the file carries both auditors' original measurements as a live falsifier, so a guard that stops being able to see the defect goes red rather than green. |
 | the same file | Any `font-size` below 12px in the four shell stylesheets, or written inline in JSX — the second half exists because the first half passed green while three sizes shipped below the floor. |
 | `frontend/src/test/responsive.test.ts` | A missing breakpoint, a drawer that is off-screen but still in the tab order, or a touch target under 44px where the pointer is coarse. |
-| `frontend/src/test/tokens.test.ts` | A palette that has drifted from `docs/design/itms-prototype.html`. A deliberate change has to be made in the design first. |
+| `frontend/src/test/tokens.test.ts` | A palette that has drifted from DESIGN.md v4 or from the brand (docs/design/marca/novieri-tokens.json). A deliberate change starts in DESIGN.md. |
 
 **What none of that covers, stated so nobody mistakes green for accessible.**
 These read tokens and stylesheets as text. jsdom implements no cascade and

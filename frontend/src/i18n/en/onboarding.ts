@@ -1,6 +1,7 @@
 export const onboarding = {
   page: {
-    title: "Add a computer",
+    // The form page's way back (redesign Task 6, 1.6): the fleet list, by the rail's word.
+    back: "Devices",
     description: "Install the agent on one machine, or find every machine on a network.",
     oneComputer: {
       title: "One computer",
@@ -10,7 +11,7 @@ export const onboarding = {
       note: "Either way, the computer makes its own key, which never leaves it, and gets its own certificate. It appears under Devices as soon as it checks in.",
     },
     manyNote:
-      "Many computers on a network: this platform never connects to a machine, so the first machine on a new segment is always a manual install. It becomes the sweeper that finds the rest.",
+      "This platform never connects to a machine, so the first machine on a new segment is always a manual install. It becomes the sweeper that finds the rest.",
     manyTitle: "Many computers on a network",
     needsAdmin: "An administrator must do this. It needs {permissions}, which your account does not have.",
     youAreHere: "You are here",
@@ -71,7 +72,7 @@ export const onboarding = {
       thisNetwork: "this network",
       noAgent: "The last sweep of {network} could not run: no enrolled agent on that segment.",
       noAgentRemedy:
-        "A sweep is performed BY an agent inside the segment. This platform never probes a network itself. Install the agent by hand on one machine there (step 5 has the command), and it becomes the sweeper for the rest.",
+        "A sweep is always performed by an agent inside the segment. This platform never probes a network itself. Install the agent by hand on one machine there (step 5 has the command), and it becomes the sweeper for the rest.",
       noAgentToLabel: "Get an install command",
       chooseNetwork: "Choose a network",
       open: "Open {prefix}",

@@ -196,8 +196,13 @@ describe("the chrome below the drawer breakpoint", () => {
     expect(block).not.toMatch(/\.top-shortcut\s*\{/);
     const shellTsx = read("frontend/src/shell/AppShell.tsx");
     expect(shellTsx).not.toContain("top-shortcut");
-    // The link's name is a catalogue entry now; the shortcut survives when the
-    // shell still renders that key and the English entry still says it.
+    // The link's name is a catalogue entry; the shortcut survives where the
+    // shell still renders that key and the English entry still says it. It
+    // is the round button at the bottom right now (decision D12, the operator
+    // on 2026-11-24), the last thing in `<main>` and never inside the top bar.
+    const header = shellTsx.slice(shellTsx.indexOf('<header className="topbar">'), shellTsx.indexOf("</header>"));
+    expect(header, "the top bar draws the Assistant again").not.toContain("shell.app.askAssistant");
+    expect(shellTsx).toContain('className="assistant-fab"');
     expect(shellTsx, "the assistant shortcut itself must survive").toContain("shell.app.askAssistant");
     expect(en.shell.app.askAssistant).toBe("Ask the Assistant");
   });
@@ -418,5 +423,59 @@ describe("the tile row's column count can be overridden by its own media queries
     expect(components.indexOf('.stats-grid[data-columns="4"]')).toBeLessThan(
       components.indexOf(".stats-grid[data-columns] {"),
     );
+  });
+});
+
+/**
+ * THE ASSISTANT'S ROUND BUTTON (decision D12; DESIGN.md v4, "Assistant
+ * button"). jsdom lays nothing out, so this is asserted on the declarations:
+ * a 48px target, fixed in the corner, and the save bar's room beside it at
+ * every width. The defect it guards is Atera's own (its walkthrough, line
+ * 639: the floating AI button covers the save button).
+ */
+describe("the Assistant's round button", () => {
+  it("is a fixed 48px circle, over the 44px target on every pointer", () => {
+    const fab = /\.assistant-fab\s*\{([^}]*)\}/.exec(SHELL)?.[1] ?? "";
+    expect(fab, "no `.assistant-fab` rule in shell.css").not.toBe("");
+    expect(fab).toMatch(/position:\s*fixed/);
+    expect(fab).toMatch(/width:\s*48px/);
+    expect(fab).toMatch(/height:\s*48px/);
+  });
+
+  it("keeps the save bar out of its corner on a desk and on a phone", () => {
+    expect(SHELL).toMatch(/body\.assistant-fab-on \.savebar\s*\{\s*margin-right:\s*72px;/);
+    expect(SHELL_BLOCKS.get(640) ?? "").toMatch(/body\.assistant-fab-on \.savebar\s*\{\s*margin-right:\s*64px;/);
+    expect(SHELL).toMatch(/body\.assistant-fab-on \.content\s*\{\s*padding-bottom:\s*88px;/);
+  });
+});
+
+/**
+ * A FOLDER'S OR ADMIN'S PAGE NAME WRAPS, IT IS NOT CUT (critique of the rail,
+ * 2026-11-24, P1). At the rail's 232px a sub-item's label starts 77px in, and
+ * in Spanish "Registro de auditoría" or "Automatización con IA" did not fit:
+ * the current page read "Registro de aud…". The rail's width and the 40px
+ * indent are DESIGN.md's and the mock's, so the name takes a second line.
+ */
+describe("the rail's sub-items", () => {
+  it("let a long name take a second line instead of an ellipsis", () => {
+    const rule = /\.nav-item\.sub \.lbl\s*\{([^}]*)\}/.exec(SHELL)?.[1] ?? "";
+    expect(rule, "no `.nav-item.sub .lbl` rule in shell.css").not.toBe("");
+    expect(rule).toMatch(/white-space:\s*normal/);
+  });
+});
+
+/**
+ * THE ADMIN INDEX'S CARDS STACK WITHOUT HOLES (the coordinator's answer to the
+ * critique's question 2, 2026-11-25): CSS columns, so DOM order is reading
+ * order (down the first column, then the second) and a short card no longer
+ * leaves a hole beside a tall one.
+ */
+describe("the Admin index", () => {
+  it("flows its cards in columns, never splitting one", () => {
+    const index = /\.admin-index\s*\{([^}]*)\}/.exec(SHELL)?.[1] ?? "";
+    expect(index, "no `.admin-index` rule").not.toBe("");
+    expect(index).toMatch(/columns:/);
+    expect(index).not.toMatch(/display:\s*grid/);
+    expect(SHELL).toMatch(/\.admin-index > \*\s*\{[^}]*break-inside:\s*avoid/);
   });
 });

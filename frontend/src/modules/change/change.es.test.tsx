@@ -18,6 +18,7 @@ import { translate } from "../../i18n/core";
 import { setActiveLanguage } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError } from "../../lib/api";
+import { TitleShell } from "../../test/renderPage";
 import type { ApiClient, Me, MeClient } from "../../lib/api";
 import { ApprovalQueue } from "./ApprovalQueue";
 import { ChangeCalendar } from "./ChangeCalendar";
@@ -130,58 +131,78 @@ describe("ChangesPage in Spanish", () => {
   it("words the list, the tiles, the pills and the gates, and follows a live switch", async () => {
     const { container } = mount(<ChangesPage />);
     expect(await screen.findByText("Actualizar firmware del conmutador")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Gestión de cambios" })).toBeInTheDocument();
+    // The h1 is the rail's label (coordinator ruling 1, redesign Task 11).
+    expect(screen.getByRole("heading", { name: "Cambios" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Cola de aprobación" })).toHaveAttribute("href", "/changes/approvals");
     expect(screen.getByRole("link", { name: "Calendario de cambios" })).toHaveAttribute("href", "/changes/calendar");
     expect(screen.getByRole("button", { name: "Nuevo cambio" })).toBeInTheDocument();
-    for (const label of ["Cambios abiertos", "Pendientes de aprobación", "Cambios de emergencia"]) {
+    for (const label of ["Cambios abiertos", "Pendientes de aprobación", "En implementación", "Cambios de emergencia"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     // A change's state and risk are masculine words under "Estado" and "Riesgo".
-    expect(screen.getByText("Borrador")).toBeInTheDocument();
-    expect(screen.getByText("Enviado")).toBeInTheDocument();
-    expect(screen.getByText("En implementación")).toBeInTheDocument();
-    expect(screen.getByText("Completado")).toBeInTheDocument();
-    expect(screen.getAllByText("Alto").length).toBe(1);
-    expect(screen.getAllByText("Medio").length).toBe(2);
-    expect(screen.getAllByText("Bajo").length).toBe(1);
+    // Read in the table: the state chips above it carry the same words (Task 11, 6.2).
+    const table = screen.getByRole("table", { name: "Cambios" });
+    expect(within(table).getByText("Borrador")).toBeInTheDocument();
+    expect(within(table).getByText("Enviado")).toBeInTheDocument();
+    expect(within(table).getByText("En implementación")).toBeInTheDocument();
+    expect(within(table).getByText("Completado")).toBeInTheDocument();
+    expect(within(table).getAllByText("Alto").length).toBe(1);
+    expect(within(table).getAllByText("Medio").length).toBe(2);
+    expect(within(table).getAllByText("Bajo").length).toBe(1);
     expect(screen.getByText(/Registrado automáticamente/)).toBeInTheDocument();
     expect(screen.getByText("Exigir un cambio aprobado")).toBeInTheDocument();
     expect(screen.getByText("Todavía nada exige un cambio aprobado.")).toBeInTheDocument();
     expectNoEnglish(container);
 
     act(() => setActiveLanguage("en"));
-    expect(screen.getByRole("heading", { name: "Change management" })).toBeInTheDocument();
-    expect(screen.getByText("Draft")).toBeInTheDocument();
-    expect(screen.getByText("Submitted")).toBeInTheDocument();
-    expect(screen.getAllByText("High").length).toBe(1);
+    expect(screen.getByRole("heading", { name: "Changes" })).toBeInTheDocument();
+    expect(within(table).getByText("Draft")).toBeInTheDocument();
+    expect(within(table).getByText("Submitted")).toBeInTheDocument();
+    expect(within(table).getAllByText("High").length).toBe(1);
     expect(screen.getByText(/Recorded automatically/)).toBeInTheDocument();
     expect(screen.getByText("Nothing requires an approved change yet.")).toBeInTheDocument();
   });
 
+  // THE SUBSET IS THE PRESSED CHIP NOW (redesign Task 11, 6.2; Receta L): the
+  // sentence that named it ("Mostrando 1 de 4: cambios de tipo emergencia.")
+  // became the type and state chips on the same keys, and the kit's count.
   it("names the subset a tile opened, and a switch re-words it", async () => {
     const { container } = mount(<ChangesPage />, "/changes?type=emergency");
     await screen.findByText("Reiniciar el nodo caído del clúster");
-    expect(screen.getByText(/^Mostrando 1 de 4: cambios de tipo emergencia\./)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Mostrar todos los cambios" })).toHaveAttribute("href", "/changes");
+    const types = screen.getByRole("combobox", { name: "Tipo" });
+    expect(types).toHaveValue("emergency");
+    expect(within(types).getByRole("option", { name: "Emergencia (1)" })).toBeInTheDocument();
+    expect(screen.getByText("Mostrando 1 de 4")).toBeInTheDocument();
+    expect(within(types).getByRole("option", { name: "Todos los tipos" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Mostrar" })).getByRole("button", { name: "Todos" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.queryByText("Actualizar firmware del conmutador")).not.toBeInTheDocument();
     expectNoEnglish(container);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText(/^Showing 1 of 4: emergency changes\./)).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 4")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Type" })).toHaveValue("emergency");
+    expect(screen.getByRole("option", { name: "Emergency (1)" })).toBeInTheDocument();
   });
 
   it("words the open view, a state view and an empty view", async () => {
     mount(<ChangesPage />, "/changes?state=open");
     await screen.findByText("Actualizar firmware del conmutador");
-    expect(screen.getByText(/^Mostrando 3 de 4: cambios abiertos\./)).toBeInTheDocument();
+    expect(screen.getByText("Mostrando 3 de 4")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Abiertos/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("words a state view with the state as the page words it, and the empty view", async () => {
     const { container } = mount(<ChangesPage />, "/changes?state=submitted&type=emergency");
-    expect(await screen.findByText(/Ningún cambio coincide con esta vista: cambios en estado enviado, cambios de tipo emergencia\./)).toBeInTheDocument();
+    expect(await screen.findByText("Nada coincide con estos filtros.")).toBeInTheDocument();
+    // The state is the chip with a list now, its option with its count (0 under this type).
+    expect(screen.getByRole("combobox", { name: "Estado" })).toHaveValue("submitted");
+    expect(screen.getByRole("option", { name: "Enviado (0)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quitar filtros" })).toBeInTheDocument();
     expectNoEnglish(container);
     act(() => setActiveLanguage("en"));
-    expect(screen.getByText(/No change matches this view: changes in state submitted, emergency changes\./)).toBeInTheDocument();
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
   });
 
   it("words the empty list", async () => {
@@ -327,7 +348,8 @@ describe("ApprovalQueue in Spanish", () => {
   it("words an empty queue", async () => {
     mockUseApi.mockReturnValue(api({ listChanges: vi.fn().mockResolvedValue([DRAFT]) }));
     const { container } = mount(<ApprovalQueue />);
-    expect(await screen.findByText("No hay cambios pendientes de aprobación.")).toBeInTheDocument();
+    // The queue's empty sentence (redesign Task 11, 6.2).
+    expect(await screen.findByText("Nada espera tu aprobación.")).toBeInTheDocument();
     expectNoEnglish(container);
   });
 
@@ -363,7 +385,8 @@ describe("ChangeCalendar in Spanish", () => {
     expect(screen.getAllByText("conflicto").length).toBe(2);
     expect(screen.getByText("Aprobado")).toBeInTheDocument();
     expect(screen.getByText("Emergencia")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Todos los cambios" })).toHaveAttribute("href", "/changes");
+    // The way back to the list is the module's own links now (redesign Task 11, 6.2).
+    expect(screen.getByRole("link", { name: "Cambios" })).toHaveAttribute("href", "/changes");
     expectNoEnglish(container);
 
     act(() => setActiveLanguage("en"));
@@ -414,38 +437,50 @@ describe("ChangeCalendar in Spanish", () => {
 });
 
 describe("ChangeDetail in Spanish", () => {
-  function renderDetail() {
+  // In the shell's half of the tab title (`TitleShell`): `useRecordTitle`
+  // does nothing outside it (pre-flight W-I3). `query` opens a tab: the
+  // approvals and the linked actions are their own (redesign Task 11, 6.2).
+  function renderDetail(query = "") {
     return mount(
-      <Routes>
-        <Route path="/changes/:changeId" element={<ChangeDetail />} />
-      </Routes>,
-      `/changes/${CHANGE_ID}`,
+      <TitleShell page="shell.nav.item.changes">
+        <Routes>
+          <Route path="/changes/:changeId" element={<ChangeDetail />} />
+        </Routes>
+      </TitleShell>,
+      `/changes/${CHANGE_ID}${query}`,
     );
   }
 
   it("words the facts, the lifecycle and the empty tables, and follows a switch", async () => {
+    const user = userEvent.setup();
     const { container } = renderDetail();
     expect(await screen.findByRole("heading", { name: "Actualizar firmware del conmutador" })).toBeInTheDocument();
-    expect(screen.getByText("Todo lo registrado sobre una solicitud de cambio.")).toBeInTheDocument();
-    for (const label of ["Estado", "Tipo", "Riesgo", "Ventana", "Registrado"]) {
+    // The state is the head's pill now (Receta F), so "Estado" is no longer a caption.
+    for (const label of ["Tipo", "Riesgo", "Ventana", "Registrado"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(screen.getByText("Borrador")).toBeInTheDocument();
     expect(screen.getByText("Estándar")).toBeInTheDocument();
     expect(screen.getByText("Plan de reversión")).toBeInTheDocument();
-    expect(screen.getByText("Ciclo de vida")).toBeInTheDocument();
+    // The decisions are the head's now (fix round 1, M3: the brief's DetailHead), so no "Ciclo de vida" panel.
     expect(screen.getByRole("button", { name: "Enviar a aprobación" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancelar cambio" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exportar evidencias" })).toBeInTheDocument();
-    expect(await screen.findByText("Aún no hay decisiones de aprobación.")).toBeInTheDocument();
-    expect(await screen.findByText("No hay acciones vinculadas.")).toBeInTheDocument();
-    expect(document.title).toBe("Actualizar firmware del conmutador · Cambio · ITMS");
+    // The shell composes the tab title: the record, then the rail's label (redesign Task 2).
+    await waitFor(() => expect(document.title).toBe("Actualizar firmware del conmutador · Cambios · Novieri RMM"));
     expectNoEnglish(container);
+    // The approvals and the linked actions are their own tabs (redesign Task 11, 6.2).
+    await user.click(screen.getByRole("tab", { name: "Historial de aprobaciones" }));
+    expect(await screen.findByText("Aún no hay decisiones de aprobación.")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Acciones vinculadas" }));
+    expect(await screen.findByText("No hay acciones vinculadas.")).toBeInTheDocument();
+    expectNoEnglish(container);
+    await user.click(screen.getByRole("tab", { name: "Resumen" }));
 
     act(() => setActiveLanguage("en"));
     expect(screen.getByRole("button", { name: "Submit for approval" })).toBeInTheDocument();
     expect(screen.getByText("Standard")).toBeInTheDocument();
-    expect(document.title).toBe("Actualizar firmware del conmutador · Change · ITMS");
+    expect(document.title).toBe("Actualizar firmware del conmutador · Changes · Novieri RMM");
   });
 
   it("words the approval history, with the decision agreeing with its noun", async () => {
@@ -458,7 +493,7 @@ describe("ChangeDetail in Spanish", () => {
         ]),
       }),
     );
-    const { container } = renderDetail();
+    const { container } = renderDetail("?tab=approvals");
     expect(await screen.findByText("Aprobada")).toBeInTheDocument();
     expect(screen.getByText("Rechazada")).toBeInTheDocument();
     expect(screen.getByText("sí")).toBeInTheDocument();
@@ -549,7 +584,7 @@ describe("ChangeDetail in Spanish", () => {
         ]),
       }),
     );
-    const { container } = renderDetail();
+    const { container } = renderDetail("?tab=links");
     const table = (await screen.findByText("run-1")).closest("table") as HTMLElement;
     const select = screen.getByLabelText("Tipo de acción");
     expect(within(table).getByText("Ejecución de parches")).toBeInTheDocument();
@@ -576,10 +611,11 @@ describe("ChangeDetail in Spanish", () => {
   it("names the unchosen deployment, and the picker hint says where deployments come from", async () => {
     const user = userEvent.setup();
     mockUseApi.mockReturnValue(api({ listDeployments: vi.fn().mockResolvedValue([]), listPackages: vi.fn().mockResolvedValue([]) }));
-    const { container } = renderDetail();
+    const { container } = renderDetail("?tab=links");
     await user.selectOptions(await screen.findByLabelText("Tipo de acción"), "deployment");
     await user.click(screen.getByRole("combobox", { name: "Despliegue" }));
-    expect(await screen.findByText(/Flota → Despliegue de software/)).toBeInTheDocument();
+    // The page by its rail label now: «Software» (coordinator, 2026-11-25).
+    expect(await screen.findByText(/cuando se crea uno en Software;/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Buscar despliegues…")).toBeInTheDocument();
     expectNoEnglish(container);
     await user.click(screen.getByRole("button", { name: "Vincular" }));
@@ -600,7 +636,7 @@ describe("ChangeDetail in Spanish", () => {
         ]),
       }),
     );
-    renderDetail();
+    renderDetail("?tab=links");
     await user.selectOptions(await screen.findByLabelText("Tipo de acción"), "deployment");
     await user.click(screen.getByRole("combobox", { name: "Despliegue" }));
     const option = await screen.findByRole("option", { name: /Firmware del conmutador 2\.1/ });
@@ -615,7 +651,7 @@ describe("ChangeDetail in Spanish", () => {
   it("words the provisioning run picker", async () => {
     const user = userEvent.setup();
     mockUseApi.mockReturnValue(api({ listProvisionRuns: vi.fn().mockResolvedValue([]), listProvisionProfiles: vi.fn().mockResolvedValue([]) }));
-    renderDetail();
+    renderDetail("?tab=links");
     await user.selectOptions(await screen.findByLabelText("Tipo de acción"), "provision_run");
     expect(screen.getByPlaceholderText("Buscar ejecuciones de aprovisionamiento…")).toBeInTheDocument();
   });
@@ -810,8 +846,9 @@ describe("label tables built outside React", () => {
     );
     expect(run?.label).toBe("prof1");
     expect(run?.sublabel).toMatch(/^completada · /);
-    expect(deploymentPickerEmptyHint()).toMatch(/Flota → Despliegue de software/);
-    expect(provisionRunPickerEmptyHint()).toMatch(/Flota → Aprovisionamiento/);
+    // Each page by where the console now draws it: the rail's «Software», Administración → Imágenes de sistema.
+    expect(deploymentPickerEmptyHint()).toMatch(/cuando se crea uno en Software;/);
+    expect(provisionRunPickerEmptyHint()).toMatch(/Administración → Imágenes de sistema/);
     setActiveLanguage("en");
     expect(deploymentPickerEmptyHint()).toBe(translate("change.picker.deploymentEmptyHint"));
     expect(deploymentPickerOptions([deployment], [pkg], "UTC")[0]?.sublabel).toMatch(/^complete · /);

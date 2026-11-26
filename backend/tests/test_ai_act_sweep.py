@@ -32,10 +32,11 @@ from app.models import AiAction, AiMessage, AiSession, AuditEvent, Organization
 from tests.conftest import PgCluster
 from tests.health_action_fixtures import seed_approved_action
 from tests.health_fixtures import seed_device, seed_org
+from tests.redis_support import TEST_REDIS_URL
 from tests.test_ai_admin_migration import seed_session
 
 NOW = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 class _World:

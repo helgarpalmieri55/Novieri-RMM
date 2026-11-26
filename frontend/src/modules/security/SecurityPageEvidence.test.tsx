@@ -109,7 +109,10 @@ describe("the evidence view is addressable (A62)", () => {
       ),
     );
     expect(screen.getByLabelText("Search by username")).toHaveValue("opsadmin");
-    expect(screen.getByLabelText("Filter by event type")).toHaveValue("logon_failure");
+    // The event type is chips now (redesign plan, O3 3.10): the one in force is pressed.
+    expect(
+      within(screen.getByRole("group", { name: "Filter by event type" })).getByRole("button", { name: "Logon failure" }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("radio", { name: /24h/ })).toHaveAttribute("aria-checked", "true");
   });
 
@@ -119,7 +122,9 @@ describe("the evidence view is addressable (A62)", () => {
     await screen.findByRole("heading", { name: "Security logs" });
 
     await user.type(screen.getByLabelText("Search by username"), "opsadmin");
-    await user.selectOptions(screen.getByLabelText("Filter by event type"), "logon_failure");
+    await user.click(
+      within(screen.getByRole("group", { name: "Filter by event type" })).getByRole("button", { name: "Logon failure" }),
+    );
     await user.click(screen.getByRole("radio", { name: /24h/ }));
 
     expect(currentUrl).toContain("username=opsadmin");
@@ -165,9 +170,10 @@ describe("the time-range control exposes its selection (A59)", () => {
     renderPage({}, "/security?hours=24");
     // A check glyph on the selected option, so a purple fill is not the only
     // difference between "24h" and "7d" for a reader who cannot see the fill.
+    // The kit's chip check (DESIGN.md, "Chips"; O3 polish) in place of a typed ✓.
     const selected = await screen.findByRole("radio", { name: /24h/ });
-    expect(selected.textContent).toContain("✓");
-    expect(screen.getByRole("radio", { name: /7d/ }).textContent).not.toContain("✓");
+    expect(selected.querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("radio", { name: /7d/ }).querySelector("svg")).toBeNull();
   });
 
   it("is one tab stop, and the arrow keys move within it", async () => {
@@ -461,7 +467,10 @@ describe("the stat tiles open the search behind them", () => {
         expect.objectContaining({ event_type: "logon_failure" }),
       ),
     );
-    expect(screen.getByLabelText("Filter by event type")).toHaveValue("logon_failure");
+    // The event type is chips now (redesign plan, O3 3.10): the one in force is pressed.
+    expect(
+      within(screen.getByRole("group", { name: "Filter by event type" })).getByRole("button", { name: "Logon failure" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("says WHICH zero a zero is", async () => {
@@ -481,7 +490,8 @@ describe("the stat tiles open the search behind them", () => {
     const values = [...document.querySelectorAll("a.stat-card .stat-value")].map(
       (value) => value.textContent,
     );
-    expect(values).toEqual(["—", "—", "—"]);
+    // The kit's pending tile: the absent mark, never a 0 (clarification 10a).
+    expect(values).toEqual(["n/a", "n/a", "n/a"]);
   });
 
   it("shouts about the failures and nothing else", async () => {

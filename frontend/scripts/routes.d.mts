@@ -8,3 +8,6 @@ export declare const ROUTES: string[];
 export declare const OPEN_DISCLOSURES: Set<string>;
 /** The client harmony chooses in the top bar (a UUID, `src/fixtures/core.ts`'s `CUSTOMER_ID`). */
 export declare const CHOSEN_CLIENT: string;
+
+/** Routes with no console shell (no `.topbar`); every other route must draw one. */
+export declare const FRAMELESS: Set<string>;

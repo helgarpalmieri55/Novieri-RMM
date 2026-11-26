@@ -1,21 +1,26 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  BrowserRouter,
+  createBrowserRouter,
+  createRoutesFromElements,
   Navigate,
+  Outlet,
   Route,
-  Routes,
+  RouterProvider,
   useLocation,
   useNavigate,
+  type RouteObject,
 } from "react-router-dom";
 import { AppShell } from "./shell/AppShell";
 import { useHealthReading } from "./shell/healthSignal";
 import { useReviewCount } from "./shell/useReviewCount";
+import { RouteError } from "./shell/RouteError";
 import { crumbFor, isPortalOnly, portalCrumbFor, searchDestinations } from "./shell/nav";
+import { newMenuEntries } from "./shell/newMenu";
 import { AreaPage } from "./shell/AreaPage";
 import { searchPrompt, useRecordSearch } from "./shell/recordSearch";
 import { ApiProvider, useApi } from "./lib/ApiContext";
-import { ClientScopeProvider, emptyQueryCache, useEnabledModules } from "./lib/clientScope";
+import { ClientScopeProvider, emptyQueryCache, useClientScope, useEnabledModules } from "./lib/clientScope";
 import { ClientSelector, useClientMark } from "./shell/ClientSelector";
 import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/context";
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
@@ -205,6 +210,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
   });
   const permissions = me.data?.permissions ?? [];
   const modules = useEnabledModules();
+  const { selected } = useClientScope();
+  // The New menu (redesign design §1.2): every entry a real destination, each
+  // gated on the code its page's own create button checks (`shell/newMenu.ts`).
+  const newMenu = useMemo(
+    () =>
+      newMenuEntries({
+        permissions,
+        everywhere: me.data?.permissions_everywhere ?? permissions,
+        clients: me.data?.clients ?? [],
+        selected,
+        modules,
+      }),
+    [permissions, me.data, selected, modules],
+  );
   // The client chosen, for the phone's drawer toggle (operator decision 4).
   const clientMark = useClientMark();
   const navigate = useNavigate();
@@ -333,6 +352,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       modules={modules}
       clientSelector={<ClientSelector />}
       clientMark={clientMark}
+      newMenu={newMenu}
       searchItems={searchItems}
       onSearchQueryChange={setSearchQuery}
       searchPending={records.pending}
@@ -344,7 +364,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
       // string "Operations" on every deployment, for every tenant -- which is
       // also why both UX auditors reported the tenant control as reading
       // "Operations": it was never showing anything else.
-      orgName={org.data?.name ?? (me.data?.org_id ? "\u2026" : "\u2014")}
+      // A name on its way is an ellipsis (also before `/me` answers, which
+      // drew an em dash on every first paint); one absent once both reads
+      // answered is the kit's absent mark (P3 adoption pass: no em dash in UI
+      // text).
+      orgName={
+        org.data?.name ??
+        (me.data?.org_id || me.isPending || org.isPending ? "\u2026" : t("shell.viz.na"))
+      }
       /* THE ASK ROW'S DESTINATION, and it is omitted rather than disabled for
          an operator without `ai.use`: an affordance that opens a 403 is worse
          than one that was never offered. The question travels in the URL so
@@ -570,6 +597,7 @@ export function RequireAuth({ children, bare = false }: { children: React.ReactN
         <AuthAlert text={signOutFailed ? t("shell.app.signOutFailed") : null} />
         <div>
           <Btn
+            wide
             variant="primary"
             label={t("shell.accountMenu.signOut")}
             onClick={() => {
@@ -717,21 +745,22 @@ export function LanguageBridge({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * NOTHING IS AWAITED BEFORE THE FIRST PAINT. `lib/auth.ts`'s `initAuth()` read
- * the OIDC user out of `sessionStorage` before anything rendered; the session
- * is a cookie now, and the one question about it is `/me`, which `RequireAuth`
- * asks behind a loading line. So a run with no backend at all -- the
- * accessibility pass over `/__preview` (`scripts/a11y-browser.mjs`) -- and
- * fixture mode render at once, and no network call can hold the page blank.
+ * THE CONSOLE'S ROUTES, AS A DATA ROUTER (redesign decision D7): the same
+ * `<Route>` elements as before, under one layout route that draws the setup
+ * gate. A data router is what lets a page with unsaved changes block a
+ * navigation (`shell/formKit.tsx`, `useBlocker`). `routes-covered.test.ts`
+ * still reads every `path=` below.
  */
-export default function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <ApiProvider>
-        <LanguageBridge>
-        <BrowserRouter>
-          <SetupGate>
-          <Routes>
+export function appRoutes(): RouteObject[] {
+  return createRoutesFromElements(
+    <Route
+      errorElement={<RouteError />}
+      element={
+        <SetupGate>
+          <Outlet />
+        </SetupGate>
+      }
+    >
         {/* DEV ONLY. Vite substitutes `false` here in a production build, so
           * rollup drops both the route and `preview/PreviewPage` from the
           * bundle. `preview.test.ts` asserts the built assets contain none of
@@ -1621,9 +1650,31 @@ export default function App() {
                 </RequireAuth>
               }
             />
-          </Routes>
-          </SetupGate>
-        </BrowserRouter>
+    </Route>,
+  );
+}
+
+/**
+ * NOTHING IS AWAITED BEFORE THE FIRST PAINT. `lib/auth.ts`'s `initAuth()` read
+ * the OIDC user out of `sessionStorage` before anything rendered; the session
+ * is a cookie now, and the one question about it is `/me`, which `RequireAuth`
+ * asks behind a loading line. So a run with no backend at all -- the
+ * accessibility pass over `/__preview` (`scripts/a11y-browser.mjs`) -- and
+ * fixture mode render at once, and no network call can hold the page blank.
+ */
+export default function App() {
+  // Built once per mount, from the URL the page was opened at. Per mount,
+  // not a module singleton, on purpose: `App.portalMeCensus.test.tsx` mounts
+  // `<App/>` at a new URL in each case. Under `StrictMode` (`main.tsx`) the
+  // development build mounts twice and builds two routers; the discarded
+  // one keeps its `popstate` listener until the page unloads. Accepted: it
+  // is development only, and production mounts once.
+  const [router] = useState(() => createBrowserRouter(appRoutes()));
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ApiProvider>
+        <LanguageBridge>
+          <RouterProvider router={router} />
         </LanguageBridge>
       </ApiProvider>
     </QueryClientProvider>

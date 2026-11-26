@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
+import { renderPage } from "../../../test/renderPage";
 import type { ApiClient, Me } from "../../../lib/api";
 import { DeviceAssignedTo, PersonLinkForUser } from "../links";
 import { PersonPage } from "../PersonPage";
@@ -185,13 +186,95 @@ describe("PersonPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Maria Garcia" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "FIN-LT-042" })).toHaveAttribute("href", "/devices/d1");
-    expect(screen.getByRole("link", { name: "Slack" })).toHaveAttribute("href", "/subscriptions/sub1");
     expect(screen.getByText("From who signs in")).toBeInTheDocument();
-    expect(screen.getByText("Hidden: you can't view tickets.")).toBeInTheDocument();
     expect(screen.getByText("The portal only")).toBeInTheDocument();
+    // What they hold is in tabs now (redesign Task 11, 6.7; Receta F): the
+    // seats under Licences, the tickets under their own.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Licences and subscriptions" }));
+    expect(screen.getByRole("link", { name: "Slack" })).toHaveAttribute("href", "/subscriptions/sub1");
+    expect(screen.queryByRole("button", { name: "Release" })).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Tickets" }));
+    expect(screen.getByText("Hidden: you can't view tickets.")).toBeInTheDocument();
     // Read-only: no checklist or release controls.
     expect(screen.queryByRole("button", { name: /Start/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Release" })).toBeNull();
+  });
+
+  it("puts the tab in the URL, and an unknown tab opens the default", async () => {
+    mockUseApi.mockReturnValue(api({ getPerson: vi.fn().mockResolvedValue(detail()) }, ["people.read"]));
+    const { router } = renderPage("/people/p1?tab=licenses", <PersonPage />, "/people/:personId");
+    expect(await screen.findByRole("tab", { name: "Licences and subscriptions" })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(screen.getByRole("tab", { name: "History" }));
+    expect(router.state.location.search).toBe("?tab=history");
+    await act(() => router.navigate("/people/p1?tab=nope"));
+    expect(await screen.findByRole("tab", { name: "Computers" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("reloads on the tab it was left on", async () => {
+    mockUseApi.mockReturnValue(api({ getPerson: vi.fn().mockResolvedValue(detail()) }, ["people.read"]));
+    renderPage("/people/p1?tab=history", <PersonPage />, "/people/:personId");
+    expect(await screen.findByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("No checklist has finished yet.")).toBeInTheDocument();
+  });
+
+  it("leads each tile to the tab its number lives on", async () => {
+    mockUseApi.mockReturnValue(api({ getPerson: vi.fn().mockResolvedValue(detail()) }, ["people.read"]));
+    renderPage("/people/p1", <PersonPage />, "/people/:personId");
+    await screen.findByRole("heading", { level: 1, name: "Maria Garcia" });
+    expect(screen.getByRole("link", { name: /Computers\s*1/ })).toHaveAttribute("href", "/people/p1");
+    expect(screen.getByRole("link", { name: /Subscription seats\s*1/ })).toHaveAttribute("href", "/people/p1?tab=licenses");
+    expect(screen.getByRole("link", { name: /Licences\s*0/ })).toHaveAttribute("href", "/people/p1?tab=licenses");
+  });
+
+  // GENERAL RULING 13: a Save on an untouched person sends nothing (an
+  // unchanged PATCH is a false audit entry); it closes.
+  it("sends nothing when the person is saved untouched (ruling 13)", async () => {
+    const user = userEvent.setup();
+    const updatePerson = vi.fn().mockResolvedValue(MARIA);
+    mockUseApi.mockReturnValue(
+      api({ getPerson: vi.fn().mockResolvedValue(detail()), updatePerson }, ["people.read", "people.manage"]),
+    );
+    renderPage("/people/p1", <PersonPage />, "/people/:personId");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit person" });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(updatePerson).not.toHaveBeenCalled();
+  });
+
+  // GENERAL RULING 12: the person is the route's, and another person under the
+  // same route does not remount the page by itself; an edit typed for one must
+  // never be saved onto the next.
+  it("drops an edit typed for one person when the page moves to another (ruling 12)", async () => {
+    const user = userEvent.setup();
+    const ANA = { ...MARIA, id: "p2", display_name: "Ana Ruiz", email: "ana@corp.example" };
+    const getPerson = vi.fn((id: string) =>
+      Promise.resolve(id === "p2" ? detail({ person: (({ device_count: _c, ...rest }) => rest)(ANA) }) : detail()),
+    );
+    const updatePerson = vi.fn().mockResolvedValue(ANA);
+    mockUseApi.mockReturnValue(api({ getPerson, updatePerson }, ["people.read", "people.manage"]));
+    const { router } = renderPage("/people/p1", <PersonPage />, "/people/:personId");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit person" });
+    await user.clear(within(dialog).getByLabelText("Name"));
+    await user.type(within(dialog).getByLabelText("Name"), "Typed for Maria");
+    await act(() => router.navigate("/people/p2"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Ana Ruiz" })).toBeInTheDocument();
+    // The dialog went with Maria's page; Ana's opens with Ana's values.
+    expect(screen.queryByDisplayValue("Typed for Maria")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const again = await screen.findByRole("dialog", { name: "Edit person" });
+    expect(within(again).getByLabelText("Name")).toHaveValue("Ana Ruiz");
+    await user.click(within(again).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(updatePerson).not.toHaveBeenCalled();
+  });
+
+  it("names the record in the browser tab", async () => {
+    mockUseApi.mockReturnValue(api({ getPerson: vi.fn().mockResolvedValue(detail()) }, ["people.read"]));
+    renderPage("/people/p1", <PersonPage />, "/people/:personId", { page: "shell.nav.page.person" });
+    await screen.findByRole("heading", { level: 1, name: "Maria Garcia" });
+    await waitFor(() => expect(document.title).toBe("Maria Garcia · Person · Novieri RMM"));
   });
 
   it("offers the leaver checklist only with people.offboard", async () => {
@@ -213,7 +296,8 @@ describe("PersonPage", () => {
       "subscriptions.manage",
     ]);
     mockUseApi.mockReturnValue(client);
-    renderAt(<PersonPage />, "/people/:personId", "/people/p1");
+    // The seats are on the Licences tab (redesign Task 11, 6.7).
+    renderAt(<PersonPage />, "/people/:personId", "/people/p1?tab=licenses");
 
     await user.click(await screen.findByRole("button", { name: "Release" }));
     expect(releaseSeat).not.toHaveBeenCalled();
@@ -356,9 +440,86 @@ describe("UnmatchedPage", () => {
       ["people.read", "people.manage"],
     );
     mockUseApi.mockReturnValue(client);
-    renderAt(<UnmatchedPage />, "/people/unmatched", "/people/unmatched");
+    // The seats are one of three types now (redesign Task 11, 6.8): `?kind=seats`.
+    renderAt(<UnmatchedPage />, "/people/unmatched", "/people/unmatched?kind=seats");
     await user.click(await screen.findByRole("button", { name: "Add as a new person" }));
     expect(linkSeatToPerson).toHaveBeenCalledWith("s9", null);
+  });
+
+  const FILLED: UnmatchedOut = {
+    seats: [
+      { seat_id: "s9", subscription_id: "sub1", service_name: "Zoom", assignee_name: "Pat Doe", assignee_email: "pat@corp.example" },
+    ],
+    devices: [
+      { device_id: "d1", hostname: "FIN-LT-042", owner: null, observed_login: null },
+      { device_id: "d2", hostname: null, owner: "Ana", observed_login: "CORP\\ana" },
+    ],
+    allocations: [],
+  };
+
+  it("keeps its filters in the URL, so a filtered view is a link", async () => {
+    mockUseApi.mockReturnValue(api({ listUnmatched: vi.fn().mockResolvedValue(FILLED) }, ["people.read"]));
+    const { router } = renderPage("/people/unmatched?kind=seats", <UnmatchedPage />);
+    expect(await screen.findByRole("table", { name: "Subscription seats" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Subscription seats/ })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: /Licences/ }));
+    expect(router.state.location.search).toContain("kind=licenses");
+    // Computers are the default type: choosing them writes nothing.
+    await userEvent.click(screen.getByRole("button", { name: /Computers/ }));
+    expect(router.state.location.search).toBe("");
+    expect(await screen.findByRole("table", { name: "Computers" })).toBeInTheDocument();
+  });
+
+  it("counts each type from the whole answer, so the three add up to what needs a person", async () => {
+    mockUseApi.mockReturnValue(api({ listUnmatched: vi.fn().mockResolvedValue(FILLED) }, ["people.read"]));
+    renderPage("/people/unmatched", <UnmatchedPage />);
+    expect(await screen.findByRole("table", { name: "Computers" })).toBeInTheDocument();
+    const chips = screen.getByRole("group", { name: "Type" });
+    expect(within(chips).getByRole("button", { name: /Computers/ })).toHaveTextContent("2");
+    expect(within(chips).getByRole("button", { name: /Licences/ })).toHaveTextContent("0");
+    expect(within(chips).getByRole("button", { name: /Subscription seats/ })).toHaveTextContent("1");
+    // One table at a time: the type chosen.
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    expect(screen.getByText("Showing 2 of 2")).toBeInTheDocument();
+  });
+
+  it("says why the list is empty", async () => {
+    mockUseApi.mockReturnValue(api({ listUnmatched: vi.fn().mockResolvedValue(FILLED) }, ["people.read"]));
+    renderPage("/people/unmatched?kind=licenses", <UnmatchedPage />);
+    // A type with nothing in it says so for that type; the other types still have rows.
+    expect(await screen.findByText("Every licence has a person.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  // The default type can be empty while another waits (the wave's critique,
+  // P2): the empty state offers the first type that has rows.
+  it("offers the type that has rows when the one shown is empty", async () => {
+    mockUseApi.mockReturnValue(
+      api({ listUnmatched: vi.fn().mockResolvedValue({ ...FILLED, devices: [] }) }, ["people.read"]),
+    );
+    const { router } = renderPage("/people/unmatched", <UnmatchedPage />);
+    expect(await screen.findByText("Every computer has a person.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "See the subscription seats" }));
+    expect(router.state.location.search).toBe("?kind=seats");
+    expect(await screen.findByRole("table", { name: "Subscription seats" })).toBeInTheDocument();
+  });
+
+  it("assigns a seat to a person as today", async () => {
+    const user = userEvent.setup();
+    const linkSeatToPerson = vi.fn().mockResolvedValue({ ...MARIA });
+    mockUseApi.mockReturnValue(
+      api(
+        { listUnmatched: vi.fn().mockResolvedValue(FILLED), listPeople: vi.fn().mockResolvedValue([MARIA]), linkSeatToPerson },
+        ["people.read", "people.manage"],
+      ),
+    );
+    renderPage("/people/unmatched?kind=seats", <UnmatchedPage />);
+    await user.click(await screen.findByRole("button", { name: "Link to…" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("combobox", { name: "Person" }));
+    await user.click(await within(dialog).findByRole("option", { name: /Maria Garcia/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Link" }));
+    await waitFor(() => expect(linkSeatToPerson).toHaveBeenCalledWith("s9", "p1"));
   });
 });
 

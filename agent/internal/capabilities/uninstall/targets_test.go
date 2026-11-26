@@ -18,19 +18,19 @@ func TestTheCredentialsAreNamedAndAllFourAreThere(t *testing.T) {
 }
 
 func TestEachOSRemovesWhatItsInstallerPlaced(t *testing.T) {
-	linux := For("linux", "/usr/local/bin/its-agent", "/var/lib/its-agent")
-	if linux.ServiceName != "its-agent" ||
-		!reflect.DeepEqual(linux.Remove, []string{"/etc/systemd/system/its-agent.service", "/etc/its-agent"}) {
+	linux := For("linux", "/usr/local/bin/novieri-agent", "/var/lib/novieri-agent")
+	if linux.ServiceName != "novieri-agent" ||
+		!reflect.DeepEqual(linux.Remove, []string{"/etc/systemd/system/novieri-agent.service", "/etc/novieri-agent"}) {
 		t.Fatalf("linux targets = %+v", linux)
 	}
-	darwin := For("darwin", "/usr/local/libexec/its-agent", "/var/lib/its-agent")
-	if darwin.ServiceName != "com.toeshee.itsagent" ||
-		!reflect.DeepEqual(darwin.Remove, []string{"/Library/LaunchDaemons/com.toeshee.itsagent.plist", "/var/log/its-agent"}) {
+	darwin := For("darwin", "/usr/local/libexec/novieri-agent", "/var/lib/novieri-agent")
+	if darwin.ServiceName != "com.novieri.rmm.agent" ||
+		!reflect.DeepEqual(darwin.Remove, []string{"/Library/LaunchDaemons/com.novieri.rmm.agent.plist", "/var/log/novieri-agent"}) {
 		t.Fatalf("darwin targets = %+v", darwin)
 	}
-	win := For("windows", `C:\Program Files\ITSuite\its-agent.exe`, `C:\ProgramData\ITSuite\agent`)
-	if win.ServiceName != "its-agent" || len(win.Remove) != 0 ||
-		!reflect.DeepEqual(win.RemoveIfEmpty, []string{`C:\Program Files\ITSuite`}) {
+	win := For("windows", `C:\Program Files\NovieriRMM\novieri-agent.exe`, `C:\ProgramData\NovieriRMM\agent`)
+	if win.ServiceName != "novieri-agent" || len(win.Remove) != 0 ||
+		!reflect.DeepEqual(win.RemoveIfEmpty, []string{`C:\Program Files\NovieriRMM`}) {
 		t.Fatalf("windows targets = %+v", win)
 	}
 }
@@ -38,8 +38,8 @@ func TestEachOSRemovesWhatItsInstallerPlaced(t *testing.T) {
 func TestTheHelperRefusesTargetsThatCouldNotBeAnAgent(t *testing.T) {
 	good := t.TempDir()
 	cases := map[string]Targets{
-		"relative data dir": {DataDir: "data", Binary: filepath.Join(good, "its-agent")},
-		"root data dir":     {DataDir: string(filepath.Separator), Binary: filepath.Join(good, "its-agent")},
+		"relative data dir": {DataDir: "data", Binary: filepath.Join(good, "novieri-agent")},
+		"root data dir":     {DataDir: string(filepath.Separator), Binary: filepath.Join(good, "novieri-agent")},
 		"binary not ours":   {DataDir: good, Binary: filepath.Join(good, "bash")},
 	}
 	for name, tc := range cases {
@@ -47,7 +47,7 @@ func TestTheHelperRefusesTargetsThatCouldNotBeAnAgent(t *testing.T) {
 			t.Errorf("%s: accepted %+v", name, tc)
 		}
 	}
-	if err := checkTargets(Targets{DataDir: good, Binary: filepath.Join(good, "its-agent")}); err != nil {
+	if err := checkTargets(Targets{DataDir: good, Binary: filepath.Join(good, "novieri-agent")}); err != nil {
 		t.Fatalf("refused a real layout: %v", err)
 	}
 }

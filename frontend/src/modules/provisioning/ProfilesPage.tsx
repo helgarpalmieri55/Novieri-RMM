@@ -12,37 +12,48 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { Me } from "../../lib/api";
-import { useSearchParams } from "react-router-dom";
 import { useApi } from "../../lib/ApiContext";
 import { Icon } from "../../shell/icons";
 import { useOsImages, useProvisionProfiles } from "./api";
 import { imagePickerOptions, nameForOption } from "./pickerOptions";
 import { ProfileEditor } from "./ProfileEditor";
-import type { ProvisionProfile } from "./types";
 import { ProvisioningPageNav } from "./provisioningNav";
 import {
   Btn,
-  FilterBar,
+  FilterChips,
+  ListEmpty,
+  ListToolbar,
   PageHead,
   Panel,
   QueryState,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
+  useEditParam,
+  useNewParam,
+  useUrlFilters,
 } from "../../shell/components";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useRecordTitle } from "../../shell/title";
 
 export function ProfilesPage() {
   const t = useT();
+  // A sub-page without a rail entry names itself in the tab, as its h1 does
+  // (general ruling 1b): "<this page> · <rail entry> · Novieri RMM".
+  useRecordTitle(t("provisioning.profiles.title"));
   const api = useApi();
-  const [editing, setEditing] = useState<ProvisionProfile | "new" | null>(null);
+  // The editor opens from the URL: `?new=profile` (decision D8) for a new
+  // profile, `?edit=<id>` for an existing one, so either is a link. Closing
+  // either undoes its opening (Back from the entry `start` added).
+  const creating = useNewParam("profile");
+  const edit = useEditParam("profile");
   // In the URL, so the "Enabled" tile opens the rows it counted.
-  const [params, setParams] = useSearchParams();
-  const enabledFilter = params.get("enabled") ?? "";
+  const filters = useUrlFilters(["enabled"] as const);
+  const enabledFilter = filters.values.enabled;
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
@@ -58,6 +69,9 @@ export function ProfilesPage() {
   const images = useOsImages();
   const imageOptions = imagePickerOptions(images.data ?? []);
   const items = profiles.data ?? [];
+  // The tiles count the list: until it answers, or once it failed, each is the
+  // kit's pending tile, the absent mark, with no zero sentence (clarification 10a).
+  const noData = !profiles.data;
   const enabledCount = items.filter((profile) => profile.enabled).length;
   // What the total is made of, for the first tile's second line: how many
   // distinct images these profiles lay down.
@@ -68,6 +82,12 @@ export function ProfilesPage() {
       : enabledFilter === "false"
         ? items.filter((profile) => !profile.enabled)
         : items;
+  // What the editor edits: a new profile, the one `?edit=` names once the list
+  // has it, or nothing. Only for someone who may manage profiles, whatever
+  // the URL asks: a courtesy, the server checks (invariant 6).
+  const edited = items.find((profile) => profile.id === edit.id);
+  const editing = !canManage ? null : creating.open ? ("new" as const) : (edited ?? null);
+  const closeEditor = creating.open ? creating.close : edit.close;
 
   return (
     <div>
@@ -76,7 +96,7 @@ export function ProfilesPage() {
         description={t("provisioning.profiles.description")}
         actions={
           canManage ? (
-            <Btn label={t("provisioning.profiles.newProfile")} icon="plus" variant="primary" onClick={() => setEditing("new")} />
+            <Btn label={t("provisioning.profiles.newProfile")} icon="plus" variant="primary" onClick={creating.start} />
           ) : undefined
         }
       />
@@ -95,6 +115,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileProfiles")}
           value={String(items.length)}
+          pending={noData}
           icon="file-text"
           to="/provisioning/profiles"
           tone="neutral"
@@ -108,6 +129,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileEnabled")}
           value={String(enabledCount)}
+          pending={noData}
           icon="circle-check"
           to="/provisioning/profiles?enabled=true"
           tone="green"
@@ -121,6 +143,7 @@ export function ProfilesPage() {
         <StatCard
           label={t("provisioning.profiles.tileDisabled")}
           value={String(items.length - enabledCount)}
+          pending={noData}
           icon="minus"
           to="/provisioning/profiles?enabled=false"
           tone="neutral"
@@ -134,36 +157,39 @@ export function ProfilesPage() {
       </StatsGrid>
 
       <Panel bare>
-        <FilterBar>
-          <select
-            className="select-field"
-            value={enabledFilter}
-            onChange={(event) => {
-              const next = new URLSearchParams(params);
-              if (event.target.value === "") next.delete("enabled");
-              else next.set("enabled", event.target.value);
-              setParams(next);
-            }}
-            aria-label={t("provisioning.profiles.filterAria")}
-          >
-            <option value="">{t("provisioning.profiles.allProfiles")}</option>
-            <option value="true">{t("provisioning.profiles.tileEnabled")}</option>
-            <option value="false">{t("provisioning.profiles.tileDisabled")}</option>
-          </select>
-          <span className="filter-spacer" />
-        </FilterBar>
-        <QueryState
-          loading={profiles.isLoading}
-          error={profiles.error}
-          empty={visible.length === 0}
-          emptyLabel={
-            items.length === 0
-              ? t("provisioning.profiles.emptyNone")
-              : t("provisioning.profiles.emptyFiltered")
+        <ListToolbar
+          chips={
+            // No counts on the chips (redesign plan, Task 9, 4.8): the tiles
+            // above carry them.
+            <FilterChips
+              label={t("provisioning.profiles.filterAria")}
+              options={[
+                { value: "", label: t("provisioning.profiles.allProfiles") },
+                { value: "true", label: t("provisioning.profiles.tileEnabled") },
+                { value: "false", label: t("provisioning.profiles.tileDisabled") },
+              ]}
+              value={enabledFilter}
+              onChange={(value) => filters.set("enabled", value)}
+            />
           }
-          emptyIcon="file-text"
-        >
-          <Table>
+          // No count before the list has answered: "Showing 0 of 0" would be an invented zero.
+          end={profiles.data ? <ShowingCount shown={visible.length} total={items.length} /> : null}
+        />
+        <QueryState loading={profiles.isLoading} error={profiles.error} empty={false} emptyLabel="">
+          {visible.length === 0 ? (
+            <ListEmpty
+              filtered={filters.active}
+              onClear={filters.clear}
+              nothingYet={t("provisioning.profiles.emptyNone")}
+              icon="file-text"
+              action={
+                canManage ? (
+                  <Btn label={t("provisioning.profiles.newProfile")} icon="plus" small onClick={creating.start} />
+                ) : undefined
+              }
+            />
+          ) : (
+          <Table label={t("provisioning.profiles.title")}>
             <thead>
               <tr>
                 <Th>{t("provisioning.profiles.colName")}</Th>
@@ -210,12 +236,13 @@ export function ProfilesPage() {
                     />
                   </Td>
                   <Td>
-                    {canManage && <Btn label={t("provisioning.profiles.edit")} icon="edit" small onClick={() => setEditing(profile)} />}
+                    {canManage && <Btn label={t("provisioning.profiles.edit")} icon="edit" small onClick={() => edit.start(profile.id)} />}
                   </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
+          )}
         </QueryState>
       </Panel>
 
@@ -245,7 +272,7 @@ export function ProfilesPage() {
       <ProfileEditor
         key={editing === "new" ? "new" : (editing?.id ?? "none")}
         profile={editing}
-        onClose={() => setEditing(null)}
+        onClose={closeEditor}
       />
     </div>
   );

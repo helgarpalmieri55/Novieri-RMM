@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
@@ -29,9 +29,21 @@ import { ownerName, ownerPickerEmptyHint, ownerPickerOptions } from "./pickerOpt
 import { initialsOf, personIndex } from "../../lib/people";
 import { billingCyclePhrase, statusKind } from "./subscriptionState";
 import type { SubscriptionOut } from "./types";
-import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import {
+  Btn,
+  ClientContext,
+  DetailHead,
+  FormSection,
+  Panel,
+  QueryState,
+  SaveBar,
+  StatsGrid,
+  UnsavedGuard,
+  useDraft,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { KV, Person } from "../../shell/viz";
+import { useRecordTitle } from "../../shell/title";
+import { KV, Person, Tile } from "../../shell/viz";
 import { PersonLink } from "../people/links";
 
 /** The glyph and kind an event in the history carries. */
@@ -90,7 +102,18 @@ function emailAddress(value: string): string | null {
 // The seats panel below has WORKING Assign/Release controls wired to the
 // real mutation hooks -- a read-only allocations table was the Phase-11
 // lesson (top follow-up on that PR), not to be repeated here.
+//
+// ONE RECORD PER MOUNT (the coordinator's ruling 12): going from one
+// subscription to another keeps this route mounted, and a record already read
+// draws at once, so an unsaved terms draft or a half-typed assignee would
+// follow to the next record and Save would write it there. Keyed by the id,
+// the next record starts from its own values.
 export function SubscriptionDetail() {
+  const { subscriptionId } = useParams<{ subscriptionId: string }>();
+  return <SubscriptionRecord key={subscriptionId} />;
+}
+
+function SubscriptionRecord() {
   const t = useT();
   const { subscriptionId } = useParams<{ subscriptionId: string }>();
   const api = useApi();
@@ -128,6 +151,11 @@ export function SubscriptionDetail() {
   const [releasing, setReleasing] = useState<{ id: string; name: string } | null>(null);
   // Populated ON SUBMIT, never while typing; held as data and worded at render.
   const [seatAttempt, setSeatAttempt] = useState<Attempt | null>(null);
+
+  // The tab names the record (Receta F): "<Service> · Subscriptions · Novieri RMM".
+  useRecordTitle(subscription.data?.service_name);
+  // The seats held now, from the seats listed below (`null` until they are read).
+  const heldSeats = seats.data ? seats.data.filter((seat) => seat.released_at == null).length : null;
 
   // The operator's own zone (cycle 5). `/me` is already fetched on this route
   // for the permission check, so this costs no request; a null timezone falls
@@ -167,69 +195,89 @@ export function SubscriptionDetail() {
         empty={!subscription.isLoading && !subscription.error && subscription.data == null}
         emptyLabel={t("subscriptions.detail.notFound")}
       >
-        <PageHead
+        {/* ON THE RECORD KIT (redesign plan, Receta F; Task 10, 5.4): the way
+            back to the registry, the service as the title, its status as the
+            head's pill, and its context: the billing cadence and the client
+            (linked to its 360 page). The actions are today's.
+
+            THE CADENCE IS STILL NOT A STATUS (design review M14): it is an
+            attribute of the record, drawn as a `.chip` -- what the ticket page
+            draws its type and queue as -- in the head's context, never a
+            second pill and never in the button row. "Billed monthly" rather
+            than "Monthly", because a bare cadence next to a status still reads
+            like one. */}
+        <DetailHead
+          back={{ to: "/subscriptions", label: t("subscriptions.detail.back") }}
           title={subscription.data?.service_name ?? t("subscriptions.detail.titleFallback")}
-          description={t("subscriptions.detail.description")}
+          status={
+            subscription.data
+              ? {
+                  kind: statusKind(subscription.data.status),
+                  label: humaniseEnum(subscription.data.status, "SubStatus"),
+                }
+              : undefined
+          }
+          context={
+            subscription.data ? (
+              <>
+                <span className="chip">{billingCyclePhrase(subscription.data.billing_cycle)}</span>{" "}
+                <ClientContext clientId={subscription.data.client_id} />
+              </>
+            ) : undefined
+          }
           actions={
-            <>
-              {canManage && (
-                <Button
-                  variant="outline"
+            canManage ? (
+              <>
+                <Btn
+                  label={renew.isPending ? t("subscriptions.detail.recording") : t("subscriptions.detail.recordRenewal")}
+                  icon="repeat"
                   disabled={renew.isPending}
                   onClick={() => setConfirmingRenew(true)}
-                >
-                  {renew.isPending ? t("subscriptions.detail.recording") : t("subscriptions.detail.recordRenewal")}
-                </Button>
-              )}
-              {canManage && (
-                <Button
-                  variant="outline"
+                />
+                <Btn
+                  label={cancel.isPending ? t("subscriptions.detail.cancelling") : t("subscriptions.detail.cancel")}
+                  icon="circle-x"
+                  variant="danger"
                   disabled={cancel.isPending}
                   onClick={() => setConfirmingCancel(true)}
-                >
-                  {cancel.isPending ? t("subscriptions.detail.cancelling") : t("subscriptions.detail.cancel")}
-                </Button>
-              )}
-            </>
+                />
+              </>
+            ) : undefined
           }
         />
 
-        {/* THE STATE AND THE CADENCE BELONG UNDER THE TITLE, NOT IN THE BUTTON
-            ROW.
-
-            Both used to be the first children of `actions`, so `.ph-act` -- a
-            row whose whole job is "the things you can press here" -- opened
-            with a pill and a sentence, neither of which can be pressed, sitting
-            immediately left of "Record renewal" and "Cancel subscription"
-            (design review M14). Every other record page in this console puts
-            its state in a pill row directly under the head:
-            /service-desk/tickets/:id, /portal/tickets/:id, /devices/:id. This
-            is that row, with the same three utilities and the same negative top
-            margin pulling it under the description.
-
-            THE CADENCE IS STILL NOT A STATUS, and that distinction survives the
-            move intact. It was once a second pill of the same shape carrying
-            the muted minus glyph on a live monthly contract -- two pills side by
-            side meaning two different kinds of thing. It is an attribute of the
-            record, so the ticket page's own vocabulary for exactly that applies:
-            `.chip`, which is what /service-desk/tickets/:id draws its type and
-            queue as, beside pills it deliberately does not use for them.
-            "Billed monthly" rather than "Monthly", because a bare cadence next
-            to a status still reads like one.
-
-            `flex items-center` IS GONE WITH THE REASON FOR IT: it was there
-            because `.ph-act` stretches its items, and this row is not
-            `.ph-act`. */}
-        {subscription.data && (
-          <div className="flex flex-wrap items-center gap-2" style={{ margin: "-8px 0 14px" }}>
-            <StatusPill
-              value={subscription.data.status}
-              label={humaniseEnum(subscription.data.status, "SubStatus")}
-              kind={statusKind(subscription.data.status)}
+        {/* THE THREE FIGURES A RENEWAL IS DECIDED ON (Task 10, 5.4): what it
+            costs per cycle, its seats against the ones held, and when it
+            renews. Not links: they are this record's own, and the seats are
+            the table below. Details no longer repeats them (the coordinator's
+            answer on the client 360: Details keeps what is nowhere else). */}
+        {subscription.data ? (
+          <StatsGrid columns={3}>
+            <Tile
+              label={t("subscriptions.detail.tileCost")}
+              value={`${subscription.data.cost_per_cycle} ${subscription.data.currency}`}
+              icon="credit-card"
             />
-            <span className="chip">{billingCyclePhrase(subscription.data.billing_cycle)}</span>
-          </div>
-        )}
+            <Tile
+              label={t("subscriptions.detail.seats")}
+              value={String(subscription.data.seats)}
+              icon="users"
+              sub={heldSeats === null ? undefined : t("subscriptions.detail.tileHeld", { count: heldSeats })}
+            />
+            <Tile
+              label={t("subscriptions.detail.renews")}
+              value={formatDate(subscription.data.renews_at, "UTC")}
+              icon="calendar-event"
+              sub={
+                subscription.data.renews_at
+                  ? subscription.data.auto_renew
+                    ? t("subscriptions.detail.tileAutoRenews")
+                    : t("subscriptions.detail.tileNoAutoRenew")
+                  : t("subscriptions.detail.tileNoDate")
+              }
+            />
+          </StatsGrid>
+        ) : null}
 
         {/* CANCEL IS THE ONE THAT ENDS A CONTRACT. The subject is the service
             name and its cost per cycle, because an estate carries several
@@ -331,11 +379,6 @@ export function SubscriptionDetail() {
                 [t("subscriptions.detail.plan"), subscription.data.plan || <NoValue label={t("subscriptions.detail.noPlan")} />],
                 [t("subscriptions.detail.category"), subscription.data.category || <NoValue label={t("subscriptions.detail.noCategory")} />],
                 [
-                  t("subscriptions.detail.cost"),
-                  <span className="mono">{`${subscription.data.cost_per_cycle} ${subscription.data.currency}`}</span>,
-                ],
-                [t("subscriptions.detail.seats"), <span className="mono">{subscription.data.seats}</span>],
-                [
                   t("subscriptions.detail.owner"),
                   (() => {
                     const owner = ownerName(ownerOptions, subscription.data.owner_user_id);
@@ -351,7 +394,6 @@ export function SubscriptionDetail() {
                   })(),
                 ],
                 [t("subscriptions.detail.started"), formatDate(subscription.data.started_at, "UTC")],
-                [t("subscriptions.detail.renews"), formatDate(subscription.data.renews_at, "UTC")],
                 [t("subscriptions.detail.noticeDays"), <span className="mono">{subscription.data.notice_days}</span>],
                 [t("subscriptions.detail.autoRenew"), subscription.data.auto_renew ? t("subscriptions.detail.yes") : t("subscriptions.detail.no")],
                 [t("subscriptions.detail.paymentRef"), subscription.data.payment_ref ?? <NoValue label={t("subscriptions.detail.noPaymentRef")} />],
@@ -361,7 +403,7 @@ export function SubscriptionDetail() {
         )}
 
         {subscription.data && canManage && subscription.data.status !== "cancelled" && (
-          <RenewalTermsPanel subscription={subscription.data} ownerOptions={ownerOptions} usersLoading={users.isLoading} />
+          <RenewalTermsForm subscription={subscription.data} ownerOptions={ownerOptions} usersLoading={users.isLoading} />
         )}
 
         <Panel title={t("subscriptions.detail.seatsPanel")}>
@@ -540,7 +582,7 @@ export function SubscriptionDetail() {
  * A narrower control that says what it does beats a wide one that invites an
  * edit nobody meant.
  */
-function RenewalTermsPanel({
+function RenewalTermsForm({
   subscription,
   ownerOptions,
   usersLoading,
@@ -552,32 +594,59 @@ function RenewalTermsPanel({
   const t = useT();
   const update = useUpdateSubscriptionMutation();
 
-  const [renewsAt, setRenewsAt] = useState(subscription.renews_at ?? "");
-  const [noticeDaysValue, setNoticeDaysValue] = useState(String(subscription.notice_days));
-  const [autoRenew, setAutoRenew] = useState(subscription.auto_renew);
-  const [ownerUserId, setOwnerUserId] = useState(subscription.owner_user_id ?? "");
+  // ON THE FORM KIT (Receta FO; Task 10, 5.4): the four terms are a draft of
+  // what the server holds, the page's one save bar says when they changed,
+  // and leaving with a change asks first. The button that saved them is gone:
+  // the bar's Save (and Enter in a field) does what it did.
+  const saved = useMemo<Terms>(
+    () => ({
+      renews_at: subscription.renews_at ?? "",
+      notice_days: String(subscription.notice_days),
+      auto_renew: subscription.auto_renew,
+      owner_user_id: subscription.owner_user_id ?? "",
+    }),
+    [subscription.renews_at, subscription.notice_days, subscription.auto_renew, subscription.owner_user_id],
+  );
+  const { draft, setDraft, dirty, discard, markSent } = useDraft(saved);
+  const terms = draft ?? saved;
+  const edit = (patch: Partial<Terms>) => setDraft({ ...terms, ...patch });
   // Populated ON SUBMIT, never while typing; held as data and worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   function submit() {
-    const next: Attempt = { rules: renewalRules, values: { notice_days: noticeDaysValue } };
+    // Nothing changed, nothing to write (the coordinator's ruling 13): an
+    // unchanged PATCH would leave a false entry in the audit log.
+    if (!dirty) return;
+    const next: Attempt = { rules: renewalRules, values: { notice_days: terms.notice_days } };
     setAttempt(next);
-    if (attemptProblems(next).length > 0) return;
+    if (attemptProblems(next).length > 0) {
+      // A stale server error (or saved note) must not hide this attempt's
+      // field problems (the coordinator's ruling 7).
+      update.reset();
+      return;
+    }
 
-    update.mutate({
-      id: subscription.id,
-      body: {
-        // Cleared means "not known" and must travel as null, not as "".
-        renews_at: renewsAt || null,
-        notice_days: Number(noticeDaysValue),
-        auto_renew: autoRenew,
-        owner_user_id: ownerUserId || null,
+    markSent(terms);
+    update.mutate(
+      {
+        id: subscription.id,
+        body: {
+          // Cleared means "not known" and must travel as null, not as "".
+          renews_at: terms.renews_at || null,
+          notice_days: Number(terms.notice_days),
+          auto_renew: terms.auto_renew,
+          owner_user_id: terms.owner_user_id || null,
+        },
       },
-    });
+      // The save failed: the change is still unsaved, and a refetch must not replace it.
+      { onError: () => markSent(null) },
+    );
   }
 
   return (
-    <Panel title={t("subscriptions.detail.termsTitle")}>
+    <Form onSubmit={submit}>
+      <UnsavedGuard dirty={dirty} />
+      <FormSection title={t("subscriptions.detail.termsTitle")} icon="calendar-event">
       {/* ONE MEASURE FOR THE WHOLE FORM. The kit caps a `.field` at 560px, so
           "Renews on" and "Notice period" sat at that width while `EntityPicker`
           -- which carries no cap -- ran the full 1078px of the panel, and the
@@ -587,14 +656,13 @@ function RenewalTermsPanel({
           drops the `.field` cap and this one goes with it, since `max-width` on
           the wrapper cannot make anything wider than its column. `Form` does not
           forward `style`; hence the wrapper rather than a prop. */}
-      <Form onSubmit={submit}>
         <div style={{ maxWidth: 560 }}>
           <Field label={t("subscriptions.detail.renewsOn")}>
             <input
               type="date"
               className={inputClass}
-              value={renewsAt}
-              onChange={(e) => setRenewsAt(e.target.value)}
+              value={terms.renews_at}
+              onChange={(e) => edit({ renews_at: e.target.value })}
             />
           </Field>
           <Field label={t("subscriptions.common.noticePeriodDays")}>
@@ -604,8 +672,8 @@ function RenewalTermsPanel({
               max={365}
               step={1}
               className={inputClass}
-              value={noticeDaysValue}
-              onChange={(e) => setNoticeDaysValue(e.target.value)}
+              value={terms.notice_days}
+              onChange={(e) => edit({ notice_days: e.target.value })}
             />
           </Field>
           {/* THE DATE, READ BACK IN THE CONSOLE'S OWN FORMAT -- the same echo
@@ -631,16 +699,16 @@ function RenewalTermsPanel({
               "Renews" row above: `renews_at` is a calendar DATE, not an
               instant, so rendering it through a zone would move it a day for
               anyone west of Greenwich. */}
-          {renewsAt !== "" ? (
+          {terms.renews_at !== "" ? (
             <p className="note" style={{ marginBottom: 12 }}>
-              {t("subscriptions.common.renewsOn", { date: formatDate(`${renewsAt}T00:00:00Z`, "UTC") })}
+              {t("subscriptions.common.renewsOn", { date: formatDate(`${terms.renews_at}T00:00:00Z`, "UTC") })}
             </p>
           ) : null}
           <label className="flex items-center gap-2" style={{ marginBottom: 12 }}>
             <input
               type="checkbox"
-              checked={autoRenew}
-              onChange={(e) => setAutoRenew(e.target.checked)}
+              checked={terms.auto_renew}
+              onChange={(e) => edit({ auto_renew: e.target.checked })}
             />
             {t("subscriptions.common.renewsAutomatically")}
           </label>
@@ -650,22 +718,39 @@ function RenewalTermsPanel({
             loading={usersLoading}
             emptyHint={ownerPickerEmptyHint()}
             placeholder={t("subscriptions.common.searchPeople")}
-            value={ownerUserId}
-            onChange={setOwnerUserId}
+            value={terms.owner_user_id}
+            onChange={(value) => edit({ owner_user_id: value })}
           />
           <p className="note" style={{ marginBottom: 12 }}>
             {t("subscriptions.detail.termsNote")}
           </p>
-          <FormActions
-            label={t("subscriptions.detail.saveTerms")}
-            pending={update.isPending}
-            error={update.error}
-            saved={update.isSuccess}
-            savedMessage={t("subscriptions.detail.termsSaved")}
-            problems={attemptProblems(attempt)}
-          />
         </div>
-      </Form>
-    </Panel>
+      </FormSection>
+      {/* The page's one save bar, inside the form so Enter in a field saves:
+          "Unsaved changes · Discard · Save", and "Renewal terms saved." once
+          the server answered (never an optimistic one). */}
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        error={update.error}
+        submit
+        saved={update.isSuccess && !dirty}
+        savedMessage={t("subscriptions.detail.termsSaved")}
+        problems={attemptProblems(attempt)}
+        onDiscard={() => {
+          discard();
+          setAttempt(null);
+          update.reset();
+        }}
+      />
+    </Form>
   );
+}
+
+/** The renewal terms as the form edits them: the four fields, as their inputs hold them. */
+interface Terms {
+  renews_at: string;
+  notice_days: string;
+  auto_renew: boolean;
+  owner_user_id: string;
 }

@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
 import type { AgentRelease, ApiClient, ClientSiteOut, MeClient } from "../../lib/api";
+import { renderPage as renderRouted } from "../../test/renderPage";
 import { AgentReleasesPage } from "./AgentReleasesPage";
 
 const mockUseApi = vi.fn();
@@ -158,7 +159,8 @@ describe("AgentReleasesPage", () => {
     expect(within(table).getAllByText("1.5.0")).toHaveLength(2);
     expect(within(table).queryByText("1.4.0")).toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: "Show older versions (1.4.0)" }));
+    // The older versions are a chip on `?older=1` (redesign Task 6, 1.11).
+    await userEvent.click(screen.getByRole("button", { name: "With older versions (1.4.0)" }));
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
     expect(rows.map((row) => within(row).getByText(/^1\.\d\.0$/).textContent)).toEqual([
       "1.5.0",
@@ -170,6 +172,30 @@ describe("AgentReleasesPage", () => {
   it("says it is loading rather than showing an empty catalogue", async () => {
     renderPage(() => new Promise<never>(() => {}));
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
+  });
+
+  it("draws no tile number or claim when the catalogue read failed (coordinator ruling 10a)", async () => {
+    renderPage(() => Promise.reject(new ApiError(503, "catalogue unavailable")));
+    expect(await screen.findByText(/catalogue unavailable/)).toBeInTheDocument();
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) {
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
+  });
+
+  it("draws no tile number or claim while the catalogue has not answered (coordinator ruling 10a)", async () => {
+    renderPage(() => new Promise<never>(() => {}));
+    await screen.findByText("Loading…");
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) {
+      // The kit's one absent mark, never a dash (corrected ruling 10a; DESIGN.md's Absent Zero Rule).
+      expect(tile.querySelector(".stat-value")?.textContent).toBe("n/a");
+      expect(tile.querySelector(".stat-zero, .stat-foot")).toBeNull();
+    }
   });
 
   it("says the request FAILED rather than showing an empty catalogue", async () => {
@@ -313,7 +339,7 @@ describe("AgentReleasesPage", () => {
       release: release(),
       token: "tok_abc123",
       token_expires_at: "2026-08-18T13:00:00Z",
-      download_url: "https://itms.example/agent-releases/873d666/its-agent-linux-amd64?sig=x",
+      download_url: "https://itms.example/agent-releases/873d666/novieri-agent-linux-amd64?sig=x",
       download_expires_in_s: 900,
       sha256: "a1b2c3d4",
       command: "curl …",
@@ -325,7 +351,7 @@ describe("AgentReleasesPage", () => {
     const link = await screen.findByRole("link", { name: /download the agent binary/i });
     expect(link).toHaveAttribute(
       "href",
-      "https://itms.example/agent-releases/873d666/its-agent-linux-amd64?sig=x",
+      "https://itms.example/agent-releases/873d666/novieri-agent-linux-amd64?sig=x",
     );
   });
 
@@ -334,10 +360,10 @@ describe("AgentReleasesPage", () => {
       release: release(),
       token: "tok_abc123",
       token_expires_at: "2026-08-18T13:00:00Z",
-      download_url: "https://itms.example/agent-releases/873d666/its-agent-linux-amd64?sig=x",
+      download_url: "https://itms.example/agent-releases/873d666/novieri-agent-linux-amd64?sig=x",
       download_expires_in_s: 900,
       sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
-      command: "curl -fsSL '…' -o /tmp/its-agent && …",
+      command: "curl -fsSL '…' -o /tmp/novieri-agent && …",
     });
     renderPage(() => Promise.resolve([release()]), generate);
     await screen.findByText("873d666");
@@ -350,6 +376,10 @@ describe("AgentReleasesPage", () => {
     // download link expires, and a bare /expires/i matches both -- which would
     // let the token's expiry be dropped entirely without failing this test.
     expect(tokenLine?.textContent).toMatch(/expires/i);
+    // The digest and what it is for, as two sentences (no em dash in UI text).
+    expect(screen.getByText(/The installer verifies this digest/).closest("p")?.textContent).toBe(
+      "SHA-256: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90. The installer verifies this digest.",
+    );
   });
 
   it("renders the token expiry in the signed-in user's zone", async () => {
@@ -472,7 +502,7 @@ describe("AgentReleasesPage", () => {
       download_url: "https://itms.example/x",
       download_expires_in_s: 900,
       sha256: "a1b2c3d4",
-      command: "curl -fsSL '…' -o /tmp/its-agent && /tmp/its-agent enroll --token tok_abc123",
+      command: "curl -fsSL '…' -o /tmp/novieri-agent && /tmp/novieri-agent enroll --token tok_abc123",
     });
     renderPage(() => Promise.resolve([release()]), generate);
     await screen.findByText("873d666");
@@ -481,7 +511,7 @@ describe("AgentReleasesPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Copy command/ }));
 
     expect(writeText).toHaveBeenCalledWith(
-      "curl -fsSL '…' -o /tmp/its-agent && /tmp/its-agent enroll --token tok_abc123",
+      "curl -fsSL '…' -o /tmp/novieri-agent && /tmp/novieri-agent enroll --token tok_abc123",
     );
     expect(await screen.findByRole("status")).toHaveTextContent(/Copied/i);
   });
@@ -676,7 +706,9 @@ describe("AgentReleasesPage", () => {
     await screen.findByText("Loading…");
 
     const values = [...document.querySelectorAll(".stat-value")].map((n) => n.textContent);
-    expect(values).toEqual(["\u2014", "\u2014", "\u2014"]);
+    // The kit's absent mark, no longer a dash (coordinator ruling 10a, corrected
+    // 2026-11-25: no em dash in the interface; DESIGN.md's Absent Zero Rule).
+    expect(values).toEqual(["n/a", "n/a", "n/a"]);
     expect(screen.queryByText("Nothing published yet")).not.toBeInTheDocument();
   });
 });
@@ -714,11 +746,191 @@ describe("the install link panel on Agent packages", () => {
     await waitFor(() => expect(getInstallLink).toHaveBeenCalledWith("s-1"));
   });
 
+  /** Two sites, each with its own link settings, for the tests below. */
+  function renderTwoSites(saveInstallLink = vi.fn()) {
+    const BRANCH: ClientSiteOut = { ...PRINCIPAL_SITE, id: "s-2", name: "Branch" };
+    const settings = (networks: string[]) => ({
+      enabled: true, has_code: false, networks, disable_at: null,
+      hourly_limit: 50, enabled_at: "2026-11-20T09:00:00Z", joined_since_enabled: 0,
+    });
+    const getInstallLink = vi.fn((siteId: string) =>
+      Promise.resolve(settings(siteId === "s-1" ? ["10.1.0.0/16"] : ["10.2.0.0/16"])),
+    );
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockResolvedValue({
+        user_id: "u", org_id: "o", email: "a@example.com", display_name: "A",
+        permissions: ["enrollment.link.manage"], timezone: null,
+      }),
+      listAgentReleases: () => Promise.resolve([]),
+      getInstallLink,
+      saveInstallLink,
+      listClientSites: () => Promise.resolve([PRINCIPAL_SITE, BRANCH]),
+    } as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], [PRINCIPAL_SITE, BRANCH]);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AgentReleasesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { saveInstallLink, getInstallLink };
+  }
+
+  it("drops an unsaved edit of one site's link when another site is chosen (coordinator ruling 12)", async () => {
+    // The site is chosen on this page, without a change of route: a draft
+    // that outlived the choice would save one site's networks onto another.
+    const { saveInstallLink } = renderTwoSites();
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Site" }), "s-1");
+    const networks = await screen.findByRole("textbox", { name: /Networks the link answers/ });
+    await waitFor(() => expect(networks).toHaveValue("10.1.0.0/16"));
+    await userEvent.type(networks, "{enter}10.9.0.0/16");
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Site" }), "s-2");
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /Networks the link answers/ })).toHaveValue("10.2.0.0/16"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save install link" }));
+    expect(saveInstallLink).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when Save is pressed on settings nobody changed (coordinator ruling 13)", async () => {
+    // An unchanged save would write an audit entry for a change nobody made.
+    const { saveInstallLink } = renderTwoSites();
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Site" }), "s-1");
+    const networks = await screen.findByRole("textbox", { name: /Networks the link answers/ });
+    await waitFor(() => expect(networks).toHaveValue("10.1.0.0/16"));
+    await userEvent.click(screen.getByRole("button", { name: "Save install link" }));
+    expect(saveInstallLink).not.toHaveBeenCalled();
+    expect(screen.getByText("Nothing has changed, so nothing was saved.")).toBeInTheDocument();
+  });
+
+  it("keeps Save enabled and says a network is missing on submit (clarification 8a)", async () => {
+    const { saveInstallLink } = renderTwoSites();
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Site" }), "s-1");
+    const networks = await screen.findByRole("textbox", { name: /Networks the link answers/ });
+    await waitFor(() => expect(networks).toHaveValue("10.1.0.0/16"));
+    await userEvent.clear(networks);
+    // Not said while typing: the form reports on submit.
+    expect(screen.queryByText("List at least one network before switching the link on.")).toBeNull();
+    const save = screen.getByRole("button", { name: "Save install link" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    expect(screen.getByRole("alert")).toHaveTextContent("List at least one network before switching the link on.");
+    expect(saveInstallLink).not.toHaveBeenCalled();
+  });
+
   it("is not offered, and not asked for, without that permission", async () => {
     const { me, getInstallLink } = renderWith(["agent.release.read"]);
     await waitFor(() => expect(me).toHaveBeenCalled());
     await screen.findByRole("heading", { name: "Published releases" });
     expect(screen.queryByRole("heading", { name: "Install link" })).not.toBeInTheDocument();
     expect(getInstallLink).not.toHaveBeenCalled();
+  });
+});
+
+/* --- the kit (redesign plan Task 6, 1.11) ---------------------------------------------- */
+
+describe("Agent packages on the kit", () => {
+  function stub(releases: AgentRelease[], permissions: string[] = ["agent.release.manage"]) {
+    mockUseApi.mockReturnValue({
+      me: () =>
+        Promise.resolve({
+          user_id: "u",
+          org_id: "o",
+          email: "op@example.com",
+          display_name: "Operator",
+          permissions,
+          permissions_everywhere: permissions,
+          timezone: null,
+        }),
+      listAgentReleases: () => Promise.resolve(releases),
+      listClientSites: () => Promise.resolve([PRINCIPAL_SITE]),
+    } as unknown as ApiClient);
+  }
+
+  it("opens Publish a release from ?new=release", async () => {
+    stub([release()]);
+    renderRouted("/agent-packages?new=release", <AgentReleasesPage />);
+    expect(await screen.findByRole("dialog", { name: "Publish a release" })).toBeInTheDocument();
+  });
+
+  it("puts Publish a release in the URL when the head's button opens it", async () => {
+    stub([release()]);
+    const { router } = renderRouted("/agent-packages", <AgentReleasesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /publish a release/i }));
+    expect(router.state.location.search).toBe("?new=release");
+  });
+
+  it("asks before Cancel drops a release with a version typed in it (coordinator ruling 3)", async () => {
+    // The form lives in the `?new=release` dialog, so Cancel, Close and Back
+    // are a change of `new`: with something in it, each asks first.
+    stub([release()]);
+    const { router } = renderRouted("/agent-packages", <AgentReleasesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /publish a release/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Publish a release" });
+    await userEvent.type(within(dialog).getByLabelText(/^Version/), "1.6.0");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const question = await screen.findByRole("dialog", { name: "Leave without saving?" });
+    // Drawn after the form's dialog, never inside or before it, so it paints on
+    // top: the two share the `.modal` z-index (coordinator ruling 3a).
+    expect(dialog.contains(question)).toBe(false);
+    expect(dialog.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(router.state.location.search).toBe("?new=release");
+    expect(within(dialog).getByLabelText(/^Version/)).toHaveValue("1.6.0");
+  });
+
+  it("closes an untouched Publish a release without asking", async () => {
+    stub([release()]);
+    const { router } = renderRouted("/agent-packages", <AgentReleasesPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /publish a release/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Publish a release" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    // The router moves first; the page draws the close on its next render.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("keeps the older versions behind a chip in the URL, and counts what it shows", async () => {
+    stub([
+      release({ id: "old-mac", version: "1.4.0", os: "darwin", arch: "arm64" }),
+      release({ id: "new-linux", version: "1.5.0" }),
+    ]);
+    const { router } = renderRouted("/agent-packages?older=1", <AgentReleasesPage />);
+    expect(await screen.findByRole("button", { name: "With older versions (1.4.0)" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(await screen.findByRole("table", { name: "Published releases" })).getByText("1.4.0")).toBeInTheDocument();
+    expect(screen.getByText("Showing 2 of 2")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Newest version" }));
+    expect(router.state.location.search).toBe("");
+    expect(screen.getByText("Showing 1 of 2")).toBeInTheDocument();
+  });
+
+  it("draws its sections in the order of the design: versions, channels, the install link, updates", async () => {
+    // Fix round 1 of wave O1: the title named four sections and the body
+    // checked two. Each section is now asked for, and each follows the last.
+    stub([release()], ["agent.release.manage", "enrollment.link.manage", "agent.update.read"]);
+    const api = mockUseApi() as Record<string, unknown>;
+    mockUseApi.mockReturnValue({
+      ...api,
+      getInstallLink: () =>
+        Promise.resolve({
+          enabled: false, has_code: false, networks: [], disable_at: null,
+          hourly_limit: 50, enabled_at: null, joined_since_enabled: 0,
+        }),
+      getFleetVersions: () =>
+        Promise.resolve({ total: 0, versions: {}, latest_stable: null, update_available: 0, needs_manual_update: [] }),
+      listUpdateRollouts: () => Promise.resolve([]),
+    } as unknown as ApiClient);
+    renderRouted("/agent-packages", <AgentReleasesPage />);
+    const order = [
+      await screen.findByRole("heading", { name: "Published releases" }),
+      await screen.findByRole("heading", { name: "Release channels" }),
+      await screen.findByRole("heading", { name: "Install link" }),
+      await screen.findByRole("heading", { name: "Fleet versions" }),
+    ];
+    for (let at = 1; at < order.length; at += 1) {
+      expect(order[at - 1]!.compareDocumentPosition(order[at]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
   });
 });

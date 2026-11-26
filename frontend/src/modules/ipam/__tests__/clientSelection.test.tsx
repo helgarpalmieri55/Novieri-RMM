@@ -10,6 +10,9 @@ import { ScanAuthorizationsPage } from "../ScanAuthorizationsPage";
 import { SubnetTreePage } from "../SubnetTreePage";
 import type { ScopeOut, SubnetOut, VlanOut, VrfOut } from "../types";
 
+// THE HEAD'S CREATE BUTTON IS THE FIRST OF ITS NAME (redesign plan, Receta L, point 3):
+// an empty list offers it again in its empty state, so those queries take the first.
+
 // MSP clients phase 3, design §3.1-§3.4: a new IPAM row takes its client from
 // its parent (a VRF, or for a VLAN a site), else from the client chosen at the
 // top, else from a required Client field; pickers list the row's client's
@@ -102,6 +105,8 @@ describe("a VRF goes to the client chosen at the top, or the one the form names"
     const user = userEvent.setup();
     renderAt(<RegistryPage />, "/ipam/registry");
 
+    // New VRF opens its dialog (`?new=vrf`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VRF" }));
     await user.type((await screen.findAllByLabelText("Name"))[0]!, "lan");
     expect(screen.queryByLabelText("Client")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Add VRF" }));
@@ -117,6 +122,8 @@ describe("a VRF goes to the client chosen at the top, or the one the form names"
     const user = userEvent.setup();
     renderAt(<RegistryPage />, "/ipam/registry");
 
+    // New VRF opens its dialog (`?new=vrf`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VRF" }));
     const field = (await screen.findAllByLabelText("Client"))[0]!;
     // Beta lacks `ipam.manage`; "Unassigned" is never offered (design §3.1, C10).
     expect(within(field).queryByRole("option", { name: "Beta" })).toBeNull();
@@ -139,6 +146,8 @@ describe("a VLAN: its site decides, and its site picker is its client's", () => 
     const user = userEvent.setup();
     renderAt(<RegistryPage />, "/ipam/registry");
 
+    // New VLAN opens its dialog (`?new=vlan`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VLAN" }));
     const fields = await screen.findAllByLabelText("Client");
     await user.selectOptions(fields[fields.length - 1]!, "c-acme");
     await waitFor(() => expect(api.listClientSites).toHaveBeenCalledWith("c-acme"));
@@ -162,6 +171,8 @@ describe("a VLAN: its site decides, and its site picker is its client's", () => 
     const user = userEvent.setup();
     renderAt(<RegistryPage />, "/ipam/registry");
 
+    // New VLAN opens its dialog (`?new=vlan`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VLAN" }));
     const fields = await screen.findAllByLabelText("Client");
     await user.selectOptions(fields[fields.length - 1]!, "c-acme");
     await user.type(screen.getByLabelText("VID"), "10");
@@ -230,7 +241,7 @@ describe("a subnet and a scan authorization: the VRF decides, else the client", 
     stubApi({ createIpamSubnet });
     const user = userEvent.setup();
     renderAt(<SubnetTreePage />, "/ipam");
-    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "New subnet" }))[0]!);
     const dialog = await screen.findByRole("dialog");
 
     await user.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
@@ -249,7 +260,7 @@ describe("a subnet and a scan authorization: the VRF decides, else the client", 
     stubApi({ createIpamScanAuthorization });
     const user = userEvent.setup();
     renderAt(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
-    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "Authorize a subnet" }))[0]!);
     await user.type(await screen.findByLabelText("Prefix"), "10.4.7.0/24");
     expect(screen.queryByLabelText("Client")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Authorize" }));
@@ -304,6 +315,8 @@ describe("with every client chosen, an empty Client field is named on create", (
     stubApi({ createIpamVrf });
     const user = userEvent.setup();
     renderAt(<RegistryPage />, "/ipam/registry");
+    // New VRF opens its dialog (`?new=vrf`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VRF" }));
     await user.type((await screen.findAllByLabelText("Name"))[0]!, "lan");
     await user.click(screen.getByRole("button", { name: "Add VRF" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
@@ -316,6 +329,8 @@ describe("with every client chosen, an empty Client field is named on create", (
     stubApi({ createIpamVlan });
     const user = userEvent.setup();
     renderAt(<RegistryPage />, "/ipam/registry");
+    // New VLAN opens its dialog (`?new=vlan`, Task 10, 5.9): the add row's fields are there now.
+    await user.click(await screen.findByRole("button", { name: "New VLAN" }));
     await user.type(await screen.findByLabelText("VID"), "40");
     await user.click(screen.getByRole("button", { name: "Add VLAN" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
@@ -328,7 +343,7 @@ describe("with every client chosen, an empty Client field is named on create", (
     stubApi({ createIpamSubnet });
     const user = userEvent.setup();
     renderAt(<SubnetTreePage />, "/ipam");
-    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "New subnet" }))[0]!);
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     await user.click(within(dialog).getByRole("button", { name: "Register" }));
@@ -342,7 +357,7 @@ describe("with every client chosen, an empty Client field is named on create", (
     stubApi({ createIpamScanAuthorization });
     const user = userEvent.setup();
     renderAt(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
-    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "Authorize a subnet" }))[0]!);
     await user.type(await screen.findByLabelText("Prefix"), "10.4.7.0/24");
     await user.click(screen.getByRole("button", { name: "Authorize" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
@@ -381,7 +396,7 @@ describe("with Unassigned chosen at the top, nothing new is offered and the page
     stubApi();
     const user = userEvent.setup();
     renderAt(<SubnetTreePage />, "/ipam");
-    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "New subnet" }))[0]!);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(REFUSED)).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Register" })).toBeNull();
@@ -396,7 +411,7 @@ describe("with Unassigned chosen at the top, nothing new is offered and the page
     stubApi();
     const user = userEvent.setup();
     renderAt(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
-    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    await user.click((await screen.findAllByRole("button", { name: "Authorize a subnet" }))[0]!);
     expect(await screen.findByText(REFUSED)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Authorize" })).toBeNull();
     await user.selectOptions(screen.getByLabelText("VRF"), "vrf-a");

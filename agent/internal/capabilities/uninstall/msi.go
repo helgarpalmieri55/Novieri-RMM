@@ -17,7 +17,7 @@ import (
 // knowledge, exactly as for the signed agent.uninstall job.
 const MsiUninstallArg = "--msi-uninstall"
 
-// MsiLogFile is the MSI's diagnostics in %ProgramData%\ITSuite, the file
+// MsiLogFile is the MSI's diagnostics in %ProgramData%\NovieriRMM, the file
 // install.MsiLogFile names: one line per run of either custom action.
 const MsiLogFile = "msi.log"
 
@@ -28,7 +28,7 @@ const maxMsiLogReason = 500
 // constant, not an error value: this package is linked into the service, and
 // a package-level value made by a call is initialised in every service process.
 const notElevated = "--msi-uninstall must run as SYSTEM or an elevated administrator; " +
-	"it is the ITMS MSI's removal step"
+	"it is the Novieri RMM MSI's removal step"
 
 // msiLogLine is one msi.log line: a UTC timestamp, the mode, and `ok` or
 // `failed: <reason>`, on one line -- install.msiLogLine's format. The reason
@@ -49,7 +49,7 @@ func msiLogLine(now time.Time, err error) string {
 // --msi-install is; otherwise RunForMSI. A FAILURE is then logged to msi.log in
 // logDir, with its reason. A clean removal logs nothing: it has just deleted
 // msi.log on purpose, and the log writer (secdir.AppendLine) creates the file
-// whenever %ProgramData%\ITSuite is still there -- which it is whenever the
+// whenever %ProgramData%\NovieriRMM is still there -- which it is whenever the
 // directory also holds something that is not the MSI's. windows-latest showed
 // that on 2026-09-30 ("msi.log survived msiexec /x").
 func msiUninstall(ctx context.Context, elevated bool, sys System, t Targets, logDir string,
@@ -73,7 +73,7 @@ func msiUninstall(ctx context.Context, elevated bool, sys System, t Targets, log
 // right after this returns.
 //
 // Then, as RunHelper does, each of t.RemoveIfEmpty goes if nothing else is in
-// it: for an MSI, %ProgramData%\ITSuite (msiTargets). Only a removal with no
+// it: for an MSI, %ProgramData%\NovieriRMM (msiTargets). Only a removal with no
 // failure first deletes logFile, the MSI's msi.log, which the install left
 // there; a removal that failed keeps it, and --msi-uninstall adds its reason.
 func RunForMSI(ctx context.Context, sys System, t Targets, logFile string) error {
@@ -98,8 +98,8 @@ func RunForMSI(ctx context.Context, sys System, t Targets, logFile string) error
 
 // msiTargets is what an MSI removal removes: the Windows targets for the
 // installed binary and the data directory every Windows installer uses,
-// %ProgramData%\ITSuite\agent (internal/install/layout), and then
-// %ProgramData%\ITSuite itself if it is empty. %ProgramFiles%\ITSuite is not
+// %ProgramData%\NovieriRMM\agent (internal/install/layout), and then
+// %ProgramData%\NovieriRMM itself if it is empty. %ProgramFiles%\NovieriRMM is not
 // among them: it is the MSI's directory, and Windows Installer removes it.
 // Pure, so it is tested on any GOOS.
 func msiTargets(programData, binary string) Targets {
@@ -108,10 +108,10 @@ func msiTargets(programData, binary string) Targets {
 	return t
 }
 
-// msiLogDir is %ProgramData%\ITSuite, where msi.log lives.
+// msiLogDir is %ProgramData%\NovieriRMM, where msi.log lives.
 func msiLogDir(programData string) string {
 	if programData == "" {
 		programData = `C:\ProgramData`
 	}
-	return strings.TrimRight(programData, `\`) + `\ITSuite`
+	return strings.TrimRight(programData, `\`) + `\NovieriRMM`
 }

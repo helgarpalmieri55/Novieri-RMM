@@ -15,7 +15,7 @@ import (
 //
 //   - argv is out — /proc/<pid>/cmdline is world-readable, so `ps` shows it to
 //     every local user for the lifetime of the process.
-//   - the unit's Environment= is out — `systemctl show its-agent` prints it, and
+//   - the unit's Environment= is out — `systemctl show novieri-agent` prints it, and
 //     it survives in the unit file on disk long after the token is spent.
 //
 // What is left is a 0600 file in the data directory, which the agent reads at

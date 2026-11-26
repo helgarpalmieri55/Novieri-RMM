@@ -15,10 +15,10 @@ import (
 // Supported: this build advertises agent.uninstall.
 const Supported = true
 
-// helperUnit is a transient unit OUTSIDE its-agent.service's cgroup, which
+// helperUnit is a transient unit OUTSIDE novieri-agent.service's cgroup, which
 // KillMode=control-group would otherwise kill the moment the service stops --
 // internal/update's self-update helper is launched the same way.
-const helperUnit = "its-agent-uninstall"
+const helperUnit = "novieri-agent-uninstall"
 
 // LaunchHelper starts `<binary> --uninstall-helper` as a transient unit.
 func LaunchHelper(ctx context.Context, binary, dataDir string) error {
@@ -62,13 +62,13 @@ func (platformSystem) DeleteService(ctx context.Context, name string) error {
 }
 
 // PurgePackage: a .deb-installed agent (agent/packaging/linux/build-deb.sh)
-// is removed by dpkg, which owns /usr/bin/its-agent and the packaged unit.
+// is removed by dpkg, which owns /usr/bin/novieri-agent and the packaged unit.
 func (platformSystem) PurgePackage(ctx context.Context) (bool, error) {
-	if _, err := os.Stat("/var/lib/dpkg/info/its-agent.list"); err != nil {
+	if _, err := os.Stat("/var/lib/dpkg/info/novieri-agent.list"); err != nil {
 		return false, nil
 	}
-	if out, err := exec.CommandContext(ctx, "dpkg", "--purge", "its-agent").CombinedOutput(); err != nil {
-		return true, fmt.Errorf("dpkg --purge its-agent: %w: %s", err, out)
+	if out, err := exec.CommandContext(ctx, "dpkg", "--purge", "novieri-agent").CombinedOutput(); err != nil {
+		return true, fmt.Errorf("dpkg --purge novieri-agent: %w: %s", err, out)
 	}
 	return true, nil
 }
@@ -77,5 +77,5 @@ func (platformSystem) ScheduleDelete(string) error { return nil }
 
 func (platformSystem) HelperExiting(ctx context.Context) {
 	_ = systemctl(ctx, "daemon-reload")
-	_ = systemctl(ctx, "reset-failed", "its-agent.service")
+	_ = systemctl(ctx, "reset-failed", "novieri-agent.service")
 }

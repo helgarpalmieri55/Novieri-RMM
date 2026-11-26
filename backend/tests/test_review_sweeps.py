@@ -28,6 +28,7 @@ from tests.ipam_fixtures import (
     seed_vrf,
     upsert_observation_row,
 )
+from tests.redis_support import TEST_REDIS_URL
 
 NOW = datetime(2026, 9, 28, 12, 0, tzinfo=UTC)
 
@@ -70,7 +71,7 @@ async def test_the_patch_scan_sweep_scans_the_approved_and_passes_over_the_pendi
         published.append(device_id)
 
     monkeypatch.setattr(worker, "publish_job", fake_publish_job)
-    redis = aioredis.from_url("redis://localhost:6379/9", decode_responses=True)
+    redis = aioredis.from_url(TEST_REDIS_URL, decode_responses=True)
     try:
         count = await worker.patch_scan_sweep_org(
             org_id,

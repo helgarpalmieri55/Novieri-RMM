@@ -14,9 +14,9 @@ import (
 )
 
 // SecureOwned and CheckOwned are what the self-installer applies to
-// %ProgramData%\ITSuite -- the data directory's PARENT -- and to the data
-// directory itself, and what the uninstall helper applies to ITSuite before it
-// stages its copy there. A standard user can create C:\ProgramData\ITSuite
+// %ProgramData%\NovieriRMM -- the data directory's PARENT -- and to the data
+// directory itself, and what the uninstall helper applies to NovieriRMM before it
+// stages its copy there. A standard user can create C:\ProgramData\NovieriRMM
 // before the install (Users may create folders in ProgramData; CREATOR OWNER
 // gets Full Control) and, owning it, rename the protected `agent` directory
 // away and put their own in its place.
@@ -83,7 +83,7 @@ func junction(t *testing.T, link, target string) {
 
 func TestSecureOwnedCreatesAnAbsentDirectoryOwnedAndRestricted(t *testing.T) {
 	needElevated(t)
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := SecureOwned(dir, nil); err != nil {
 		t.Fatalf("SecureOwned: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSecureOwnedCreatesAnAbsentDirectoryOwnedAndRestricted(t *testing.T) {
 
 func TestSecureOwnedTakesAnExistingDirectory(t *testing.T) {
 	needElevated(t)
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestSecureOwnedTakesAnExistingDirectory(t *testing.T) {
 
 func TestSecureOwnedAsksBeforeItChangesAnything(t *testing.T) {
 	needElevated(t)
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestSecureOwnedAsksBeforeItChangesAnything(t *testing.T) {
 
 func TestSecureOwnedDoesNotAskAboutADirectoryItCreated(t *testing.T) {
 	needElevated(t)
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := SecureOwned(dir, func(*windows.SID) error { return errors.New("asked") }); err != nil {
 		t.Fatalf("SecureOwned consulted accept about a directory it created itself: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestSecureOwnedRefusesAJunctionAndLeavesItsTargetAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, before := descriptor(t, target)
-	link := filepath.Join(base, "ITSuite")
+	link := filepath.Join(base, "NovieriRMM")
 	junction(t, link, target)
 	err := SecureOwned(link, nil)
 	if err == nil || !strings.Contains(err.Error(), "junction or symbolic link") {
@@ -169,7 +169,7 @@ func TestSecureOwnedRefusesASymbolicLink(t *testing.T) {
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(base, "ITSuite")
+	link := filepath.Join(base, "NovieriRMM")
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("cannot create a directory symbolic link here: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestSecureOwnedRefusesASymbolicLink(t *testing.T) {
 
 func TestSecureOwnedRefusesAFile(t *testing.T) {
 	needElevated(t)
-	path := filepath.Join(t.TempDir(), "ITSuite")
+	path := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestSecureOwnedRefusesAFile(t *testing.T) {
 }
 
 func TestCheckOwnedAcceptsAnAbsentDirectoryAndChangesNothing(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "ITSuite")
+	dir := filepath.Join(t.TempDir(), "NovieriRMM")
 	if err := CheckOwned(dir, func(*windows.SID) error { return errors.New("asked") }); err != nil {
 		t.Fatalf("CheckOwned on an absent directory = %v", err)
 	}
@@ -202,7 +202,7 @@ func TestCheckOwnedAcceptsAnAbsentDirectoryAndChangesNothing(t *testing.T) {
 func TestCheckOwnedShowsTheOwnerAndRefusesAJunction(t *testing.T) {
 	needElevated(t)
 	base := t.TempDir()
-	dir := filepath.Join(base, "ITSuite")
+	dir := filepath.Join(base, "NovieriRMM")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -26,9 +26,10 @@ import { BarChart, LineChart } from "../components/chart";
 import { ConfirmDialog } from "../components/confirm";
 import { EmptyState, NoValue } from "../components/emptystate";
 import { EntityPicker } from "../components/picker";
-import { Badge, Table, Td, Th } from "../components/ui";
+import { Badge, Dialog, Field, inputClass, Table, Td, Th } from "../components/ui";
 import { WeekPainter } from "../components/weekpainter";
 import { AppShell, HealthGlyph } from "../shell/AppShell";
+import type { NewMenuEntry } from "../shell/newMenu";
 import { SessionEnded } from "../shell/SessionEnded";
 import {
   Avatar,
@@ -52,22 +53,40 @@ import { Icon } from "../shell/icons";
 import type { HealthReading } from "../shell/healthSignal";
 import {
   Btn,
+  BulkBar,
   CellMain,
+  ChipSelect,
+  DetailGrid,
+  DetailHead,
   FilterBar,
+  FilterChips,
+  FormSection,
+  ListEmpty,
+  ListToolbar,
+  MultiFilterChips,
   PageHead,
   Pager,
   Panel,
   Progress,
   QueryState,
+  SaveBar,
   SearchField,
+  ShowingCount,
   StatCard,
   StatsGrid,
   StatusPill,
   TableWrap,
   Tabs,
   Toggle,
+  UrlTabs,
+  useNewParam,
+  useUnsavedGuard,
+  useUrlTab,
 } from "../shell/components";
-import type { DocDocument, DocDocumentVersion, Me } from "../lib/api";
+import type { DocDocument, DocDocumentVersion, Me, PortalMe } from "../lib/api";
+import { AuthCard } from "../modules/auth/AuthCard";
+import { PortalShell } from "../modules/portal/PortalShell";
+import { PORTAL_ME_KEY } from "../modules/portal/usePortalMe";
 import { DocumentViewer } from "../modules/docs/DocumentViewer";
 import { DocumentView, DocumentsSection } from "../modules/docs/documents";
 import {
@@ -113,6 +132,20 @@ const ALL_PERMISSIONS = [
   "notification.read", "email_intake.read", "sla.read", "docs.read", "change.read",
   "bcp.read", "reporting.read", "licenses.read", "subscriptions.read", "budget.read",
   "ipam.read", "jobs.read", "platform.errors.read",
+];
+
+/**
+ * THE NEW MENU, every entry (redesign Task 4, design §1.2): the top bar's one
+ * primary, which the browser pass measures here as it measured "Add a
+ * computer" before it moved into this menu (decision D11).
+ */
+const PREVIEW_NEW_MENU: readonly NewMenuEntry[] = [
+  { kind: "ticket", to: "/service-desk?new=ticket", icon: "ticket" },
+  { kind: "client", to: "/clients?new=client", icon: "building" },
+  { kind: "contact", to: "/clients?new=contact", icon: "user" },
+  { kind: "device", to: "/devices/onboard", icon: "devices" },
+  { kind: "document", to: "/docs?new=article", icon: "book" },
+  { kind: "change", to: "/changes?new=change", icon: "changes" },
 ];
 
 /**
@@ -771,7 +804,7 @@ function patchPreviewClient(): QueryClient {
  * THE FIXTURE IS A LIVE XSS PAYLOAD ON PURPOSE. Three vectors that a browser
  * really runs: a `<script>` element, an `<img onerror>` and an `<svg onload>`,
  * each setting the SAME global. A browser pass can then assert one thing --
- * `window.__ITMS_XSS_EXECUTED` is undefined -- and have it mean "none of the
+ * `window.__XSS_PROBE_EXECUTED` is undefined -- and have it mean "none of the
  * three fired". Rendered as characters, it is inert; rendered as markup, all
  * three fire before the page finishes painting.
  *
@@ -789,9 +822,9 @@ function patchPreviewClient(): QueryClient {
 // the component that renders it did not. See the note above
 // `patchPreviewClient` for the same lesson one level up.
 const DOCS_XSS_PAYLOAD = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" onload="window.__ITMS_XSS_EXECUTED=true">
-  <script>window.__ITMS_XSS_EXECUTED = true;</script>
-  <image href="x" onerror="window.__ITMS_XSS_EXECUTED=true" />
+<svg xmlns="http://www.w3.org/2000/svg" onload="window.__XSS_PROBE_EXECUTED=true">
+  <script>window.__XSS_PROBE_EXECUTED = true;</script>
+  <image href="x" onerror="window.__XSS_PROBE_EXECUTED=true" />
   <text x="10" y="20">core switch — building 2</text>
 </svg>`;
 
@@ -979,12 +1012,333 @@ const DASH_PREVIEW_TITLES: Record<string, string> = {
   "open-tickets": "Open tickets",
 };
 
+/**
+ * THE PATTERN KIT (redesign plan, Task 3; DESIGN.md v4, "Lists", "Records",
+ * "Forms"): every piece a list, a record or a form is built from, on the one
+ * page the browser pass measures, each in the state that paints something the
+ * others do not -- a selected chip with its count, a multi-select row with two
+ * values chosen, a select chip holding a value, a selection, both empty
+ * states, a status beside a record's context, a tab strip, an open section
+ * with its lead paragraph,
+ * the save bar with a change, failed, not allowed and saved. Three sections,
+ * each drawn the way its pages draw it (critique answer 1): no card inside a
+ * card. Fixed data, no API. `ClientFilter` is not here: it needs `/me`, and
+ * the harmony walk measures it on the lists themselves; `ChipSelect`, which
+ * draws it, is.
+ *
+ * THE TABS USE THEIR OWN PARAMETER (`?kit=`), so they never fight this page's
+ * other strip for `?tab=`.
+ */
+const KIT_TABS = ["a", "b", "c"] as const;
+const KIT_TAB_LABEL: Record<(typeof KIT_TABS)[number], string> = {
+  a: "Overview",
+  b: "Hardware",
+  c: "Software",
+};
+
+function KitPreview() {
+  const [state, setState] = useState("online");
+  const [severities, setSeverities] = useState<string[]>(["critical", "important"]);
+  const [site, setSite] = useState("bogota");
+  const [kitTab, setKitTab] = useUrlTab(KIT_TABS, "a", "kit");
+  return (
+    <>
+      {/* TILES ABOVE A LIST: one answered, one whose read has not (kit
+          requests batch 2, K3; ruling 10a): no number, no claim, busy. */}
+      <div className="tiles" style={{ marginBottom: 24 }}>
+        <Tile label="Deployed this week" icon="cpu" value="14" sub="3 failed, 11 installed" to="/deploy" />
+        <Tile label="Waiting for a reboot" icon="heartbeat" value="0" sub="Every machine is up to date" to="/patch" pending />
+        {/* The read answered with no figure (P3 adoption pass): the mark, and
+            the line that says why, kept; not busy. */}
+        <Tile label="Success rate" icon="chart" value="0" unit="%" sub="No completed runs yet" to="/jobs" absent />
+      </div>
+      {/* A LIST: one bare panel, as every list page draws it, so the toolbar
+          and the bulk bar run flush to its edges. */}
+      <Panel title="Kit v4: a list" subtitle="Search, filter chips with counts, the count, the bulk bar, both empty states" bare>
+        <ListToolbar
+          search={<SearchField placeholder="Hostname, IP or serial" aria-label="Search computers" />}
+          chips={
+            <>
+              <FilterChips
+                label="State"
+                options={[
+                  { value: "", label: "All", count: 12 },
+                  { value: "online", label: "Online", count: 9 },
+                  { value: "offline", label: "Offline" },
+                ]}
+                value={state}
+                onChange={setState}
+              />
+              {/* FilterChips' multi-select mode (kit requests batch 1, item 4). */}
+              <MultiFilterChips
+                label="Severity"
+                options={[
+                  { value: "", label: "All severities", count: 40 },
+                  { value: "critical", label: "Critical", count: 3 },
+                  { value: "important", label: "Important", count: 12 },
+                  { value: "low", label: "Low", count: 25 },
+                ]}
+                values={severities}
+                onChange={setSeverities}
+              />
+              {/* The select chip, holding a value (kit requests batch 1, item 5). */}
+              <ChipSelect
+                label="Site"
+                options={[
+                  { value: "", label: "All sites" },
+                  { value: "bogota", label: "Bogotá office" },
+                  { value: "medellin", label: "Medellín warehouse" },
+                ]}
+                value={site}
+                onChange={setSite}
+              />
+            </>
+          }
+          end={<ShowingCount shown={9} total={12} />}
+        />
+        <BulkBar count={2} onClear={() => undefined}>
+          <Btn label="Approve" small />
+        </BulkBar>
+        <div className="g2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <ListEmpty filtered onClear={() => undefined} nothingYet="No computers yet." />
+          <ListEmpty
+            filtered={false}
+            onClear={() => undefined}
+            nothingYet="No computers yet."
+            icon="devices"
+            action={<Btn label="Add a computer" icon="plus" small variant="primary" />}
+          />
+        </div>
+      </Panel>
+
+      {/* A RECORD, on the page ground as its pages draw it (critique answer 1,
+          `.impeccable/critica-respuestas.md`): the head, the tabs, and the two
+          panels side by side, none of them inside another card. */}
+      <div style={{ marginTop: 24 }}>
+        <DetailHead
+          back={{ to: "/devices", label: "All computers" }}
+          title="srv-app02"
+          status={{ kind: "ok", label: "Online" }}
+          context={<span>Andes Logistics · Bogotá</span>}
+          actions={<Btn label="Connect" icon="remote" variant="primary" />}
+        />
+        <UrlTabs
+          label="Computer"
+          items={KIT_TABS.map((key) => ({
+            key,
+            label: KIT_TAB_LABEL[key],
+            count: key === "c" ? 214 : undefined,
+            // A tab's state beside its name (kit requests batch 3, B3-1).
+            note: key === "b" ? "Not collected" : undefined,
+          }))}
+          active={kitTab}
+          onSelect={setKitTab}
+        >
+          <DetailGrid
+            main={
+              <Panel title="Details" subtitle={`${KIT_TAB_LABEL[kitTab]} of this computer`}>
+                <div style={{ padding: 14 }}>Windows Server 2022, 16 GB of memory, last seen 2 minutes ago.</div>
+              </Panel>
+            }
+            aside={
+              <Panel title="Activity">
+                <div style={{ padding: 14 }}>Patched on Saturday at 02:10. No open alerts.</div>
+                {/* A long value with no space to break at (kit requests batch
+                    3, B3-7): it wraps inside the narrow column. */}
+                <div style={{ padding: "0 14px 14px" }}>
+                  <KV items={[["Signed in as", "maria.fernanda.gonzalez-restrepo@andeslogistics.example.com"]]} />
+                </div>
+              </Panel>
+            }
+          />
+        </UrlTabs>
+      </div>
+
+      {/* THE NARROW COLUMN FIRST (kit requests batch 3, B3-6): a library
+          beside its reader, as /docs draws it. */}
+      <div style={{ marginTop: 24 }}>
+        <DetailGrid
+          asideFirst
+          aside={
+            <Panel title="Library">
+              <div style={{ padding: 14 }}>Runbooks, network diagrams and vendor contracts.</div>
+            </Panel>
+          }
+          main={
+            <Panel title="Reader">
+              <div style={{ padding: 14 }}>Restoring a domain controller from the nightly backup, step by step.</div>
+            </Panel>
+          }
+        />
+      </div>
+
+      {/* NOTHING OPEN BESIDE THE LIBRARY (P3 adoption pass, C's request R1):
+          with no main, the library is drawn alone across the row. */}
+      <div style={{ marginTop: 24 }} data-bench="library-alone">
+        <DetailGrid
+          asideFirst
+          main={null}
+          aside={
+            <Panel title="Library, nothing open">
+              <div style={{ padding: 14 }}>Open a runbook, a diagram or a contract to read it beside the list.</div>
+            </Panel>
+          }
+        />
+      </div>
+
+      {/* A FORM, on the page ground: a section, then the one save bar in each
+          state that paints something the others do not (critique answer 2):
+          with a change, failed, not allowed, and saved. Each bar has a name of
+          its own, which axe's landmark-unique needs, and a block of its own,
+          so a sticky bar has no room to ride over another while measured. */}
+      <div style={{ marginTop: 24 }}>
+        <FormSection
+          title="Organization"
+          icon="settings"
+          description="The name your clients see on tickets, reports and the portal."
+        >
+          <div className="form-grid">
+            <Field label="Name">
+              <input className={inputClass} defaultValue="Andes Logistics" />
+            </Field>
+            {/* A value the person cannot change (kit requests batch 2, K5). */}
+            <Field label="Organization ID">
+              <input className={inputClass} value="org-toeshee" readOnly />
+            </Field>
+          </div>
+        </FormSection>
+        <div>
+          <SaveBar dirty saving={false} onDiscard={() => undefined} onSave={() => undefined} />
+        </div>
+        <div>
+          <SaveBar
+            dirty
+            saving={false}
+            label="Unsaved changes, the save failed"
+            error={new Error("The server refused the change.")}
+            onDiscard={() => undefined}
+            onSave={() => undefined}
+          />
+        </div>
+        <div>
+          <SaveBar
+            dirty
+            saving={false}
+            label="Unsaved changes, saving not allowed"
+            blockedReason="You can read these settings, and an org-admin can change them."
+            onDiscard={() => undefined}
+            onSave={() => undefined}
+          />
+        </div>
+        <div>
+          <SaveBar dirty={false} saving={false} saved onDiscard={() => undefined} onSave={() => undefined} />
+        </div>
+      </div>
+      {/* A STEP'S ONE ACTION ACROSS ITS CARD (kit requests batch 2, K4), at
+          the sign-in card's width. */}
+      <div style={{ maxWidth: 360, marginTop: 24 }}>
+        <Btn label="Continue" variant="primary" wide />
+      </div>
+      <GuardedDialogBench />
+    </>
+  );
+}
+
+/**
+ * A FORM IN A DIALOG, GUARDED (kit requests batch 2, G1 and G2), the case a
+ * wave's review found broken in Chromium: the page renders its guard BEFORE
+ * the dialog, so with both on `.modal`'s layer the form painted over the
+ * leave question, and Escape reached both. The browser probe opens it, types,
+ * presses Cancel, and checks the question is on top and Escape answers it
+ * alone. Closed by default (`?new=kit-ticket` opens it), so the a11y pass
+ * measures the page as before.
+ */
+function GuardedDialogBench() {
+  const ticket = useNewParam("kit-ticket");
+  const request = useNewParam("kit-request");
+  return (
+    <div style={{ marginTop: 24, display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <Btn label="New ticket in a dialog" icon="plus" onClick={ticket.start} />
+      <Btn label="New request, guard inside the dialog" icon="plus" onClick={request.start} />
+      {/* Each form lives while its dialog is open, so closing drops the draft
+          and opening starts clean, as a page's create dialog does. Both
+          layouts a page draws (batch 2 review, H6): the guard before the
+          dialog and the guard inside it. One is open at a time, so one guard
+          holds changes. */}
+      {ticket.open ? <GuardedTicketForm title="New ticket" onClose={ticket.close} /> : null}
+      {request.open ? <GuardedTicketForm title="New request" onClose={request.close} guardInside /> : null}
+    </div>
+  );
+}
+
+function GuardedTicketForm({
+  title,
+  onClose,
+  guardInside = false,
+}: {
+  title: string;
+  onClose: () => void;
+  guardInside?: boolean;
+}) {
+  const [subject, setSubject] = useState("");
+  const { guard } = useUnsavedGuard(subject !== "", { search: ["new"] });
+  return (
+    <>
+      {/* BEFORE the dialog: the order that hid the question (G1). */}
+      {guardInside ? null : guard}
+      <Dialog open onClose={onClose} title={title}>
+        {/* INSIDE the dialog: the panel's transform would hold the question
+            without the portal (G1). */}
+        {guardInside ? guard : null}
+        <div className="form-grid">
+          <Field label="Subject" full>
+            <input className={inputClass} value={subject} onChange={(event) => setSubject(event.target.value)} />
+          </Field>
+        </div>
+        <div className="confirm-actions">
+          <Btn label="Cancel" onClick={onClose} />
+        </div>
+      </Dialog>
+    </>
+  );
+}
+
+/**
+ * The portal's `/portal/me`, answered, and nothing that can reach the
+ * network: `PortalShell` reads it, and this pass runs with no backend.
+ */
+function portalPreviewClient(): QueryClient {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: Infinity,
+        gcTime: Infinity,
+        retry: false,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+      },
+    },
+  });
+  const contact: PortalMe = {
+    user_id: "contact-preview",
+    kind: "contact",
+    email: "ana.gomez@andes.example",
+    display_name: "Ana Gómez",
+    timezone: "America/Bogota",
+    permissions: ["portal.ticket.read", "portal.ticket.write"],
+  };
+  client.setQueryData([PORTAL_ME_KEY], contact);
+  return client;
+}
+
 export function PreviewPage() {
   const [tab, setTab] = useState("all");
   // See the note above `patchPreviewClient`: at module scope these two calls
   // kept every fixture they reference in the production bundle.
   const patchClient = useMemo(() => patchPreviewClient(), []);
   const docsClient = useMemo(() => docsPreviewClient(), []);
+  const portalClient = useMemo(() => portalPreviewClient(), []);
   const [picked, setPicked] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [chip, setChip] = useState(0);
@@ -1014,6 +1368,7 @@ export function PreviewPage() {
          in the drawer toggle (operator decision 4) as it grades the rest of
          the chrome: at 390px it is drawn, at 320px it wraps out of sight. */
       clientMark={{ short: "AL", name: "Andes Logistics" }}
+      newMenu={PREVIEW_NEW_MENU}
       user={{ name: "Alex Morgan", role: "Administrator" }}
       onSignOut={() => undefined}
     >
@@ -1615,7 +1970,7 @@ export function PreviewPage() {
           it, and the document viewer is the one surface in this product where
           a rendering mistake is stored XSS across a whole tenant rather than a
           layout defect. The fixture's current version is a live three-vector
-          XSS payload; a browser pass asserts `window.__ITMS_XSS_EXECUTED` is
+          XSS payload; a browser pass asserts `window.__XSS_PROBE_EXECUTED` is
           still undefined after the page settles. */}
       <div style={{ marginTop: 24 }}>
         <QueryClientProvider client={docsClient}>
@@ -1634,6 +1989,38 @@ export function PreviewPage() {
           onSignIn={() => {}}
           embedded
         />
+      </div>
+
+      {/* THE PATTERN KIT (redesign plan, Task 3): the pieces every list,
+          record and form is built from, measured here before any page uses
+          them. */}
+      <div style={{ marginTop: 24 }}>
+        <KitPreview />
+      </div>
+
+      {/* THE SIGN-IN FRAME (redesign plan, pre-flight W-I4): the card every
+          screen without a session draws. Here so the browser pass measures
+          it, and measures it again when wave 8 repaints `AuthCard`.
+          `embedded`: a region named by its headline, not a second <main>,
+          and it leaves the tab's title alone. */}
+      <div style={{ marginTop: 24 }}>
+        <AuthCard title="Sign in" intro="Use the email address and password your administrator gave you." embedded>
+          <p>The sign-in form goes here.</p>
+        </AuthCard>
+      </div>
+
+      {/* THE PORTAL'S FRAME (pre-flight W-I4), around one fixed line: what
+          a client's contact sees around every portal page, measured here
+          because the harmony walk's fixture person is not a contact. Its
+          `/portal/me` is seeded (`portalPreviewClient`). `embedded`: a
+          region named by the portal, not a second <main>, and nobody's
+          session (it forgets no stored client and records no person). */}
+      <div style={{ marginTop: 24 }}>
+        <QueryClientProvider client={portalClient}>
+          <PortalShell embedded>
+            <p>A portal page draws here.</p>
+          </PortalShell>
+        </QueryClientProvider>
       </div>
 
       <ConfirmDialog

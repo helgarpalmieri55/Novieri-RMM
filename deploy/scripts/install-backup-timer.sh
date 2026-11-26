@@ -47,7 +47,7 @@ write_unit() {
 
 write_unit its-platform-backup.service <<EOF
 [Unit]
-Description=ITMS platform backup (databases, objects, off-host copy)
+Description=Novieri RMM platform backup (databases, objects, off-host copy)
 Wants=docker.service
 After=docker.service
 
@@ -62,7 +62,7 @@ EOF
 
 write_unit its-platform-backup.timer <<'EOF'
 [Unit]
-Description=Nightly ITMS platform backup
+Description=Nightly Novieri RMM platform backup
 
 [Timer]
 OnCalendar=*-*-* 02:30:00
@@ -76,7 +76,7 @@ EOF
 if [ "$DRILL" = 1 ]; then
     write_unit its-restore-drill.service <<EOF
 [Unit]
-Description=ITMS monthly restore drill (throwaway project, never the live stack)
+Description=Novieri RMM monthly restore drill (throwaway project, never the live stack)
 Wants=docker.service
 After=docker.service its-platform-backup.service
 
@@ -90,7 +90,7 @@ EOF
 
     write_unit its-restore-drill.timer <<'EOF'
 [Unit]
-Description=Monthly ITMS restore drill
+Description=Monthly Novieri RMM restore drill
 
 [Timer]
 OnCalendar=*-*-01 05:00:00

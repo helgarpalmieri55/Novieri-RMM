@@ -79,7 +79,7 @@ export function CompliancePanels({
       title={t("patch.compliance.title")}
       subtitle={t("patch.compliance.subtitle")}
     >
-      <QueryState loading={report.isLoading} error={report.error} empty={false} emptyLabel="">
+      <QueryState loading={report.isPending} error={report.error} empty={false} emptyLabel="">
         {nothingMeasured ? (
           <EmptyState
             icon="chart"

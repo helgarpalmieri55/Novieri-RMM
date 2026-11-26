@@ -57,7 +57,7 @@
  * button here, which is what SC 1.4.11 means by "information required to
  * identify a user interface component". `--line-control` clears 3:1 on every
  * surface a button lands on; `contrast.test.ts` computes it. */
-.btn { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--t-body)/1 var(--sans); padding: 9px 13px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap;
+.btn { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--t-body)/1 var(--sans); padding: 9px 13px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap; min-height: 36px;
 }
 /* Console addition (design first). Hover repaints the ground AND hardens the
  * edge; a ground wash alone (`--surface-2` on `--surface`, 1.02:1) would be a
@@ -78,6 +78,11 @@
  * (design edit 8), and white on it is 7.57:1. */
 .btn.primary:hover, .btn.pri:hover { background: var(--accent-2); border-color: var(--accent-2);
 }
+/* PRESSED (DESIGN.md v4, "Buttons"; redesign decision D5): the brand's third
+ * accent step, `--accent-3`, one deeper than the hover, so white on it reads
+ * at least as well as on the hover. */
+.btn.primary:active, .btn.pri:active { background: var(--accent-3); border-color: var(--accent-3);
+}
 /* v3 `.btn.ghost`: no edge, accent ink. */
 .btn.ghost { border-color: transparent; background: transparent; color: var(--accent);
 }
@@ -96,7 +101,11 @@
 }
 .btn.ghost.danger:hover { background: var(--sev-crit-s);
 }
-.btn.small { padding: 6px 10px; font-size: var(--t-sm);
+.btn.small { padding: 6px 10px; font-size: var(--t-sm); min-height: 30px;
+}
+/* Kit addition (batch 2, K4): `Btn wide`, a step's one action across its
+ * card, content centred. */
+.btn.wide { width: 100%; justify-content: center;
 }
 .btn.icon-only { padding: 9px;
 }
@@ -153,6 +162,10 @@
 .tabs a.on, .tabs .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500;
 }
 .tab-count { color: var(--muted); font-size: var(--t-sm);
+}
+/* Kit addition (batch 3, B3-1): a tab's state beside its name (`TabItem.note`),
+ * quieter than the label: muted, the small step, regular weight. */
+.tab-note { color: var(--muted); font-size: var(--t-sm); font-weight: 400;
 }
 /* A strip that scrolls instead of folding (design file, console additions
  * wave 10). The hairline is an inset shadow, because `overflow` clips the
@@ -399,7 +412,7 @@ td.cell-clip .cell-title, td.cell-clip .cell-sub { display: block; overflow: hid
  * a pill with no kind is colourless on purpose, so `StatusPill` cannot paint
  * a state it has not classified. Every pill also carries its kind's icon
  * (`kindOf` in components.tsx), because colour is never the only carrier. */
-.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 500; padding: 3px 9px 3px 7px; border-radius: var(--r-pill); white-space: nowrap;
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 500; min-height: 24px; padding: 0 9px 0 7px; border-radius: var(--r-badge); white-space: nowrap;
 }
 .p-crit { background: var(--sev-crit-s); color: var(--sev-crit);
 }
@@ -525,6 +538,11 @@ td.cell-clip .cell-title, td.cell-clip .cell-sub { display: block; overflow: hid
 }
 .input-field::placeholder, .search-field::placeholder, .select-field::placeholder { color: var(--muted);
 }
+/* Kit addition (batch 2, K5): a value the person cannot change, kept in a
+ * field (for a password manager): sunken, so it does not look editable. The
+ * colour only: the shorthand would also wipe a select's chevron image. */
+.input-field[readonly] { background-color: var(--surface-2);
+}
 .input-field:focus, .select-field:focus, .search-field:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
 }
 .search-field { min-width: 260px; flex: 1;
@@ -646,9 +664,15 @@ select.input-field, select.select-field { appearance: none; -webkit-appearance: 
  * a <button>, which would otherwise bring the user agent's font. No
  * `line-height`: v3's `.chip` declares none, and stating 1.2 here drew every
  * chip in the console 3px shorter than the design. */
-.chip { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); padding: 6px 11px; border-radius: var(--r-pill); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink-2); font-family: inherit;
+.chip { display: inline-flex; align-items: center; gap: 7px; font-size: var(--t-body); font-weight: 500; min-height: 32px; padding: 0 11px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink); font-family: inherit;
 }
 .chip.on { background: var(--accent-s); border-color: var(--accent); color: var(--accent);
+}
+/* A chip's count (`FilterChips`, DESIGN.md v4 "Chips"): smaller and quieter
+ * than its label, in tabular figures, and in the accent once selected. */
+.chip .n { font-size: var(--t-sm); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.chip.on .n { color: var(--accent);
 }
 /* `disabled` (console addition, wave 8): genuinely inert, not merely dimmed
  * -- `Chips` puts the real `disabled` attribute on each `<button>`, which is
@@ -734,6 +758,13 @@ select.input-field, select.select-field { appearance: none; -webkit-appearance: 
 }
 .kv dt { color: var(--muted);
 }
+/* Kit addition (batch 3, B3-7): a long value (an address, a sign-in name)
+ * breaks instead of running past its panel. The `1fr` track's automatic
+ * minimum is the value's min-content, so one long word set it;
+ * `overflow-wrap: anywhere` lowers that minimum and `min-width: 0` lets the
+ * cell shrink to its track. */
+.kv dd { min-width: 0; overflow-wrap: anywhere;
+}
 
 /* ------------------------------------------------------------------- empty */
 
@@ -750,6 +781,11 @@ select.input-field, select.select-field { appearance: none; -webkit-appearance: 
 .empty-icon { display: inline-grid; place-items: center; color: var(--muted);
 }
 .note { font-size: var(--t-sm); color: var(--muted);
+}
+/* Kit addition (batch 3, B3-4): a note, a form hint or a page's description
+ * ends without one word alone on its last line (the detector's stragglers at
+ * 390). `pretty` for paragraphs; headings balance (`.ph h1`, kit.css). */
+.note, .form-hint, .ph .sub { text-wrap: pretty;
 }
 /* The caption rung, UNSCOPED (design additions wave 2). `.tile .k` and
  * `.facts .k` each add a layout on top of this and win on specificity; a

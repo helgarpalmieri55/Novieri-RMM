@@ -536,7 +536,7 @@ async def test_the_test_send_goes_through_the_saved_relay_and_is_audited(email_e
     assert (client.host, client.port) == ("smtp.internal", 587)
     assert client.starttls_called and client.login_args == ("itms", STORED)
     assert client.sent is not None and client.sent["To"] == "itms@toeshee.com"
-    assert client.sent["Subject"] == "ITMS test message"
+    assert client.sent["Subject"] == "Novieri RMM test message"
     sent = [e for e in await _audit(email_env.admin_engine, org) if e.action.startswith("email.")]
     assert [e.action for e in sent] == ["email.credential_used", "email.test_requested"]
     assert sent[1].meta == {"recipient": "itms@toeshee.com", "outcome": "sent"}
@@ -563,7 +563,7 @@ async def test_a_test_send_the_relay_refuses_is_reported_not_swallowed(email_env
 async def test_the_test_send_goes_to_the_address_asked_for_and_audits_it(email_env: Any) -> None:
     org, sub, headers = await _admin(email_env, "email-test-chosen")
     await _seed(email_env, org, sub)
-    tagged = f"{sub}+itms-test@test.local"
+    tagged = f"{sub}+novieri-test@test.local"
 
     response = await email_env.client.post(
         "/api/v1/settings/email/test", json={"recipient": tagged}, headers=headers
@@ -674,14 +674,14 @@ async def test_the_settings_suggest_a_tagged_form_of_the_callers_address(email_e
 
     response = await email_env.client.get("/api/v1/settings/email", headers=headers)
 
-    assert response.json()["suggested_test_recipient"] == f"{sub}+itms-test@test.local"
+    assert response.json()["suggested_test_recipient"] == f"{sub}+novieri-test@test.local"
 
 
 @pytest.mark.parametrize(
     ("email", "expected"),
     [
-        ("helgar@toeshee.com", "helgar+itms-test@toeshee.com"),
-        ("helgar+old@Toeshee.com", "helgar+itms-test@toeshee.com"),
+        ("helgar@toeshee.com", "helgar+novieri-test@toeshee.com"),
+        ("helgar+old@Toeshee.com", "helgar+novieri-test@toeshee.com"),
         ("", ""),
         ("not-an-address", ""),
         ("a@b@c.com", ""),

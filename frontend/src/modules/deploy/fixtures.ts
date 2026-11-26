@@ -44,7 +44,7 @@ const PACKAGE_SEEDS: PackageSeed[] = [
   { id: "pkg-chrome-128", name: "Google Chrome", version: "128.0.6613", os: "windows", installer: "msi", sha: "9f3a4c1e7b2d8a6f0c5e3b1d9a7f2c4e6b8d0a2c4e6f8a0b2c4d6e8f0a1b3c5e", args: "/qn", createdDays: 5 },
   { id: "pkg-7zip-2408", name: "7-Zip", version: "24.08", os: "windows", installer: "msi", sha: "41b0c2d4e6f8a0b2c4d6e8f0a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7d90", args: "/qn", createdDays: 24 },
   { id: "pkg-zoom-620", name: "Zoom Workplace", version: "6.2.0", os: "macos", installer: "pkg", sha: "c8e1f3a5b7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3", args: null, createdDays: 12 },
-  { id: "pkg-agent-deb", name: "toeshee-agent", version: "1.8.2", os: "linux", installer: "deb", sha: null, args: null, createdDays: 1 },
+  { id: "pkg-agent-deb", name: "novieri-agent", version: "1.8.2", os: "linux", installer: "deb", sha: null, args: null, createdDays: 1 },
 ];
 
 function pkg(seed: PackageSeed): Package {

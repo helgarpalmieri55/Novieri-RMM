@@ -89,7 +89,7 @@ class DeploymentPackage:
 
 
 def _artifact_filename(os_name: str, arch: str) -> str:
-    return f"its-agent-{os_name}-{arch}{'.exe' if os_name == 'windows' else ''}"
+    return f"novieri-agent-{os_name}-{arch}{'.exe' if os_name == 'windows' else ''}"
 
 
 def _verify_command(os_name: str, filename: str, sha256: str) -> str:
@@ -125,12 +125,12 @@ def _install_command(os_name: str, filename: str) -> str:
     if os_name == "windows":
         return (
             "powershell.exe -NoProfile -ExecutionPolicy Bypass "
-            "-File \\\\<dfs-or-sysvol>\\its-agent\\install.ps1 "
-            f"-Binary \\\\<dfs-or-sysvol>\\its-agent\\{filename} -NoStart"
+            "-File \\\\<dfs-or-sysvol>\\novieri-agent\\install.ps1 "
+            f"-Binary \\\\<dfs-or-sysvol>\\novieri-agent\\{filename} -NoStart"
         )
     if os_name == "darwin":
-        return "sudo /path/to/its-agent/packaging/darwin/install.sh --no-start"
-    return "sudo apt install -y ./its-agent_<version>_<arch>.deb"
+        return "sudo /path/to/novieri-agent/packaging/darwin/install.sh --no-start"
+    return "sudo apt install -y ./novieri-agent_<version>_<arch>.deb"
 
 
 def _enrol_command(os_name: str) -> str:
@@ -145,16 +145,16 @@ def _enrol_command(os_name: str) -> str:
         return (
             "$env:ITS_AGENT_ENROLL_TOKEN = <read from your secret store>; "
             "powershell.exe -NoProfile -ExecutionPolicy Bypass "
-            "-File \\\\<dfs-or-sysvol>\\its-agent\\its-agent-enroll.ps1 "
+            "-File \\\\<dfs-or-sysvol>\\novieri-agent\\novieri-agent-enroll.ps1 "
             "-Url https://<your-console>"
         )
     if os_name == "darwin":
         return (
             "sudo ITS_AGENT_ENROLL_TOKEN=<from your secret store> "
-            "/path/to/its-agent/packaging/darwin/install.sh --url https://<your-console>"
+            "/path/to/novieri-agent/packaging/darwin/install.sh --url https://<your-console>"
         )
     return (
-        "printf %s \"$TOKEN\" | sudo its-agent-enroll --token-stdin "
+        "printf %s \"$TOKEN\" | sudo novieri-agent-enroll --token-stdin "
         "--url https://<your-console>"
     )
 
@@ -224,7 +224,7 @@ def _staging(channel: str, *, filename: str, url: str, verify: str) -> tuple[Ste
                 detail=tr(
                     "A DFS or SYSVOL path every target machine account can read, and "
                     "that only your administrators can write. Copy install.ps1 and "
-                    "its-agent-enroll.ps1 from agent/packaging/windows/ alongside it."
+                    "novieri-agent-enroll.ps1 from agent/packaging/windows/ alongside it."
                 ),
                 command="",
             ),
@@ -256,15 +256,15 @@ def _staging(channel: str, *, filename: str, url: str, verify: str) -> tuple[Ste
                 title=tr("Wrap it as a Win32 app"),
                 detail=tr(
                     "IntuneWinAppUtil over a folder holding the binary, install.ps1 and "
-                    "its-agent-enroll.ps1. Intune encrypts the payload at rest and "
+                    "novieri-agent-enroll.ps1. Intune encrypts the payload at rest and "
                     "delivers it to SYSTEM on the assigned device."
                 ),
-                command="IntuneWinAppUtil.exe -c .\\its-agent -s install.ps1 -o .\\out",
+                command="IntuneWinAppUtil.exe -c .\\novieri-agent -s install.ps1 -o .\\out",
             ),
             Step(
                 title=tr("Set the detection rule"),
                 detail=tr(
-                    "File exists: %ProgramFiles%\\ITSuite\\its-agent.exe. Do not detect "
+                    "File exists: %ProgramFiles%\\NovieriRMM\\novieri-agent.exe. Do not detect "
                     "on the enrolled state — an installed-but-unenrolled agent is a "
                     "normal intermediate state on this path."
                 ),

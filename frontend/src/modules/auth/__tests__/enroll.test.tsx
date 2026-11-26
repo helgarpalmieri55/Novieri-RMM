@@ -51,8 +51,21 @@ afterEach(() => {
 });
 
 describe("adding the first second factor", () => {
+  it("draws the two ways to enrol as two sections, each with its own heading", () => {
+    // Plan Task 13 (8.3): the passkey and the app are two choices inside the
+    // frame's card, each a region named by its own panel-rung heading.
+    renderAuth("/sign-in/enroll");
+    const passkey = screen.getByRole("region", { name: "Passkey (recommended)" });
+    const app = screen.getByRole("region", { name: "Authenticator app" });
+    expect(within(passkey).getByRole("heading", { level: 2, name: "Passkey (recommended)" })).toBeInTheDocument();
+    expect(within(passkey).getByRole("button", { name: "Create a passkey" })).toBeInTheDocument();
+    expect(within(app).getByRole("heading", { level: 2, name: "Authenticator app" })).toBeInTheDocument();
+    expect(within(app).getByRole("button", { name: "Set up an authenticator app" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(2);
+  });
+
   it("makes a passkey from the server's options, names it, and shows the recovery codes", async () => {
-    const options = { challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" }, excludeCredentials: [] };
+    const options = { challenge: "cmVnaXN0ZXI", rp: { name: "Novieri RMM" }, excludeCredentials: [] };
     calls.enrollPasskeyOptions.mockResolvedValue(options);
     const user = userEvent.setup();
     renderAuth("/sign-in/enroll?next=%2Fdevices");
@@ -125,6 +138,17 @@ describe("adding the first second factor", () => {
 });
 
 describe("the recovery codes", () => {
+  it("keeps one primary action", () => {
+    // Plan Task 13 (8.4): "Continue to the console" is the step's one primary;
+    // copying is a secondary action beside the codes.
+    handOverCodes(TEN_CODES);
+    const { container } = renderAuth("/sign-in/recovery-codes");
+    const primaries = container.querySelectorAll("button.primary");
+    expect(primaries).toHaveLength(1);
+    expect(primaries[0]).toHaveAccessibleName("Continue to the console");
+    expect(screen.getByRole("button", { name: "Copy the codes" })).not.toHaveClass("primary");
+  });
+
   it("open the console only once the person says they saved them", async () => {
     handOverCodes(TEN_CODES);
     const user = userEvent.setup();

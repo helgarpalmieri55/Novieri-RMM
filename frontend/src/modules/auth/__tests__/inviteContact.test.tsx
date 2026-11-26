@@ -72,7 +72,7 @@ describe("a contact's invitation", () => {
   });
 
   it("accepts with a passkey instead, named by the person", async () => {
-    calls.invitePasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" } });
+    calls.invitePasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "Novieri RMM" } });
     calls.invitePasskey.mockResolvedValue({ state: "signed_in" });
     const user = userEvent.setup();
     renderAuth("/invite#tok-contact-1");
@@ -89,7 +89,7 @@ describe("a contact's invitation", () => {
   });
 
   it("says so when the passkey is not made, and the invitation still takes a password (fix round 1)", async () => {
-    calls.invitePasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "ITMS" } });
+    calls.invitePasskeyOptions.mockResolvedValue({ challenge: "cmVnaXN0ZXI", rp: { name: "Novieri RMM" } });
     webauthn.startRegistration.mockRejectedValue(Object.assign(new Error("The prompt was closed"), { name: "NotAllowedError" }));
     const user = userEvent.setup();
     renderAuth("/invite#tok-contact-1");

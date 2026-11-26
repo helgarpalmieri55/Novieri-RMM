@@ -203,9 +203,9 @@ next to the cert pair. Registration is a map insert.
 7. The process runs under its service manager, and the service manager's
    configured binary path equals `os.Executable()` after symlink resolution →
    otherwise `not_running_as_service` / `unsupported_install_layout`. The check
-   uses `systemctl show its-agent -p ExecStart` on Linux, `QueryServiceConfig`
+   uses `systemctl show novieri-agent -p ExecStart` on Linux, `QueryServiceConfig`
    `BinaryPathName` on Windows, and `ProgramArguments[0]` from
-   `launchctl print system/com.toeshee.itsagent` on macOS.
+   `launchctl print system/com.novieri.rmm.agent` on macOS.
 8. `artifact_url` is `https://`, and `artifact_size` ≤ 256 MiB → otherwise
    `bad_artifact_url` / `artifact_too_large`.
 9. There is free space of at least 3 × `artifact_size` on the data directory's
@@ -228,11 +228,11 @@ two security-relevant primitives.
    `artifact_size + 1`, while hashing. If the size or the SHA-256 does not
    match, delete the file and fail with `size_mismatch` / `hash_mismatch`.
    Compare in constant time, and never echo the digests (as `stage` does).
-3. Rename it to `staged/its-agent[.exe]`, mode 0700.
+3. Rename it to `staged/novieri-agent[.exe]`, mode 0700.
 4. Windows, once a signer pin is compiled in: verify Authenticode (§10).
-5. Copy the running binary (`os.Executable()`) to `prev/its-agent[.exe]` and
+5. Copy the running binary (`os.Executable()`) to `prev/novieri-agent[.exe]` and
    hash it. That copy is the rollback source and is also what runs the helper.
-6. Run `prev/its-agent --version`, with a 10 s timeout. It must exit 0 and
+6. Run `prev/novieri-agent --version`, with a 10 s timeout. It must exit 0 and
    print `main.version`. If the data directory is mounted `noexec`, that shows
    up here as `data_dir_noexec`, before anything has changed.
 7. Write `state.json` in phase `staged`. Write it atomically: a temporary file,
@@ -288,7 +288,7 @@ reasons:
 - **Windows.** Enterprise outbound-firewall rules, AV exclusions and
   WDAC/AppLocker path rules are usually keyed on the program path.
 - **Linux.** A systemd drop-in pointing at a versioned directory would fight
-  dpkg over `/usr/bin/its-agent`. A plain file at the same path is what
+  dpkg over `/usr/bin/novieri-agent`. A plain file at the same path is what
   `apt`/`dpkg -i` expects to overwrite later.
 
 **A later manual install always wins.** A package install or `install.ps1`
@@ -299,36 +299,36 @@ ignored.
 The one install primitive, `update.InstallFile(src, wantSHA, target)`, is used
 for both the swap and the rollback:
 
-1. Copy `src` to `<targetdir>/.its-agent.new`, opened `O_EXCL`, then `fsync`.
-2. **Re-hash `.its-agent.new` in the target directory** and compare it with
+1. Copy `src` to `<targetdir>/.novieri-agent.new`, opened `O_EXCL`, then `fsync`.
+2. **Re-hash `.novieri-agent.new` in the target directory** and compare it with
    `wantSHA`. This is the last check before the rename, done at the location
    the file will run from.
-3. Run `.its-agent.new --update-selftest` with a 30 s timeout. The self-test
+3. Run `.novieri-agent.new --update-selftest` with a 30 s timeout. The self-test
    loads config, loads identity read-only, parses the pinned job-signing key,
    builds the capability registry, and prints `{"version","os","arch"}`. It
    dials nothing and writes nothing. It must exit 0 and report the expected
    version. Architecture errors, missing ad-hoc signatures on arm64 macOS, AV
    blocks and init panics surface here, **before** the swap. If it fails, the
    result is `selftest_failed`.
-4. Rename `.its-agent.new` over `target`. On POSIX this is `rename(2)`. On
+4. Rename `.novieri-agent.new` over `target`. On POSIX this is `rename(2)`. On
    Windows it is `MoveFileExW(MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)`
    with the service stopped (§5.5). At no point is `target` missing.
 
-The target directory holds `.its-agent.new` only for the length of one swap.
+The target directory holds `.novieri-agent.new` only for the length of one swap.
 The previous binary lives in `<data>/update/prev/`, not beside the target, so
 nothing unowned ever appears in `/usr/bin` or `Program Files`.
 
 ### 5.2 The helper: a transient process, running the previous binary
 
-The helper is `prev/its-agent --update-helper=apply --state <data>/update/state.json`,
+The helper is `prev/novieri-agent --update-helper=apply --state <data>/update/state.json`,
 or `=rollback`. It is the **known-good binary**, so a new release that cannot
 start cannot also break its own rollback. It must live outside the service's
 lifetime, because it stops and starts that service:
 
 | OS | How it is launched so a service stop does not kill it |
 |---|---|
-| Linux | `systemd-run --unit=its-agent-update --collect --no-block --quiet -p Type=exec -p ProtectSystem=strict -p ReadWritePaths=<targetdir> -p ReadWritePaths=<data> -p ProtectHome=yes -p PrivateTmp=yes -p NoNewPrivileges=yes -- <prev> --update-helper=apply --state ...`. This is a transient unit outside `its-agent.service`'s cgroup, which `KillMode=control-group` would otherwise kill. |
-| macOS | `launchctl bootstrap system <data>/update/com.toeshee.itsagent.update.plist`, a root:wheel 0644 plist with `RunAtLoad`, no `KeepAlive` and `LaunchOnlyOnce`. The plist is not under `/Library/LaunchDaemons`, so a reboot does not relaunch it. The helper `bootout`s its own label as its last act. `launchctl submit` is the fallback if `bootstrap` refuses a path outside the standard directories, and the macOS e2e job (§11) settles which one ships. |
+| Linux | `systemd-run --unit=novieri-agent-update --collect --no-block --quiet -p Type=exec -p ProtectSystem=strict -p ReadWritePaths=<targetdir> -p ReadWritePaths=<data> -p ProtectHome=yes -p PrivateTmp=yes -p NoNewPrivileges=yes -- <prev> --update-helper=apply --state ...`. This is a transient unit outside `novieri-agent.service`'s cgroup, which `KillMode=control-group` would otherwise kill. |
+| macOS | `launchctl bootstrap system <data>/update/com.novieri.rmm.agent.update.plist`, a root:wheel 0644 plist with `RunAtLoad`, no `KeepAlive` and `LaunchOnlyOnce`. The plist is not under `/Library/LaunchDaemons`, so a reboot does not relaunch it. The helper `bootout`s its own label as its last act. `launchctl submit` is the fallback if `bootstrap` refuses a path outside the standard directories, and the macOS e2e job (§11) settles which one ships. |
 | Windows | `CreateProcess` with `DETACHED_PROCESS\|CREATE_NEW_PROCESS_GROUP\|CREATE_BREAKAWAY_FROM_JOB`, inheriting SYSTEM. If breakaway is denied, it retries without that flag. The SCM does not kill a service's child processes on stop. |
 
 The helper reads one file and writes one file. It has no network access
@@ -416,8 +416,8 @@ exists.
 
 | OS | Swap | Restart / rollback |
 |---|---|---|
-| **Linux (systemd)** | Rename-over while the old process runs (the kernel keeps its inode alive). | `systemctl reset-failed its-agent` (clears a `StartLimitBurst` trip), then `systemctl restart its-agent`. Rollback uses the same sequence with `prev`. `Restart=always` handles crashes during trial, and each start increments `starts`. |
-| **macOS (launchd)** | Rename-over while running. | `launchctl kickstart -k system/com.toeshee.itsagent`. `KeepAlive` plus `ThrottleInterval 10` restarts crashes, which count toward `starts`. |
+| **Linux (systemd)** | Rename-over while the old process runs (the kernel keeps its inode alive). | `systemctl reset-failed novieri-agent` (clears a `StartLimitBurst` trip), then `systemctl restart novieri-agent`. Rollback uses the same sequence with `prev`. `Restart=always` handles crashes during trial, and each start increments `starts`. |
+| **macOS (launchd)** | Rename-over while running. | `launchctl kickstart -k system/com.novieri.rmm.agent`. `KeepAlive` plus `ThrottleInterval 10` restarts crashes, which count toward `starts`. |
 | **Windows (SCM)** | A running image cannot be replaced, so the helper stops the service first (`mgr.Service.Control(svc.Stop)` via `golang.org/x/sys/windows/svc/mgr`, then waits up to 60 s for `Stopped`), then does the rename-over. | `mgr.Service.Start()`. A clean stop does not trigger the SCM recovery actions. Crashes during trial do (`restart/5000/restart/15000/restart/60000` from `install.ps1`), and count toward `starts`. Downtime is the stop plus the start: seconds. |
 
 ---
@@ -661,7 +661,7 @@ defined now so that turning it on changes a constant and nothing else.
   the control plane would be the control plane vouching for itself, which is
   the thing a signature exists to avoid.
 - **Verification** happens at step 4 of §4.2, and again inside `InstallFile`
-  on `.its-agent.new`. It calls `WinVerifyTrust` with
+  on `.novieri-agent.new`. It calls `WinVerifyTrust` with
   `WINTRUST_ACTION_GENERIC_VERIFY_V2` through `golang.org/x/sys/windows`
   (no cgo), then extracts the signer chain with `WTHelperProvDataFromStateData`
   and compares it against the pin. It requires a timestamp countersignature.
@@ -698,7 +698,7 @@ trust. It does not make the control plane less trusted overall.
 **Go tests, in the existing `agent` CI job:** the §4.1 refusal order, one test
 per token, each asserting through a counting fetcher that no network call was
 made; the §4.3 table; a hash, size or signature mismatch leaves no
-`staged/its-agent`, no `state.json` and no helper; `InstallFile` re-hashes at
+`staged/novieri-agent`, no `state.json` and no helper; `InstallFile` re-hashes at
 the target and refuses a file swapped after staging; every §5.3 transition,
 driven through `Resume` with a fake clock, including the decision-lock race;
 `ErrDeferred` from any type except `agent.update` becomes `failed`; the budget
@@ -747,7 +747,7 @@ The job must observe each of these on each OS:
 6. **Kill the helper during C's trial**, which simulates a reboot. The new
    binary's own deadline triggers the rollback, and the old binary reports it.
 7. **Throughout scenarios 1–6**, a sampler records the listening sockets owned
-   by any `its-agent` process and finds none. The tools are `ss -ltnp` on
+   by any `novieri-agent` process and finds none. The tools are `ss -ltnp` on
    Linux, `lsof -iTCP -sTCP:LISTEN` on macOS and `Get-NetTCPConnection -State
    Listen` on Windows.
 

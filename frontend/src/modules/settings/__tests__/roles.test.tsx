@@ -170,7 +170,7 @@ describe("Settings — Roles tab", () => {
     const user = await openRoles();
     await user.click(await screen.findByRole("button", { name: "Edit permissions for technician" }));
     await user.click(await screen.findByLabelText("devices.manage"));
-    await user.click(screen.getByRole("button", { name: "Save permissions" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.setRolePermissions).toHaveBeenCalledTimes(1));
     expect(calls.setRolePermissions).toHaveBeenCalledWith(TECHNICIAN_ROLE.id, [
@@ -201,7 +201,7 @@ describe("Settings — Roles tab", () => {
     const user = await openRoles();
     await user.click(await screen.findByRole("button", { name: "Edit permissions for technician" }));
     await user.click(await screen.findByLabelText("devices.manage"));
-    await user.click(screen.getByRole("button", { name: "Save permissions" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
       await screen.findByText(
@@ -227,7 +227,10 @@ describe("Settings — Roles tab", () => {
 
     // Still visible — hiding it teaches people the feature does not exist.
     expect(await screen.findByLabelText("devices.manage")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save permissions" })).toBeDisabled();
+    // RE-POINTED (redesign, decision D22): the matrix saves through the kit's
+    // bar, drawn only with a change, and a person who cannot edit makes none;
+    // the reason is the notice above the tab instead of a disabled Save.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.getByRole("button", { name: "Create role" })).toBeDisabled();
     expect(screen.getAllByText(/requires the roles\.manage permission/i).length).toBeGreaterThan(0);
   });
@@ -329,7 +332,7 @@ describe("Settings — Roles tab, a recent second factor", () => {
     const user = await openRoles();
     await user.click(await screen.findByRole("button", { name: "Edit permissions for technician" }));
     await user.click(await screen.findByLabelText("devices.manage"));
-    await user.click(screen.getByRole("button", { name: "Save permissions" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await confirm(user);
 
@@ -382,5 +385,34 @@ describe("Settings — Roles tab, a recent second factor", () => {
     expect(within(still).getByRole("button", { name: "Delete auditor" })).toBeInTheDocument();
     expect(await within(still).findByRole("alert")).toHaveTextContent("Nothing was changed: the confirmation was closed.");
     expect(calls.deleteRole).toHaveBeenCalledExactlyOnceWith(AUDITOR_ROLE.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The form pattern (redesign plan, Task 12, 7.1; Receta FO; decision D22): the
+// matrix saves through the kit's one bar, and a create with no name is refused
+// out loud instead of by a dead button.
+// ---------------------------------------------------------------------------
+
+describe("Settings — Roles on the form pattern", () => {
+  it("shows the bar only while the matrix holds a change, and Discard puts it back", async () => {
+    const user = await openRoles();
+    await user.click(await screen.findByRole("button", { name: "Edit permissions for technician" }));
+    const manage = await screen.findByLabelText("devices.manage");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await user.click(manage);
+    expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(screen.getByLabelText("devices.manage")).not.toBeChecked();
+  });
+
+  it("says a new role needs a name on submit, and sends nothing", async () => {
+    const user = await openRoles();
+    const create = await screen.findByRole("button", { name: "Create role" });
+    expect(create).toBeEnabled();
+    await user.click(create);
+    expect(await screen.findByRole("alert")).toHaveTextContent("New role name is required");
+    expect(calls.createRole).not.toHaveBeenCalled();
   });
 });

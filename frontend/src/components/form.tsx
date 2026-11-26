@@ -21,7 +21,7 @@
  *
  * NOT INVENTED. Two implementations already in this tree do it correctly, and
  * this generalises them rather than adding a third opinion:
- * `modules/settings/SaveBar.tsx` — disabled with a visible reason,
+ * `shell/formKit.tsx`'s `SaveBar` — disabled with a visible reason,
  * `role="alert"` on failure, `role="status"` on success, and no optimistic
  * success anywhere — and `modules/reporting/paramsForm.ts#missingRequired`,
  * the one route in the product that renders its validation.

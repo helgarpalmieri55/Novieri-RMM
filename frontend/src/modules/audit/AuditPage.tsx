@@ -36,8 +36,6 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-
 import { EmptyState, NoValue } from "../../components/emptystate";
 import { describeSubmitError } from "../../components/form";
 import { Table, Td, Th } from "../../components/ui";
@@ -47,7 +45,22 @@ import { Trans } from "../../i18n/Trans";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime, intlLocale } from "../../lib/datetime";
-import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill, Tabs } from "../../shell/components";
+import {
+  Btn,
+  ListEmpty,
+  ListToolbar,
+  PageHead,
+  Panel,
+  QueryState,
+  SearchField,
+  ShowingCount,
+  StatCard,
+  StatsGrid,
+  StatusPill,
+  UrlTabs,
+  useUrlFilters,
+  useUrlTab,
+} from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { AUDIT_EVENTS_KEY, AUDIT_VERIFY_KEY, listAuditEvents, verifyAuditChain } from "./api";
 import { auditActionLabel, auditActorTypeLabel, auditTargetTypeLabel } from "./labels";
@@ -146,20 +159,19 @@ function HashCell({ hash, onCopy }: { hash: string; onCopy: (hash: string) => vo
 export function AuditPage() {
   const t = useT();
   const api = useApi();
-  const [params, setParams] = useSearchParams();
-  // An unrecognised `?tab=` falls back to the event search rather than
-  // rendering nothing: a hand-edited URL must not produce a blank page.
-  const tab = params.get(TAB_PARAM) === INTEGRITY_TAB ? INTEGRITY_TAB : EVENTS_TAB;
-  function setTab(key: string) {
-    const next = new URLSearchParams(params);
-    if (key === EVENTS_TAB) next.delete(TAB_PARAM);
-    else next.set(TAB_PARAM, key);
-    // `replace`: flipping between two views of one page is not a step back
-    // through the operator's history.
-    setParams(next, { replace: true });
-  }
-  const [search, setSearch] = useState("");
-  const [action, setAction] = useState("");
+  // THE KIT'S URL TABS on the same `?tab=` (redesign plan, O3 3.11). An
+  // unrecognised value falls back to the event search rather than rendering
+  // nothing: a hand-edited URL must not produce a blank page.
+  const [tab, setTab] = useUrlTab<(typeof TABS)[number]["key"]>([EVENTS_TAB, INTEGRITY_TAB], EVENTS_TAB, TAB_PARAM);
+  // THE TWO FILTERS IN THE URL (they were `useState`): `q` searches the
+  // loaded page, `action` is the server's one filter. Both replace their
+  // history entry as they are typed. No Client chip: the audit log is every
+  // client's, read only with the permission on every client (invariant 5a).
+  const filters = useUrlFilters(["q", "action"] as const);
+  const search = filters.values.q;
+  const action = filters.values.action;
+  const setSearch = (value: string) => filters.set("q", value);
+  const setAction = (value: string) => filters.set("action", value, { replace: true });
   const [copied, setCopied] = useState<string | null>(null);
 
   async function copyHash(hash: string) {
@@ -321,8 +333,14 @@ export function AuditPage() {
     intact: t("audit.tiles.chainFoot.intact"),
     broken: t("audit.tiles.chainFoot.broken"),
   };
+  // NO FIGURE FOR THE LOG'S TWO TILES, two ways (coordinator, P3 adoption
+  // pass). Still on its way or failed: the kit's `pending`, busy (ruling 10a).
+  // Not this account's to read, once `/me` has said so: nothing is coming, so
+  // the kit's `absent`, not busy. Either way the absent mark, never a dash or 0.
+  const cannotRead = me.data !== undefined && !canRead;
+  const eventsNoData = !canRead || !events.data;
   const loadedFoot =
-    !canRead || !events.data
+    eventsNoData
       ? undefined
       : items.length < events.data.total
         ? t("audit.tiles.loaded", { loaded: items.length })
@@ -378,7 +396,9 @@ export function AuditPage() {
       <StatsGrid columns={4}>
         <StatCard
           label={t("audit.tiles.events")}
-          value={canRead && events.data ? String(events.data.total) : "—"}
+          value={String(events.data?.total ?? 0)}
+          pending={eventsNoData && !cannotRead}
+          absent={cannotRead}
           icon="logs"
           to="/audit"
           tone="blue"
@@ -400,8 +420,13 @@ export function AuditPage() {
         <StatCard
           label={t("audit.tiles.verified")}
           // Only a SUCCESSFUL verification may report a count. A count from a
-          // failed walk would read as reassurance.
-          value={chain === "intact" ? String(verify.data?.count ?? 0) : "—"}
+          // failed walk would read as reassurance: any other state has no
+          // figure, and draws the kit's absent mark. Busy while the walk is on
+          // its way or failed; not for a broken chain or an account that may
+          // not ask, where no count is coming.
+          value={String(verify.data?.count ?? 0)}
+          pending={!cannotRead && (chain === "verifying" || chain === "unknown")}
+          absent={cannotRead || chain === "broken"}
           icon="list-check"
           to={`/audit?${TAB_PARAM}=${INTEGRITY_TAB}`}
           tone="green"
@@ -413,7 +438,9 @@ export function AuditPage() {
         />
         <StatCard
           label={t("audit.tiles.actionTypes")}
-          value={canRead && events.data ? String(actionTypes) : "—"}
+          value={String(actionTypes)}
+          pending={eventsNoData && !cannotRead}
+          absent={cannotRead}
           icon="filter"
           // The loaded page IS the view this counts, and the action filter that
           // narrows it sits on that tab.
@@ -424,9 +451,12 @@ export function AuditPage() {
         />
       </StatsGrid>
 
-      <Tabs items={TABS.map((item) => ({ key: item.key, label: t(item.label) }))} active={tab} onSelect={setTab} panelId="audit-tabpanel" />
-
-      <div id="audit-tabpanel" role="tabpanel" aria-label={tab === INTEGRITY_TAB ? t("audit.page.tabIntegrity") : t("audit.page.tabEvents")} tabIndex={-1}>
+      <UrlTabs
+        label={t("audit.page.title")}
+        items={TABS.map((item) => ({ key: item.key, label: t(item.label) }))}
+        active={tab}
+        onSelect={setTab}
+      >
       {!canRead ? (
         <Panel>
           <EmptyState
@@ -441,46 +471,40 @@ export function AuditPage() {
         </Panel>
       ) : tab === "events" ? (
         <Panel bare>
-          <FilterBar>
-            {/* SHORT ENOUGH TO READ AT 390px. Both placeholders were
-                sentences and both truncated mid-word on a phone ("...or
-                targ", "...(server-"), which is worse than a short label: a
-                cut-off sentence reads as a broken control. What each field
-                does in full is on its `aria-label`, where it is not competing
-                for pixels.
-
-                AND NO TRAILING SPACER. `.filter-spacer` grows, so on the
-                wrapped second row it took the width from the field beside it
-                and the two fields came out different sizes. Nothing follows
-                them here, so there is nothing for it to push. */}
-            <SearchField
-              placeholder={t("audit.events.searchPlaceholder")}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              aria-label={t("audit.events.searchAria")}
-            />
-            <SearchField
-              placeholder={t("audit.events.actionPlaceholder")}
-              value={action}
-              onChange={(event) => setAction(event.target.value)}
-              aria-label={t("audit.events.actionAria")}
-            />
-          </FilterBar>
-
-          <QueryState
-            loading={events.isLoading}
-            error={events.error}
-            empty={filtered.length === 0}
-            emptyIcon="logs"
-            emptyLabel={
-              items.length === 0
-                ? action
-                  ? t("audit.events.emptyForAction", { action })
-                  : t("audit.events.emptyNone")
-                : t("audit.events.emptyFiltered")
+          <ListToolbar
+            search={
+              <>
+                {/* SHORT ENOUGH TO READ AT 390px. Both placeholders were
+                    sentences and both truncated mid-word on a phone; what each
+                    field does in full is on its `aria-label`. The second is not
+                    a chip: the server's `action=` takes any action code. */}
+                <SearchField
+                  placeholder={t("audit.events.searchPlaceholder")}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  aria-label={t("audit.events.searchAria")}
+                />
+                <SearchField
+                  placeholder={t("audit.events.actionPlaceholder")}
+                  value={action}
+                  onChange={(event) => setAction(event.target.value)}
+                  aria-label={t("audit.events.actionAria")}
+                />
+              </>
             }
-          >
-            <Table>
+            end={events.data ? <ShowingCount shown={filtered.length} total={events.data.total} /> : null}
+          />
+
+          <QueryState loading={events.isPending} error={events.error} empty={false} emptyLabel="">
+            {filtered.length === 0 ? (
+              <ListEmpty
+                filtered={filters.active}
+                onClear={filters.clear}
+                icon="logs"
+                nothingYet={t("audit.events.emptyNone")}
+              />
+            ) : (
+            <Table label={t("audit.page.tabEvents")}>
               <thead>
                 <tr>
                   <Th>{t("audit.events.action")}</Th>
@@ -531,6 +555,7 @@ export function AuditPage() {
                 ))}
               </tbody>
             </Table>
+            )}
           </QueryState>
           {copied != null && (
             <p role="status" className="cell-sub" style={{ padding: "10px 18px" }}>
@@ -597,7 +622,7 @@ export function AuditPage() {
           )}
         </Panel>
       )}
-      </div>
+      </UrlTabs>
     </>
   );
 }

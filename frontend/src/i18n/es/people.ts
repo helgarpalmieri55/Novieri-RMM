@@ -34,6 +34,20 @@ export const people: Shape<typeof en> = {
     retired: "Retirado",
   },
   person: {
+    /** Back to the list this page lives under in the rail (redesign Task 11, 6.7). */
+    back: "Equipos",
+    tabs: {
+      label: "Lo que tiene",
+      equipment: "Equipos",
+      licenses: "Licencias y suscripciones",
+      tickets: "Tickets",
+      history: "Historial",
+    },
+    tiles: {
+      computers: "Equipos",
+      licences: "Licencias",
+      seats: "Puestos de suscripción",
+    },
     notFound: "No se encontró a la persona.",
     edit: "Editar",
     startStarter: "Empezar nueva incorporación",
@@ -57,6 +71,7 @@ export const people: Shape<typeof en> = {
       loginsLearned: "Se aprende cuando alguien vincula un equipo a la persona",
     },
     past: {
+      none: "Aún no ha terminado ninguna lista de verificación.",
       title: "Listas de verificación anteriores",
       finished: "{kind}: terminada el {date}",
       cancelled: "{kind}: cancelada el {date}",
@@ -172,7 +187,7 @@ export const people: Shape<typeof en> = {
     skip: "Omitir",
     skipTitle: "Omitir: {title}",
     markDoneTitle: "Marcar como hecho: {title}",
-    stillSees: "ITMS sigue detectando: {evidence}. Indica por qué se da por hecho de todos modos.",
+    stillSees: "Novieri RMM sigue detectando: {evidence}. Indica por qué se da por hecho de todos modos.",
     confirmDone: "Confirma que esto se ha hecho. Tu nombre queda registrado junto a la acción.",
     why: "Motivo",
     noteOptional: "Nota (opcional)",
@@ -181,9 +196,25 @@ export const people: Shape<typeof en> = {
   },
   unmatched: {
     title: "Necesita una persona",
-    description:
-      "Estos elementos nombran a alguien, pero no hemos podido asociarlos a una persona por su correo electrónico. Vincula cada uno o añádelos como persona nueva.",
+    // Una frase de 40 a 70 caracteres (Receta L, 1); las acciones están en cada fila.
+    description: "Nombran a alguien que no pudimos asociar a una persona por su correo.",
     empty: "Todo está vinculado a una persona.",
+    /** One type per chip (redesign Task 11, 6.8): what the list under it holds. */
+    kindLabel: "Tipo",
+    kind: {
+      devices: "Equipos",
+      licences: "Licencias",
+      seats: "Puestos de suscripción",
+    },
+    emptyDevices: "Todos los equipos tienen persona.",
+    emptyLicences: "Todas las licencias tienen persona.",
+    emptySeats: "Todos los puestos de suscripción tienen persona.",
+    // From a type's empty state to the first type with rows.
+    see: {
+      devices: "Ver los equipos",
+      licences: "Ver las licencias",
+      seats: "Ver los puestos de suscripción",
+    },
     seats: {
       title: "Puestos de suscripción",
       service: "Servicio",

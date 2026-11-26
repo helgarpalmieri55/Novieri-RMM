@@ -68,7 +68,8 @@
  * `npx playwright install --with-deps chromium`.
  */
 
-import { spawn } from "node:child_process";
+import { spawnGroup } from "./devServer.mjs";
+import { isEntryPoint } from "./entryPoint.mjs";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -158,10 +159,15 @@ async function startServer() {
 }
 
 function startServerOn(port) {
-  const child = spawn("npx", ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"], {
-    cwd: FRONTEND,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // IN A PROCESS GROUP OF ITS OWN, stopped whole (`devServer.mjs`): signalling
+  // `npx` alone left its `vite` running on the worktree's cache.
+  const server = spawnGroup(
+    "npx",
+    ["vite", "--port", String(port), "--host", "127.0.0.1", "--strictPort"],
+    { cwd: FRONTEND, stdio: ["ignore", "pipe", "pipe"] },
+    { what: "vite" },
+  );
+  const { child } = server;
   const url = `http://127.0.0.1:${port}/__preview`;
   let said = "";
   const keep = (d) => {
@@ -170,20 +176,26 @@ function startServerOn(port) {
   child.stderr.on("data", keep);
   return new Promise((ok, fail) => {
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
       fail(new Error(`vite did not start on ${port} within 60s\n${said}`));
     }, 60_000);
     child.stdout.on("data", (d) => {
       keep(d);
       if (String(d).includes("ready in")) {
         clearTimeout(timer);
-        ok({ url, stop: async () => child.kill("SIGTERM") });
+        // `stop()` rejects when a process of the group survives it, and the
+        // pass then fails rather than leave a server behind.
+        ok({ url, stop: () => server.stop() });
       }
     });
     child.on("exit", (code) => {
       clearTimeout(timer);
       fail(new Error(`vite exited with ${code} on port ${port}\n${said}`));
     });
+  }).catch(async (err) => {
+    // A port taken, or a server that never said it was ready: nothing of this
+    // attempt is left running before the next one.
+    await server.stop().catch(() => {});
+    throw err;
   });
 }
 
@@ -488,7 +500,7 @@ const XSS_IN_PAGE = () => {
   const pre = document.querySelector('[data-testid="document-source"]');
   const scope = pre ?? document.body;
   return {
-    executed: Boolean(window.__ITMS_XSS_EXECUTED),
+    executed: Boolean(window.__XSS_PROBE_EXECUTED),
     // The characters, as the console rendered them.
     text: pre ? (pre.textContent ?? "") : null,
     // ELEMENTS, in the real parsed DOM. A `<pre>` holding a text node has
@@ -613,12 +625,34 @@ const VIEWPORTS = [
   { width: 320, height: 568, coarse: true },
 ];
 
-/** States the default render never reaches, and where the interesting bugs live. */
-const STATES = {
+/**
+ * States the default render never reaches, and where the interesting bugs
+ * live. Exported, with the run guarded below, so a vitest guard can drive a
+ * state with a stand-in page (`src/test/a11yStates.test.ts`).
+ */
+export const STATES = {
   default: async () => {},
   dialog: async (page) => {
     await page.getByRole("button", { name: /Delete device/ }).first().click();
     await page.waitForTimeout(400);
+  },
+  // AN ARMED DESTRUCTIVE CONFIRMATION (kit requests batch 2, K9). `dialog`
+  // grades the delete confirmation as it opens, when its confirm is disabled
+  // until the subject is typed, so the enabled destructive button was never
+  // graded -- and every destructive confirmation without `requireTyping`
+  // (the leave question among them) drew it as red ink on the filled accent,
+  // about 1.1:1. Typing the subject arms it.
+  armed: async (page) => {
+    await page.getByRole("button", { name: /Delete device/ }).first().click();
+    await page.waitForTimeout(400);
+    await page.locator("section.modal.open .confirm-typing input").fill("ws-alpha.corp.local");
+    await page.waitForTimeout(200);
+    // ARMED, OR SAY SO (batch 2 review, H4): if the bench's subject or the
+    // typing changed, the confirm would stay disabled and this state would
+    // grade the disabled button again, the blind spot it exists to close.
+    if (await page.locator("section.modal.open.confirm .confirm-actions button").nth(1).isDisabled()) {
+      throw new Error("armed: the destructive confirm is still disabled after typing its subject");
+    }
   },
   palette: async (page) => {
     await page.keyboard.press("/");
@@ -1103,4 +1137,9 @@ async function main() {
   process.exit(failures.length ? 1 : 0);
 }
 
-await main();
+// RUN ONLY WHEN EXECUTED (`node scripts/a11y-browser.mjs`, by any path to it,
+// a symlink included: ./entryPoint.mjs), as harmony.mjs: imported by a test,
+// the module starts no server and no browser.
+if (isEntryPoint(process.argv[1], import.meta.url)) {
+  await main();
+}

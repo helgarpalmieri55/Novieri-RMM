@@ -30,23 +30,23 @@ type Targets struct {
 // For returns the targets for one OS. Pure, so every OS is testable here.
 func For(goos, binary, dataDir string) Targets {
 	t := Targets{
-		ServiceName: "its-agent",
+		ServiceName: "novieri-agent",
 		Binary:      binary,
 		DataDir:     dataDir,
 		Credentials: []string{"enroll-token", "agent.key", "agent.key.pending", "previous.json"},
 	}
 	switch goos {
 	case "windows":
-		// install.ps1 / the self-installer: %ProgramFiles%\ITSuite\its-agent.exe.
+		// install.ps1 / the self-installer: %ProgramFiles%\NovieriRMM\novieri-agent.exe.
 		// The directory holds nothing else; it goes only if it is empty.
 		t.RemoveIfEmpty = []string{winDir(binary)}
 	case "darwin":
-		t.ServiceName = "com.toeshee.itsagent"
-		t.Remove = []string{"/Library/LaunchDaemons/com.toeshee.itsagent.plist", "/var/log/its-agent"}
+		t.ServiceName = "com.novieri.rmm.agent"
+		t.Remove = []string{"/Library/LaunchDaemons/com.novieri.rmm.agent.plist", "/var/log/novieri-agent"}
 	default:
 		// linux/install.sh. A .deb-installed agent is purged by dpkg instead
 		// (platformSystem.PurgePackage), which removes its own unit and binary.
-		t.Remove = []string{"/etc/systemd/system/its-agent.service", "/etc/its-agent"}
+		t.Remove = []string{"/etc/systemd/system/novieri-agent.service", "/etc/novieri-agent"}
 	}
 	return t
 }
@@ -72,10 +72,10 @@ func ownsDataDir(t Targets) bool {
 }
 
 // helperImage is the staged copy's file name (Windows).
-const helperImage = "its-agent-uninstall.exe"
+const helperImage = "novieri-agent-uninstall.exe"
 
 // helperStaging is where the Windows helper's copy goes (review M1):
-// `%ProgramData%\ITSuite\uninstall-<n>\its-agent-uninstall.exe`, in a
+// `%ProgramData%\NovieriRMM\uninstall-<n>\novieri-agent-uninstall.exe`, in a
 // directory of its own that the launcher creates owned by Administrators
 // and SYSTEM+Administrators-only -- never the service's temp directory.
 // Pure, so it is tested on any GOOS.
@@ -83,13 +83,13 @@ func helperStaging(programData string, n int64) (dir, exe string) {
 	if programData == "" {
 		programData = `C:\ProgramData`
 	}
-	dir = strings.TrimRight(programData, `\`) + `\ITSuite\uninstall-` + strconv.FormatInt(n, 10)
+	dir = strings.TrimRight(programData, `\`) + `\NovieriRMM\uninstall-` + strconv.FormatInt(n, 10)
 	return dir, dir + `\` + helperImage
 }
 
 // bootDeletions is what the helper hands to MoveFileEx(DELAY_UNTIL_REBOOT)
 // for its own image: the image, and -- only when it is a staging directory
-// helperStaging made, `...\ITSuite\uninstall-<n>` -- that directory after it,
+// helperStaging made, `...\NovieriRMM\uninstall-<n>` -- that directory after it,
 // so the directory is already empty when its turn comes.
 func bootDeletions(self string) []string {
 	out := []string{self}
@@ -97,7 +97,7 @@ func bootDeletions(self string) []string {
 	parent := winDir(dir)
 	if dir != self && parent != dir &&
 		strings.HasPrefix(strings.ToLower(winBase(dir)), "uninstall-") &&
-		strings.EqualFold(winBase(parent), "ITSuite") {
+		strings.EqualFold(winBase(parent), "NovieriRMM") {
 		out = append(out, dir)
 	}
 	return out
@@ -122,8 +122,8 @@ func checkTargets(t Targets) error {
 		return fmt.Errorf("uninstall: data directory %q is a filesystem root", t.DataDir)
 	}
 	base := strings.ToLower(filepath.Base(t.Binary))
-	if base != "its-agent" && base != "its-agent.exe" {
-		return fmt.Errorf("uninstall: %q is not an its-agent binary", t.Binary)
+	if base != "novieri-agent" && base != "novieri-agent.exe" {
+		return fmt.Errorf("uninstall: %q is not a novieri-agent binary", t.Binary)
 	}
 	return nil
 }

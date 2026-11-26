@@ -7,8 +7,8 @@ import "testing"
 // words, where this computer is about to be connected.
 func TestThePromptNamesTheConsoleTheFileNamePointsAt(t *testing.T) {
 	for console, want := range map[string]string{
-		"https://itms.toeshee.com":      "Install the ITMS agent and connect this computer to itms.toeshee.com?",
-		"https://itms.toeshee.com:8443": "Install the ITMS agent and connect this computer to itms.toeshee.com:8443?",
+		"https://rmm.novieri.com":      "Install the Novieri RMM agent and connect this computer to rmm.novieri.com?",
+		"https://rmm.novieri.com:8443": "Install the Novieri RMM agent and connect this computer to rmm.novieri.com:8443?",
 	} {
 		if got := confirmText(Link{Console: console}); got != want {
 			t.Errorf("confirmText(%q) = %q, want %q", console, got, want)

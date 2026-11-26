@@ -531,7 +531,7 @@ func (r *restorer) file(ctx context.Context, e *entryV2, rel string) error {
 		}
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(dest), ".itms-restore-*")
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".novieri-restore-*")
 	if err != nil {
 		// The Controlled Folder Access case, among others.
 		return err

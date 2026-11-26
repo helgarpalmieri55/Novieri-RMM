@@ -739,7 +739,13 @@ async def _issue_invitation(
     )
     link = action_tokens.link(console_url, "invite", token)
     view = await _view(session, org_id, user)
-    return InvitedUser(user=view, link=link, delivered=await deliver(view, link))
+    delivered = await deliver(view, link)
+    if delivered:
+        await action_tokens.start_clock(session, token, action_tokens.INVITE_TTL)
+        # Re-read so `invite_expires_at` is the stored value, not the one
+        # `issue` wrote before the send.
+        view = await _view(session, org_id, user)
+    return InvitedUser(user=view, link=link, delivered=delivered)
 
 
 async def invite_user(

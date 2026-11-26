@@ -24,8 +24,9 @@ from app.gateway.dispatch import (
 from app.gateway.protocol import parse_agent_message
 from app.jobs.engine import JobEngine
 from app.models import AuditEvent, Device, JobLog, JobStatus, Organization
+from tests.redis_support import TEST_REDIS_URL
 
-REDIS_URL = "redis://localhost:6379/9"
+REDIS_URL = TEST_REDIS_URL
 
 
 class FakeWs:

@@ -15,6 +15,7 @@ import {
   windowEndMinutes,
 } from "../slaState";
 import type { PolicyOut, TargetState } from "../types";
+import { NO_DATE } from "../../../lib/datetime";
 
 // --------------------------------------------------------------------------
 // The midnight-end sentinel (spec §2.2, migration 0035)
@@ -110,6 +111,11 @@ describe("formatMinutes", () => {
     expect(formatMinutes(1440)).toBe("1d");
     expect(formatMinutes(45)).toBe("45m");
     expect(formatMinutes(0)).toBe("0m");
+  });
+
+  it("draws an unusable duration as the kit's absent mark, never a dash", () => {
+    expect(formatMinutes(Number.NaN)).toBe("n/a");
+    expect(formatMinutes(Number.POSITIVE_INFINITY)).toBe("n/a");
   });
 });
 
@@ -398,7 +404,9 @@ describe("describeTargetTiming renders instants in the reader's zone", () => {
       NOW,
       "Europe/London",
     );
-    expect(timing.detail).toContain("answered —, after the deadline");
+    // NO_DATE, the date formatters' absent mark, not a literal dash: the
+    // adoption pass makes it the kit's localized n/a.
+    expect(timing.detail).toContain(`answered ${NO_DATE}, after the deadline`);
     expect(timing.detail).not.toContain("Invalid Date");
     expect(timing.detail).not.toContain("not-a-timestamp");
   });

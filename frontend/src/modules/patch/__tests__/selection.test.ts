@@ -361,7 +361,7 @@ describe("hostLensWarning", () => {
     // clearing their updates clears them for every machine in the ring, which
     // on `broad` is the fleet.
     expect(hostLensWarning(["srv-a", "srv-b"], "broad", 227)).toBe(
-      "You are choosing these from srv-a and srv-b, but an approval covers all 227 devices in the broad ring — not those hosts alone.",
+      "You are choosing these from srv-a and srv-b, but an approval covers all 227 devices in the broad ring, not those hosts alone.",
     );
   });
 

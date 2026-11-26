@@ -32,11 +32,11 @@ func throwawayPEM(t *testing.T) (string, ed25519.PublicKey) {
 func TestSignProducesSignaturesTheAgentAccepts(t *testing.T) {
 	keyPEM, pub := throwawayPEM(t)
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "its-agent-linux-amd64")
+	bin := filepath.Join(dir, "novieri-agent-linux-amd64")
 	if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	win := filepath.Join(dir, "its-agent-windows-arm64.exe")
+	win := filepath.Join(dir, "novieri-agent-windows-arm64.exe")
 	if err := os.WriteFile(win, []byte("pe binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}

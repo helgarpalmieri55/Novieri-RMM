@@ -71,7 +71,6 @@ export const portal: Shape<typeof en> = {
     },
   },
   myTickets: {
-    title: "Mis tickets",
     description: "Crea una solicitud o consulta cómo va una que ya abriste.",
     newRequest: "Nueva solicitud",
     empty: "Todavía no has creado ningún ticket.",
@@ -79,9 +78,11 @@ export const portal: Shape<typeof en> = {
     status: "Estado",
     lastUpdate: "Última actualización",
     opened: "abierto {age}",
+    stateLabel: "Mostrar",
+    stateOpen: "Abiertos",
+    stateAll: "Todos",
   },
   newTicket: {
-    title: "Nuevo ticket",
     description: "Cuéntanos qué pasa. No hace falta que sepas quién lo va a arreglar.",
     category: "Categoría",
     selectCategory: "Elige una categoría",
@@ -94,6 +95,7 @@ export const portal: Shape<typeof en> = {
     attachments: "Archivos adjuntos (opcional)",
     drop: "Suelta los archivos aquí o haz clic para elegirlos",
     submit: "Enviar",
+    section: "Tu solicitud",
     noCategory: "No puedes crear un ticket sin categoría, y el catálogo no está disponible.",
   },
   help: {
