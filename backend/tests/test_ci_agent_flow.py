@@ -468,7 +468,9 @@ def test_the_distrusted_pin_is_an_ed25519_key_nobody_signs_with() -> None:
 class _RefusedClient(_FakeClient):
     """The refused phase's calls: ci-agent online, a hello that ends STATUS
     with RESULT ("GREETING": the greeting it was sent), and an audit log with
-    its dispatch and its ending."""
+    its dispatch and its ending. Each job answer carries the job's `params`, as
+    the api's `JobOut` does: the greeting it was sent is in every answer, run
+    or not (the rehearsal of 2026-11-27, Step 7, first green run)."""
 
     def __init__(self, status: str, result: Any) -> None:
         self.status, self.result = status, result
@@ -480,12 +482,19 @@ class _RefusedClient(_FakeClient):
             return _Answer(200, {"items": [device]}, path)
         if path == "/api/v1/jobs" and method == "POST":
             self.sent = kwargs["body"]
-            return _Answer(201, {"id": "job-1", "signed": True, "status": "queued"}, path)
+            queued = {"id": "job-1", "signed": True, "status": "queued"}
+            return _Answer(201, {**queued, "params": self.sent["params"]}, path)
         if path == "/api/v1/jobs/job-1":
             result = self.result
             if result == "GREETING":
                 result = {"greeting": self.sent["params"]["message"]}
-            body = {"id": "job-1", "signed": True, "status": self.status, "result": result}
+            body = {
+                "id": "job-1",
+                "signed": True,
+                "status": self.status,
+                "params": self.sent["params"],
+                "result": result,
+            }
             return _Answer(200, body, path)
         if path == "/api/v1/audit/verify":
             return _Answer(200, {"ok": True, "broken_at": None, "count": 9}, path)

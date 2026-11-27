@@ -373,7 +373,12 @@ class AgentFlow:
             job.get("result") == {"refused": "bad_signature"},
             f"refused, but not for its signature: {job.get('result')}",
         )
-        check(message not in json.dumps(job), "the refused hello's greeting came back: it ran")
+        # In its result: every answer about a job echoes its params, the
+        # greeting it was sent included (`JobOut.params`), run or not.
+        check(
+            message not in json.dumps(job.get("result")),
+            "the refused hello's greeting came back: it ran",
+        )
         ok("hello: server-signed, refused by the agent with bad_signature, never run")
         self.done("a server-signed hello, refused with bad_signature and never run")
 
