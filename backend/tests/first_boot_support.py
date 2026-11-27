@@ -65,9 +65,27 @@ CAPTURING = ("cat", "mktemp", "mv", "rm", "tee")
 #: What a command line of a FAILED block may start with: the operator pastes
 #: these (CLAUDE.md, "A copy-pasteable command contains no placeholders").
 COMMAND_WORDS = (
-    "cd", "chmod", "docker", "env", "grep", "rm", "sed", "sudo", "xargs",
+    "[", "cd", "chmod", "docker", "env", "grep", "printf", "read", "rm", "sed", "sudo", "xargs",
     "./scripts/first-boot.sh", "./scripts/openbao-seal.sh", "./scripts/prepare-host.sh",
 )  # fmt: skip
+
+#: A command line that destroys or undoes something (review I1 of round 3): it
+#: runs only behind a typed guard, `read -r -p '... Type WORD to go on: ' answer
+#: && [ "$answer" = WORD ] && ...`, one `&&` chain, so that no paste runs it.
+DESTRUCTIVE = re.compile(
+    r"\bdown -v\b|\bvolume rm\b|\bdocker rm\b|\bcompose rm\b|\brm (-f )?\.env\b"
+    r"|\bsed -i .*\.env\b|\bup -d --no-deps openbao\b|unseal\.key"
+)
+_GUARD_WORD = re.compile(r'\[ "\$answer" = ([A-Z]+) \]')
+
+#: The stand-ins a pasted report runs into (`paste_into_a_shell`): they log, and do nothing.
+PASTE_STAND_INS = ("chmod", "docker", "rm", "sed", "sudo", "xargs")
+#: What a logged act that destroys or undoes looks like.
+DESTRUCTIVE_ACT = re.compile(
+    r"^(docker compose down|docker compose rm|docker volume rm|xargs -r docker (rm|volume rm)"
+    r"|rm (-f )?\.env|sudo rm .*unseal\.key|sed -i .*COMPOSE_FILE"
+    r"|docker compose up -d --no-deps openbao)"
+)
 
 #: Where each secret may be written: where the runbook writes it.
 ALLOWED = {
@@ -622,13 +640,20 @@ def failed_block_problems(stderr: str, deploy: Path) -> list[str]:
         ways = groups
         if len(ways) > 1:
             problems.append(f"{len(ways)} ways on, without `# run ONE of the following`")
-    for way in ways:
+    for number, way in enumerate(ways):
         commands = [line[8:] for line in way if line.startswith("        ")]
         if not commands:
             problems.append(f"a way on with no command: {way!r}")
             continue
         if _segments(commands[0]) != [["cd", str(deploy)]]:
             problems.append(f"the first command is not the cd to {deploy}: {commands[0]!r}")
+        # Review I1 (round 3): pasted whole, a report runs its ways on one after
+        # another; so each but the first is one chain behind its own guard.
+        if number > 0 and (len(commands) != 2 or not _guarded(commands[1])):
+            problems.append(f"way on {number + 1} is not one chain behind a typed guard: {way!r}")
+        for command in commands:
+            if DESTRUCTIVE.search(command) and not _guarded(command):
+                problems.append(f"destroys or undoes without a typed guard: {command!r}")
         for n, line in enumerate(way):
             if line.startswith("        ") and _reads_the_terminal(line[8:]) and n != len(way) - 1:
                 problems.append(f"a line that may read the terminal is not the last: {line!r}")
@@ -647,6 +672,31 @@ def failed_block_problems(stderr: str, deploy: Path) -> list[str]:
     return problems
 
 
+def _guarded(command: str) -> bool:
+    """COMMAND is one `&&` chain (pipes inside it allowed) that starts with
+    `read -r -p '... Type WORD to go on: ' answer && [ "$answer" = WORD ]`."""
+    segments = _segments(command)
+    operators = _operators(command)
+    if len(segments) < 3 or set(operators) - {"&&", "|"} or operators[:2] != ["&&", "&&"]:
+        return False
+    read, check = segments[0], segments[1]
+    word = _GUARD_WORD.fullmatch(" ".join(check[:1] + ['"$answer"'] + check[2:]))
+    return (
+        read[:3] == ["read", "-r", "-p"] and len(read) == 5 and read[4] == "answer"
+        and check[:2] == ["[", "$answer"] and word is not None
+        and f"Type {word.group(1)} to go on: " in read[3]
+    )  # fmt: skip
+
+
+def _operators(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return [token for token in lexer if token in ("&&", "||", "|", ";")]
+    except ValueError:
+        return [";"]
+
+
 def _bare(words: list[str]) -> list[str]:
     """A simple command without the `do`, `sudo` and `env -u NAME` before it."""
     while words[:1] in (["do"], ["sudo"]) or words[:2] == ["env", "-u"]:
@@ -655,12 +705,13 @@ def _bare(words: list[str]) -> list[str]:
 
 
 def _reads_the_terminal(command: str) -> bool:
-    """sudo (its password), first-boot.sh and the other scripts (their
-    prompts), and an interactive `docker compose exec` (a hidden share)."""
+    """sudo (its password), a `read` (a typed guard), first-boot.sh and the
+    other scripts (their prompts), and an interactive `docker compose exec`
+    (a hidden share)."""
     for words in _segments(command):
         if words[:1] == ["do"]:
             words = words[1:]
-        if words[:1] == ["sudo"]:
+        if words[:1] in (["sudo"], ["read"]):
             return True
         words = _bare(words)
         if words[:1] and words[0].startswith("./scripts/"):
@@ -686,6 +737,64 @@ def _segments(command: str) -> list[list[str]]:
     except ValueError:
         return []
     return segments
+
+
+def paste_into_a_shell(
+    host: Host, text: str, *, bracketed: bool, answers: Sequence[str] = (), timeout: float = 15
+) -> list[str]:
+    """TEXT pasted whole into an interactive bash 5 on a pseudo-terminal, from
+    HOST's deploy/, as an operator copying a FAILED report would (review I1,
+    round 3; the reviewer's probe_paste.py). Every command that could change
+    anything is a stand-in that logs and does nothing: PASTE_STAND_INS, and
+    first-boot.sh itself. BRACKETED: one bracketed paste, bash's default since
+    5.1, so a `read` in it waits for the keyboard; each of ANSWERS is typed in
+    turn whenever the shell goes quiet. Without it, the lines after a `read`
+    are what it reads. Returns the stand-ins' log, one act a line."""
+    fakes = host.tmp / "paste-stand-ins"
+    fakes.mkdir(exist_ok=True)
+    log = host.tmp / "paste.log"
+    log.write_text("")
+    for name in PASTE_STAND_INS:
+        _exe(fakes / name, f"#!/bin/sh\nprintf '%s %s\\n' {name} \"$*\" >> {log}\n", python=False)
+    _exe(host.deploy / "scripts" / "first-boot.sh",
+         f"#!/bin/sh\nprintf 'first-boot.sh %s\\n' \"$*\" >> {log}\n", python=False)  # fmt: skip
+    master, slave = pty.openpty()
+    shell = subprocess.Popen(
+        [BASH, "--norc", "--noprofile", "-i"],
+        stdin=slave, stdout=slave, stderr=slave, cwd=host.deploy, start_new_session=True,
+        env={"PATH": f"{fakes}:/usr/bin:/bin", "TERM": "xterm", "HOME": str(host.home),
+             "PS1": "$ ", "INPUTRC": "/dev/null"},
+    )  # fmt: skip
+    os.close(slave)
+
+    def quiet(limit: float) -> None:
+        """Read until nothing more comes for 0.4 s, or LIMIT runs out."""
+        end, last = time.monotonic() + limit, time.monotonic()
+        while time.monotonic() < end and time.monotonic() - last < 0.4:
+            ready, _, _ = select.select([master], [], [], 0.05)
+            if ready:
+                try:
+                    if os.read(master, 65536):
+                        last = time.monotonic()
+                except OSError:
+                    return
+
+    deadline = time.monotonic() + timeout
+    try:
+        quiet(2)
+        pasted = text.replace("\n", "\r").encode()
+        os.write(master, (b"\x1b[200~" + pasted + b"\x1b[201~\r") if bracketed else pasted + b"\r")
+        quiet(max(0.5, deadline - time.monotonic()))
+        for answer in answers:
+            os.write(master, answer.encode() + b"\r")
+            quiet(max(0.5, deadline - time.monotonic()))
+        os.write(master, b"exit\r")
+        quiet(1)
+    finally:
+        shell.kill()
+        shell.wait()
+        os.close(master)
+    return log.read_text().splitlines()
 
 
 class Host:

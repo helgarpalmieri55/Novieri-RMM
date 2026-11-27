@@ -96,7 +96,11 @@ rerun="./scripts/first-boot.sh"
 # is a block of its own, after a line that says to run ONE of them. In a way
 # on, a line that may read the terminal (sudo, a hidden prompt, this script)
 # is the last: pasted whole, nothing after it is typed into its prompt.
-# (tests/first_boot_support.py, failed_block_problems, checks all of it.)
+# A report pasted whole runs its ways on one after another, so every way on
+# after the first, and every line that destroys or undoes, is ONE `&&` chain
+# that starts with `guard`: it goes on only if the operator types its word.
+# (tests/first_boot_support.py, failed_block_problems, checks all of it, and
+# test_a_whole_report_pasted_runs_one_way_on_at_most pastes every report.)
 report() {
   local line ways=1 cd_said=no
   printf '\nFAILED  %s\n' "$1" >&2
@@ -119,6 +123,12 @@ die() {
   report "$@"
   exit 1
 }
+# guard WORD WHAT: the head of a chain, in the operator's shell, that goes on
+# only if they type WORD at a prompt saying what the chain does: "This WHAT.
+# Type WORD to go on". Pasted with the rest of a report, the `read` takes the
+# next pasted line, or waits for the keyboard; either way, not WORD. WHAT has
+# no single quote.
+guard() { printf "read -r -p 'This %s. Type %s to go on: ' answer && [ \"\$answer\" = %s ]" "$2" "$1" "$1"; }
 # The SAVED prompt is the one moment the five shares and the root token are on
 # the screen and nowhere else. Whatever stops the run there -- the input
 # ending, Ctrl-C, a TERM, the terminal hanging up -- says so, before anything
@@ -128,7 +138,8 @@ custody_lost() {
   printf '\n' >&2   # off the prompt's line
   warn "the five shares and the root token on this screen are their only copy: copy them off this VPS before anything clears it"
   die "$1: OpenBao is initialised already, and the five shares and the root token on this screen are their only copy" \
-      "# they are stored off this VPS: run it again, and it asks for the root token and three shares" "$rerun" \
+      "# they are stored off this VPS: the line below clears this screen and its scrollback, where the shares still are, and runs it again, which asks for the root token and three shares" \
+      "printf '\033[H\033[2J\033[3J' && $rerun" \
       --or \
       "# they are not, and cannot be any more: three lost shares are a vault nobody can open, and on a first boot nothing is in it yet, so this host starts from zero" \
       "${start_from_zero[@]}"
@@ -434,13 +445,13 @@ read_root_token() {
 # What an earlier first boot leaves outside deploy/: its gateway-issuer token,
 # which no new OpenBao knows, and its auto-unseal key, which openbao-seal.sh
 # would reuse for the new one (it keeps any 32-byte key it finds).
-# The removal runs the script again on the same line: sudo may ask for a
-# password, so nothing can come after it in a block.
-earlier_files=(
-  "# with them the earlier first boot's gateway-issuer token and auto-unseal key go too; keep that key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one"
-  "sudo rm -f $token_file_q $key_file_q && $rerun")
-start_from_zero=("# to start from zero, which DESTROYS this stack's volumes and everything in them"
-                 "docker compose down -v && rm .env" "${earlier_files[@]}")
+# Starting from zero is one line behind a typed DESTROY (review I1, round 3):
+# nothing of it runs unless the operator types the word, pasted or not. The
+# removal runs the script again on the same line: sudo may ask for a password.
+earlier_prose="with them go the earlier first boot's gateway-issuer token and auto-unseal key; keep that key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one"
+start_from_zero=(
+  "# to start from zero: the line below asks you to type DESTROY, then DESTROYS this stack's volumes and everything in them, and .env; $earlier_prose"
+  "$(guard DESTROY "DESTROYS the volumes of this stack and everything in them, deletes .env, and deletes the gateway-issuer token and auto-unseal key files of the earlier first boot") && docker compose down -v && rm .env && sudo rm -f $token_file_q $key_file_q && $rerun")
 # The other way on when shares do not unseal: lost, they are a vault nobody
 # can open, and on a first boot there is nothing in it yet.
 lost_shares=(--or
@@ -458,17 +469,15 @@ pending_migration() {
     "$seal_status_note" \
     "for n in 1 2 3; do docker compose exec openbao bao operator unseal -migrate; done && docker compose restart openbao && $rerun" \
     --or \
-    "# to undo it, back to the shares alone, as openbao-seal.sh's own way back does; the run after it proves three shares and moves the seal again" \
-    "sed -i '/^COMPOSE_FILE=/d;/^OPENBAO_UNSEAL_KEY_FILE=/d;/^OPENBAO_SEAL_STANZA=/d' .env" \
-    "docker compose up -d --no-deps openbao" \
-    "$rerun"
+    "# to undo it, back to the shares alone, as openbao-seal.sh's own way back does: the line below asks you to type UNDO first; the run after it proves three shares and moves the seal again" \
+    "$(guard UNDO "undoes the seal migration: it takes the auto-unseal lines out of .env and recreates OpenBao without its static seal, to be unsealed with shares alone") && sed -i '/^COMPOSE_FILE=/d;/^OPENBAO_UNSEAL_KEY_FILE=/d;/^OPENBAO_SEAL_STANZA=/d' .env && docker compose up -d --no-deps openbao && $rerun"
 }
 
 # --------------------------------------------------------------- steps
 
 check_state_before_anything() {
   say "Before anything: the state this host is in"
-  local volumes error f found=()
+  local volumes error f found=() removal
   if [ -e .env ]; then
     ok ".env exists: this is a run after step 1"
     return 0
@@ -485,18 +494,20 @@ check_state_before_anything() {
         "# that first boot's .env is in its off-host custody: copy it back to $deploy_dir/.env, then" \
         "chmod 600 .env" "$rerun" \
         --or \
-        "# it is not: start from zero, which DESTROYS those volumes and everything in them" \
-        "docker ps -aq --filter label=com.docker.compose.project=it-suite | xargs -r docker rm -f" \
-        "docker volume ls -q --filter label=com.docker.compose.project=it-suite | xargs -r docker volume rm" \
-        "${earlier_files[@]}"
+        "# it is not: start from zero; the line below asks you to type DESTROY, then DESTROYS those volumes, everything in them and the containers that hold them; $earlier_prose" \
+        "$(guard DESTROY "DESTROYS the it-suite containers and volumes and everything in them, and deletes the gateway-issuer token and auto-unseal key files of the earlier first boot") && docker ps -aq --filter label=com.docker.compose.project=it-suite | xargs -r docker rm -f && docker volume ls -q --filter label=com.docker.compose.project=it-suite | xargs -r docker volume rm && sudo rm -f $token_file_q $key_file_q && $rerun"
   fi
   for f in "$token_file" "$key_file"; do
     if sudo test -e "$f"; then found+=("$(printf '%q' "$f")"); fi
   done
   if [ "${#found[@]}" -gt 0 ]; then
+    removal="sudo rm -f ${found[*]} && $rerun"
+    case " ${found[*]} " in
+      *" $key_file_q "*) removal="$(guard DELETE "deletes the auto-unseal key file of an earlier first boot, and its gateway-issuer token file if one is listed") && $removal" ;;
+    esac
     die "mixed state: no .env and no it-suite volume, but this host keeps files of an earlier first boot (${found[*]}): no OpenBao here knows them" \
-        "# no OpenBao on this host knows them, and the new first boot makes its own; keep an auto-unseal key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one" \
-        "sudo rm -f ${found[*]} && $rerun"
+        "# no OpenBao on this host knows them, and the new first boot makes its own; keep an auto-unseal key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one; deleting the key asks you to type DELETE first" \
+        "$removal"
   fi
   ok "no .env, no it-suite volume and no file of an earlier first boot: a new host"
 }
@@ -558,8 +569,8 @@ step_2() {
   fi
   roles="$(psql_admin "select count(*) from pg_roles where rolname in ('app_user', 'portal_user')" | tr -d '[:space:]')"
   [ "$roles" = 2 ] || die "postgres has no app_user and portal_user: its data directory is older than this .env, so postgres/init-app-user.sh never ran on it" \
-    "# remove postgres and its volume -- only that one, which DESTROYS what is in it -- and run it again:" \
-    "docker compose rm -s -f postgres" "docker volume rm it-suite_postgres-data" "$rerun"
+    "# remove postgres and its volume -- only that one, which DESTROYS what is in it -- and run it again; the line below asks you to type DESTROY first" \
+    "$(guard DESTROY "DESTROYS the postgres volume it-suite_postgres-data and everything in it") && docker compose rm -s -f postgres && docker volume rm it-suite_postgres-data && $rerun"
   ok "step 2: postgres has app_user and portal_user"
 }
 
@@ -630,8 +641,8 @@ step_3_3() {
     pending_migration
   elif [ "$bao_migration" = true ]; then
     die "OpenBao still waits for a seal migration, but .env no longer has the auto-unseal overlay: the undo of a migration left half-way is half done" \
-        "# OpenBao has to be recreated from the .env as it is now:" \
-        "docker compose up -d --no-deps openbao" "$rerun"
+        "# OpenBao has to be recreated from the .env as it is now: the line below asks you to type UNDO first" \
+        "$(guard UNDO "finishes the undo: it recreates OpenBao from .env as it is now, without its static seal, to be unsealed with shares alone") && docker compose up -d --no-deps openbao && $rerun"
   elif auto_unseal_on; then
     note "the auto-unseal is on: waiting for OpenBao to unseal itself"
     wait_unsealed || die "OpenBao is sealed although the auto-unseal is on, with its static key: its key file is missing or wrong" \
