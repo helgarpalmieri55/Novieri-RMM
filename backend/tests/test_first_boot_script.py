@@ -811,23 +811,39 @@ SCENARIOS: dict[str, Callable[[Host], subprocess.CompletedProcess[str]]] = {
     "stopped before the seal": lambda host: _not_sealed_run(host),
 }
 
-#: What makes a first run fail in steps 4 to 8 (Task 3), and what its FAILED
-#: line says; `_late_failure` sets each up.
-LATE_FAILURES = {
-    "no revision file in the checkout": "no revision file in ../backend/migrations/versions",
-    "migrate exits 1": "migrate exited 1",
-    "the schema short of the newest revision": "after migrate the schema is at 0247, not 0248",
-    "postgres-grants exits 1": "postgres-grants exited 1",
-    "app_user not narrowed": "after postgres-grants, app_user is not narrowed",
-    "the gateway's certificate not issued": "the gateway's certificate was not issued",
-    "a service that stops": "a service stopped: worker(exited 1)",
-    "a service that keeps restarting": "after 300 s, still waiting on:",
-    "the :443 certificate refused": "the certificate on :443 is not one a browser accepts",
-    "acme.json not 600": "Traefik's acme.json is mode 644, not 600",
-    ":8443 not the internal CA's": ":8443 does not present the internal CA's certificate",
-    "the api does not answer setup/status": "the api did not answer /api/v1/setup/status",
-    "the api wrote no install code": "the api wrote no install code",
-}
+#: What makes a first run fail in steps 4 to 8 (Task 3), and what its report
+#: says: its FAILED line first, then other lines it must hold; `_late_failure`
+#: sets each up.
+LATE_FAILURES: dict[str, tuple[str, ...]] = {
+    "no revision file in the checkout": ("no revision file in ../backend/migrations/versions",),
+    "migrate exits 1": ("migrate exited 1",),
+    "migrate exits 1, and compose with it": ("migrate exited 1",),
+    "the schema short of the newest revision": (
+        "after migrate the schema is at 0247, not 0248",),
+    "postgres-grants exits 1": ("postgres-grants exited 1",),
+    "postgres-grants exits 1, and compose with it": ("postgres-grants exited 1",),
+    "the RBAC catalog writable after postgres-grants": (
+        "after postgres-grants, app_user is not narrowed",),
+    "an empty audit key": ("/var/lib/its/secrets/audit-hmac.key is there, so set -C",),
+    "the gateway's certificate not issued": ("the gateway's certificate was not issued",),
+    "docker compose up -d fails": ("docker compose up -d failed (above)",
+                                   "        docker compose ps -a"),
+    "a service that stops": ("a service stopped: worker(exited 1)",),
+    # Review m8 of Task 3: the names are services, whatever the project is called.
+    "a service that keeps restarting": ("after 300 s, still waiting on:", " worker(restarted)",
+                                        "        docker compose logs --tail 50 "),
+    "a one-shot still running": ("after 300 s, still waiting on: openbao-init(running)",),
+    "the :443 certificate refused": ("the certificate on :443 is not one a browser accepts",),
+    "acme.json not 600": ("Traefik's acme.json is mode 644, not 600",
+                          "Traefik writes acme.json itself"),
+    ":8443 not the internal CA's": (":8443 does not present the internal CA's certificate",),
+    # Review m4: the runbook's named failure, the same name from another issuer.
+    ":8443 the Let's Encrypt certificate": (
+        ":8443 does not present the internal CA's certificate",),
+    "the api does not answer setup/status": ("the api did not answer /api/v1/setup/status",),
+    "the api wrote no install code": ("the api wrote no install code",),
+    "no setup-code file": ("the api wrote no install code",),
+}  # fmt: skip
 
 
 def _late(name: str) -> Callable[[Host], subprocess.CompletedProcess[str]]:
@@ -868,7 +884,11 @@ def _not_sealed_run(host: Host) -> subprocess.CompletedProcess[str]:
 def test_every_command_of_a_failed_block_can_be_pasted(tmp_path: Path, scenario: str) -> None:
     """Each line at the command indent is a shell command the operator can
     run as it stands, starting with the `cd` to deploy/, so that they work
-    from any folder; prose is at two spaces. `Host.run` raises if not."""
+    from any folder; prose is at two spaces. `Host.run` raises if not.
+
+    A failure of steps 4 to 8 also says what failed, and no secret leaves on
+    the way (what test_each_failure_of_steps_4_to_8_says_what_failed checked
+    on a run of its own until review m10 of Task 3)."""
     host = Host(tmp_path)
     done = SCENARIOS[scenario](host)
     assert done.returncode == 1, done.stdout + done.stderr
@@ -876,6 +896,13 @@ def test_every_command_of_a_failed_block_can_be_pasted(tmp_path: Path, scenario:
     commands = [line[8:] for line in block if line.startswith("        ")]
     assert commands[0] == f"cd {host.deploy}"
     assert any("./scripts/first-boot.sh" in c for c in commands), commands
+    if scenario in LATE_FAILURES:
+        header, *more = LATE_FAILURES[scenario]
+        assert f"FAILED  {header}" in done.stderr, done.stderr
+        for text in more:
+            assert text in done.stderr, (text, done.stderr)
+        assert host.leaks() == []
+        assert host.secrets["code"] not in done.stdout + done.stderr
 
 
 # --------------------------------------------------------------------------- #
@@ -1099,33 +1126,33 @@ def _report(host: Host, scenario: str) -> str:
     return done.stderr[done.stderr.index("FAILED  ") :]
 
 
-@pytest.mark.parametrize("bracketed", [False, True], ids=["later-lines-fed", "answered-empty"])
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS))
-def test_a_whole_report_pasted_runs_one_way_on_at_most(
-    tmp_path: Path, scenario: str, bracketed: bool
-) -> None:
+def test_a_whole_report_pasted_runs_one_way_on_at_most(tmp_path: Path, scenario: str) -> None:
     """Review I1 (round 3): an operator who copies everything under FAILED and
-    pastes it into a shell. Without bracketed paste a typed guard reads the
-    line after it; with it, the guard waits, and is answered with nothing.
-    Either way, the acts of one way on at most run, and nothing destroys or
-    undoes. (Every command is a logging stand-in: nothing real runs.)"""
+    pastes it into a shell. Without bracketed paste ("later-lines-fed") a typed
+    guard reads the line after it; with it ("answered-empty"), the guard waits,
+    and is answered with nothing. Either way, the acts of one way on at most
+    run, and nothing destroys or undoes. (Every command is a logging stand-in:
+    nothing real runs.) Both pastes are of the one report: one run of the
+    script, not one a mode (review m10 of Task 3)."""
     host = Host(tmp_path)
     report = _report(host, scenario)
     ways = _ways(report)
     if ways[0][0].startswith("  # run ONE of the following"):
         ways = ways[1:]
     guards = sum(line.startswith("        read -r -p '") for line in report.splitlines())
-    answers = [""] * guards if bracketed else []
-    acts = [act.rstrip() for act in paste_into_a_shell(host, report, bracketed=bracketed,
-                                                       answers=answers)]  # fmt: skip
-    assert sum(act.startswith("first-boot.sh") for act in acts) <= 1, acts
-    assert [act for act in acts if DESTRUCTIVE_ACT.match(act)] == [], acts
-    assert any(set(acts) <= _acts_of(way) for way in ways), (acts, ways)
-    # Review r1 (round 3): not green for nothing. The paste helper proves the
-    # shell read the paste and ran the line after it; and where the FAILED line
-    # leaves no quote open, the first way on, if no guard holds it, ran whole.
-    if _quotes_closed(report.splitlines()[0]) and not _behind_a_guard(ways[0]):
-        assert _acts_of(ways[0]) <= set(acts), (acts, ways[0])
+    for mode, bracketed in (("later-lines-fed", False), ("answered-empty", True)):
+        answers = [""] * guards if bracketed else []
+        acts = [act.rstrip() for act in paste_into_a_shell(host, report, bracketed=bracketed,
+                                                           answers=answers)]  # fmt: skip
+        assert sum(act.startswith("first-boot.sh") for act in acts) <= 1, (mode, acts)
+        assert [act for act in acts if DESTRUCTIVE_ACT.match(act)] == [], (mode, acts)
+        assert any(set(acts) <= _acts_of(way) for way in ways), (mode, acts, ways)
+        # Review r1 (round 3): not green for nothing. The paste helper proves the
+        # shell read the paste and ran the line after it; and where the FAILED
+        # line leaves no quote open, the first way on, if no guard holds it, ran.
+        if _quotes_closed(report.splitlines()[0]) and not _behind_a_guard(ways[0]):
+            assert _acts_of(ways[0]) <= set(acts), (mode, acts, ways[0])
 
 
 def _quotes_closed(line: str) -> bool:
@@ -1143,7 +1170,7 @@ def _behind_a_guard(way: list[str]) -> bool:
 @pytest.mark.parametrize(
     "scenario",
     ["--host another than .env's", "a migration half-way", "volumes without .env",
-     "postgres without its roles", "a leftover unseal key", "no SAVED"],
+     "postgres without its roles", "a leftover unseal key", "no SAVED", "an empty audit key"],
 )  # fmt: skip
 def test_a_guarded_way_on_runs_once_its_word_is_typed(tmp_path: Path, scenario: str) -> None:
     """The guards are not a chain that never runs: pasted on its own, a guarded
@@ -1398,14 +1425,28 @@ def _late_failure(host: Host, name: str) -> subprocess.CompletedProcess[str]:
         s["newest"] = "0247"
     elif name == "postgres-grants exits 1":
         s["oneshot_exit"] = {"postgres-grants": 1}
-    elif name == "app_user not narrowed":
-        s["pg"]["narrow_after_grants"] = "f"
+    elif name == "migrate exits 1, and compose with it":
+        s["oneshot_exit"], s["up_returns_exit"] = {"migrate": 1}, True
+    elif name == "postgres-grants exits 1, and compose with it":
+        s["oneshot_exit"], s["up_returns_exit"] = {"postgres-grants": 1}, True
+    elif name == "the RBAC catalog writable after postgres-grants":
+        s["pg"]["grants_leave_catalog_writable"] = True
+    elif name == "an empty audit key":
+        s["files"]["audit"] = "empty"
+    elif name == "docker compose up -d fails":
+        s["up_d_fails"] = True
+    elif name == "a one-shot still running":
+        s["still_running"] = ["openbao-init"]
+    elif name == ":8443 the Let's Encrypt certificate":
+        env["FAKE_GATEWAY_ISSUER"] = "C = US, O = Let's Encrypt, CN = R11"
+    elif name == "no setup-code file":
+        s["setup"]["code"] = None
     elif name == "the gateway's certificate not issued":
         env["FAKE_DOCKER_FAIL"] = "issue-gateway-cert.py rmm.novieri.com"
     elif name == "a service that stops":
         s["crash"] = ["worker"]
     elif name == "a service that keeps restarting":
-        s["restart_step"] = 1
+        s["restart_step"], s["project"] = 1, "rmm-prod"
     elif name == "the :443 certificate refused":
         env["FAKE_RC_CHECK_PUBLIC_TLS"] = "1"
     elif name == "acme.json not 600":
@@ -1419,19 +1460,6 @@ def _late_failure(host: Host, name: str) -> subprocess.CompletedProcess[str]:
     else:
         raise AssertionError(name)
     return host.run(stdin=_saved_and_three(host), env=env)
-
-
-@pytest.mark.parametrize("name", sorted(LATE_FAILURES))
-def test_each_failure_of_steps_4_to_8_says_what_failed(tmp_path: Path, name: str) -> None:
-    """Each FAILED of steps 4 to 8 is reached, says what failed, and (Host.run
-    checks it) can be pasted; SCENARIOS pastes each one whole. No secret
-    leaves on the way."""
-    host = Host(tmp_path)
-    done = _late_failure(host, name)
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert f"FAILED  {LATE_FAILURES[name]}" in done.stderr
-    assert host.leaks() == []
-    assert host.secrets["code"] not in done.stdout + done.stderr
 
 
 @pytest.mark.parametrize("lookup", [1, 2, 3], ids=["OPENBAO_TOKEN", "ITS_OPENBAO_TOKEN", "file"])
@@ -1476,3 +1504,92 @@ def test_step_7_says_only_what_it_checked_before_it_waits(tmp_path: Path) -> Non
     assert again.returncode == 0, again.stdout + again.stderr
     (seven,) = [s for s in lines(again.stdout, "skip") if s.startswith("step 7:")]
     assert seven == "step 7: docker compose up -d created no container and recreated none"
+
+
+# --------------------------------------------------------------------------- #
+# Task 3, fix round 1 (review of Task 3: I1, m1 to m9)
+# --------------------------------------------------------------------------- #
+
+STEP_4B = (
+    "step 4b: app_user reads devices, cannot write the RBAC catalog (permissions,"
+    " role_permissions), and cannot rewrite audit_events or security_events"
+)
+
+
+def test_step_4b_says_what_its_query_proves(tmp_path: Path) -> None:
+    """Review I1: the line says what the query checks, run or skipped."""
+    host, out = _done_host(tmp_path)
+    assert f"  ok      {STEP_4B}" in out.splitlines()
+    again = host.run()
+    assert f"  skip    {STEP_4B}" in again.stdout.splitlines()
+
+
+#: Every privilege grant-app-privileges.sql revokes from app_user.
+REVOKED = [("permissions", p) for p in ("INSERT", "UPDATE", "DELETE")] + [
+    ("role_permissions", p) for p in ("INSERT", "UPDATE", "DELETE")] + [
+    (log, p) for log in ("audit_events", "security_events") for p in ("UPDATE", "DELETE")]
+
+
+def test_a_host_the_grants_did_not_narrow_never_skips_step_4b(tmp_path: Path) -> None:
+    """Review I1: after migrate, app_user may write the RBAC catalog --
+    init-app-user.sh's default privileges -- and only postgres-grants takes
+    that away. A host that kept any one privilege grant-app-privileges.sql
+    revokes runs postgres-grants again; it never skips it. (The fake answers
+    per privilege, as Postgres does: a new host starts with the catalog
+    writable.) One done host, run again once for each privilege."""
+    host, _ = _done_host(tmp_path)
+    for table, privilege in REVOKED:
+        host.state["pg"]["privs"][table].append(privilege)
+        again = host.run()
+        assert again.returncode == 0, (table, privilege, again.stdout + again.stderr)
+        assert "skip    step 4b" not in again.stdout, (table, privilege)
+        assert "docker compose up postgres-grants" in lines(again.stdout, "run"), (table, privilege)
+        assert f"  ok      {STEP_4B}" in again.stdout.splitlines(), (table, privilege)
+
+
+def test_a_host_that_cannot_read_devices_never_skips_step_4b(tmp_path: Path) -> None:
+    host, _ = _done_host(tmp_path)
+    host.state["pg"]["privs"]["devices"] = []
+    again = host.run()
+    assert "skip    step 4b" not in again.stdout
+    assert "docker compose up postgres-grants" in lines(again.stdout, "run")
+
+
+def test_a_key_the_check_misses_is_never_written_over(tmp_path: Path) -> None:
+    """Review m5: the case `set -C` is there for -- a key that exists, which
+    the `test -s` before did not see. The fake writes over it unless the
+    command carries `set -C`, as the shell would."""
+    host = Host(tmp_path)
+    host.state["files"]["audit"] = True
+    host.state["audit_check_fails"] = True
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 1
+    assert "FAILED  /var/lib/its/secrets/audit-hmac.key is there, so set -C" in done.stderr
+    assert not host.state.get("audit_replaced"), "the audit key was written over"
+    assert host.state["files"]["audit"] is True
+
+
+def test_a_claimed_installation_is_not_sent_to_enter_an_install_code(tmp_path: Path) -> None:
+    """Review m9: after `skip step 8: the installation is claimed`, the closing
+    notes do not send the operator to type an install code."""
+    host, _ = _done_host(tmp_path)
+    host.state["setup"]["needed"] = False
+    again = host.run(env=ALLOW)
+    assert again.returncode == 0, again.stdout + again.stderr
+    closing = again.stdout.split("First boot: every step is done.\n", 1)[1]
+    assert len(lines(closing, "note")) == 6
+    assert "install code" not in closing
+    assert "the installation is claimed" in closing
+
+
+def test_an_openbao_sealed_at_a_lookup_says_it_is_sealed(tmp_path: Path) -> None:
+    """Review m7: "did not answer" was also said of an OpenBao that answered,
+    sealed. It still judges no token."""
+    host = Host(tmp_path)
+    _done(host)
+    host.state.update(lookups=0, seal_at_lookup=3)
+    done = host.run()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "FAILED  OpenBao is sealed, so it could not look up the token in " in done.stderr
+    for blame in ("mixed state", "sudo rm -f", "down -v", "did not answer"):
+        assert blame not in done.stderr, blame

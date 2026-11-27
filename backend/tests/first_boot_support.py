@@ -76,7 +76,7 @@ COMMAND_WORDS = (
 #: && [ "$answer" = WORD ] && ...`, one `&&` chain, so that no paste runs it.
 DESTRUCTIVE = re.compile(
     r"\bdown -v\b|\bvolume rm\b|\bdocker rm\b|\bcompose rm\b|\brm (-f )?\.env\b"
-    r"|\bsed -i .*\.env\b|\bup -d --no-deps openbao\b|unseal\.key"
+    r"|\bsed -i .*\.env\b|\bup -d --no-deps openbao\b|unseal\.key|\brm \S*audit-hmac\.key"
 )
 _GUARD_WORD = re.compile(r'\[ "\$answer" = ([A-Z]+) \]')
 
@@ -86,7 +86,7 @@ PASTE_STAND_INS = ("chmod", "docker", "rm", "sed", "sudo", "xargs")
 DESTRUCTIVE_ACT = re.compile(
     r"^(docker compose down|docker compose rm|docker volume rm|xargs -r docker (rm|volume rm)"
     r"|rm (-f )?\.env|sudo rm .*unseal\.key|sed -i .*COMPOSE_FILE"
-    r"|docker compose up -d --no-deps openbao)"
+    r"|docker compose up -d --no-deps openbao|docker compose run .*\brm \S*audit-hmac\.key)"
 )
 
 #: Where each secret may be written: where the runbook writes it.
@@ -119,7 +119,7 @@ def wrote(path):
 '''
 
 FAKE_DOCKER = r'''
-import json, os, sys
+import json, os, re, sys
 
 STATE = os.environ["FAKE_STATE"]
 with open(STATE) as fh:
@@ -137,6 +137,46 @@ if os.environ.get("FAKE_DOCKER_FAIL") and os.environ["FAKE_DOCKER_FAIL"] in " ".
 def save():
     with open(STATE, "w") as fh:
         json.dump(s, fh)
+
+
+# app_user's table privileges, as Postgres holds them (review of Task 3, I1).
+# migrate leaves init-app-user.sh's default privileges -- all four on every
+# table its_admin creates -- less what migrations 0006 and 0009 revoke on the
+# two logs; only postgres-grants (grant-app-privileges.sql) takes the RBAC
+# catalog's INSERT, UPDATE and DELETE away.
+ALL4 = ["SELECT", "INSERT", "UPDATE", "DELETE"]
+TABLES = ("devices", "audit_events", "security_events", "permissions", "role_permissions")
+
+
+def privileges_after_migrate():
+    held = {table: list(ALL4) for table in TABLES}
+    for log in ("audit_events", "security_events"):
+        held[log] = ["SELECT", "INSERT"]
+    return held
+
+
+def privileges_after_grants():
+    held = privileges_after_migrate()
+    for catalog in ("permissions", "role_permissions"):
+        held[catalog] = ["SELECT"]
+    return held
+
+
+_TERM = r"(not )?has_table_privilege\('app_user', '(\w+)', '([A-Z, ]+)'\)"
+
+
+def has_table_privileges(sql):
+    """A conjunction of has_table_privilege(), as Postgres answers it: a list
+    of privileges is true if ANY is held. Anything else is refused."""
+    if not re.fullmatch(r"select %s( and %s)*" % (_TERM, _TERM), sql.strip()):
+        sys.stderr.write("fake psql: not a conjunction of has_table_privilege: %s\n" % sql)
+        return None
+    held = s["pg"]["privs"]
+    value = True
+    for negated, table, wanted in re.findall(_TERM, sql):
+        any_held = any(w.strip() in held[table] for w in wanted.split(","))
+        value = value and (any_held != bool(negated))
+    return "t" if value else "f"
 
 
 def out(text):
@@ -165,8 +205,12 @@ def run_once(name):
     service["exit"] = s["oneshot_exit"].get(name, 0)
     if name == "migrate" and service["exit"] == 0:
         s["pg"]["alembic"] = s["newest"]
+        s["pg"]["privs"] = s["pg"]["privs"] or privileges_after_migrate()
     if name == "postgres-grants" and service["exit"] == 0:
-        s["pg"]["narrow"] = s["pg"].get("narrow_after_grants", "t")
+        if s["pg"]["privs"] is None:  # no tables yet: ON_ERROR_STOP
+            service["exit"] = 3
+        elif not s["pg"].get("grants_leave_catalog_writable"):
+            s["pg"]["privs"] = privileges_after_grants()
 
 
 def bao_json():
@@ -185,6 +229,8 @@ def bao(args, token):
             svc("openbao")["state"] = "exited"
             sys.stderr.write("Error looking up token: connection refused\n")
             return 2
+        if s.get("seal_at_lookup") == s["lookups"]:
+            b["sealed"] = True
         if not b["init"] or b["sealed"]:
             sys.stderr.write("Vault is sealed\n")
             return 2
@@ -233,6 +279,8 @@ def compose(args):
         if "--status" in rest:
             shown = [(n, v) for n, v in shown if v["state"] == "running"]
         for name, v in shown:
+            if name in s.get("still_running", []):
+                v = dict(v, state="running", health="")
             if fmt is None:
                 out(v["id"] + "\n")
             elif fmt.startswith("table"):
@@ -253,9 +301,15 @@ def compose(args):
                     run_once(name)
             for name in s.get("crash", []):
                 svc(name).update(state="exited", exit=1)
+            if s.get("up_d_fails"):
+                sys.stderr.write("dependency failed to start: container it-suite-postgres-grants-1"
+                                 " exited (1)\n")
+                return 1
             return 0
         for name in names:
             (run_once if name in s["oneshots"] else run_long)(name)
+            if s.get("up_returns_exit") and name in s["oneshots"] and svc(name)["exit"]:
+                return svc(name)["exit"]
         return 0
     if sub == "restart":
         for name in rest:
@@ -324,7 +378,13 @@ def compose(args):
                     return 1
                 out(s["pg"]["alembic"] + "\n")
             elif "has_table_privilege" in sql:
-                out(s["pg"]["narrow"] + "\n")
+                if s["pg"]["privs"] is None:
+                    sys.stderr.write('relation "devices" does not exist\n')
+                    return 1
+                value = has_table_privileges(sql)
+                if value is None:
+                    return 1
+                out(value + "\n")
             return 0
         if name == "traefik" and cmd[0] == "stat":
             out(s["acme_mode"] + "\n")
@@ -339,6 +399,9 @@ def compose(args):
                 out("30 30\n")
             return 0
         if name == "api" and cmd[0] == "cat":
+            if s["setup"]["code"] is None:
+                sys.stderr.write("cat: /var/lib/its/secrets/setup-code: No such file\n")
+                return 1
             out(s["setup"]["code"] + "\n")
             return 0
         return 0
@@ -353,15 +416,27 @@ def compose(args):
             out("gateway.crt  /var/lib/its/tls/gateway.crt  (CN=%s, 365d)\n" % rest[-1])
             return 0
         if "audit-hmac.key" in script:
+            # files.audit: True (a key), "empty" (0 bytes), False (none).
+            key = s["files"]["audit"]
             if script.startswith("test -s"):
-                return 0 if s["files"]["audit"] else 1
-            if script.startswith("set -C"):
-                if s["files"]["audit"]:
-                    sys.stderr.write("sh: cannot create audit-hmac.key: File exists\n")
-                    return 1
+                return 0 if key is True and not s.get("audit_check_fails") else 1
+            if "head -c 32 /dev/urandom >" in script:
+                # As the shell does it: `set -C` refuses a file that exists, and
+                # without it the key is written over.
+                if "set -C" in script and key in (True, "empty"):
+                    sys.stderr.write("sh: 1: cannot create audit-hmac.key: File exists\n")
+                    return 2
+                if key is True:
+                    s["audit_replaced"] = True
                 s["files"]["audit"] = True
                 return 0
-            out("-rw------- 1 its its 32 Nov 27 10:00 /var/lib/its/secrets/audit-hmac.key\n")
+            if script.startswith("test -f") and "rm " in script:  # removed only if empty
+                if key == "empty":
+                    s["files"]["audit"] = False
+                    return 0
+                return 1
+            size = 32 if key is True else 0
+            out("-rw------- 1 its its %d Nov 27 10:00 /var/lib/its/secrets/audit-hmac.key\n" % size)
             return 0
         if "gateway.crt" in script:
             return 0 if s["files"]["gateway"] else 1
@@ -379,14 +454,21 @@ if argv[:2] == ["volume", "ls"]:
 elif argv[:2] == ["image", "inspect"]:
     rc = 0 if all(ref in s["images"] for ref in argv[2:]) else 1
 elif argv[0] == "inspect":
+    # The format it is given, field by field; one it does not know is refused,
+    # as a template error (review of Task 3, m3).
     fmt = argv[argv.index("-f") + 1]
     by_id = {v["id"]: (n, v) for n, v in s["services"].items()}
     for ident in [a for a in argv[1:] if a not in ("-f", fmt)]:
         name, v = by_id[ident]
-        if "ExitCode" in fmt:
-            out("%d\n" % v["exit"])
-        else:
-            out("/it-suite-%s-1 %d\n" % (name, v["restarts"] + s["restart_drift"]))
+        line = (fmt.replace("{{.State.ExitCode}}", str(v["exit"]))
+                .replace("{{.RestartCount}}", str(v["restarts"] + s["restart_drift"]))
+                .replace("{{.Name}}", "/%s-%s-1" % (s.get("project", "it-suite"), name))
+                .replace('{{index .Config.Labels "com.docker.compose.service"}}', name))
+        if "{{" in line:
+            sys.stderr.write("fake docker inspect: a field it does not know: %s\n" % fmt)
+            rc = 1
+            break
+        out(line + "\n")
     s["restart_drift"] += s["restart_step"]
 elif argv[0] == "compose":
     rc = compose(argv[1:])
@@ -506,7 +588,7 @@ with open(os.environ["ARGV_LOG"], "a") as log:
     log.write("openssl " + " ".join(sys.argv[1:]) + "\n")
 sys.stdin.read()
 if sys.argv[1] == "x509":
-    print("issuer=CN = Novieri RMM internal CA")
+    print("issuer=" + os.environ.get("FAKE_GATEWAY_ISSUER", "CN = Novieri RMM internal CA"))
     print("X509v3 Subject Alternative Name: ")
     print("    DNS:" + os.environ.get("FAKE_GATEWAY_HOST", "rmm.novieri.com"))
 '''
@@ -988,7 +1070,7 @@ class Host:
                 "its-app": self.secrets["its-app"],
                 "gateway-issuer": self.secrets["gateway-issuer"],
             },
-            "pg": {"roles": 2, "alembic": "", "narrow": "f"},
+            "pg": {"roles": 2, "alembic": "", "privs": None},
             "files": {"audit": False, "gateway": False},
             "acme_mode": "600",
             "setup": {"needed": True, "code": self.secrets["code"]},

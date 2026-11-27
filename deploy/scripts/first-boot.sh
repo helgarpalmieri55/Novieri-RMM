@@ -303,9 +303,11 @@ is_root_token() { local p; p="$(printf '%s\n' "$1" | token_policies)" || return 
 # word the operator would start from zero, or delete a token file whose token
 # stays valid for ten years with no copy. As for shares (review M5).
 lookup_failed() {
+  local why="did not answer when it was asked about $1"
   bao_state
   [ "$bao_up" = yes ] && [ "$bao_sealed" = false ] && return 0
-  die "OpenBao did not answer when it was asked about $1 (answering $bao_up, sealed ${bao_sealed:-unknown}), so that token is not judged, and nothing is to be deleted" \
+  [ "$bao_up" != yes ] || why="is sealed, so it could not look up $1"
+  die "OpenBao $why: that token is not judged, and nothing is to be deleted" \
       "docker compose ps openbao" "docker compose logs --tail 50 openbao" "$rerun"
 }
 
@@ -836,7 +838,9 @@ step_4() {
     return 0
   fi
   act "docker compose up migrate"
-  dc up migrate
+  # What decides is migrate's own exit code, next: whether compose's follows it
+  # is not measured (review of Task 3, (a)).
+  dc up migrate || true
   code="$(oneshot_exit migrate)"
   [ "$code" = 0 ] || die "migrate exited $code" "docker compose logs migrate" "$rerun"
   current="$(psql_admin 'select version_num from alembic_version' | tr -d '[:space:]')"
@@ -844,22 +848,34 @@ step_4() {
   ok "step 4: the schema is at $current"
 }
 
+# Step 4b's question, what postgres/grant-app-privileges.sql leaves: app_user
+# reads (its GRANT on every table, here on devices) and holds none of what it
+# REVOKEs. The RBAC catalog is the one only that file narrows: migrate leaves
+# init-app-user.sh's default privileges, all four on every table, and the two
+# logs narrowed by migrations 0006 and 0009 (review of Task 3, I1). A list of
+# privileges is true if ANY is held.
+narrowed_query="select has_table_privilege('app_user', 'devices', 'SELECT')"
+narrowed_query+=" and not has_table_privilege('app_user', 'permissions', 'INSERT, UPDATE, DELETE')"
+narrowed_query+=" and not has_table_privilege('app_user', 'role_permissions', 'INSERT, UPDATE, DELETE')"
+narrowed_query+=" and not has_table_privilege('app_user', 'audit_events', 'UPDATE, DELETE')"
+narrowed_query+=" and not has_table_privilege('app_user', 'security_events', 'UPDATE, DELETE')"
+narrowed_said="app_user reads devices, cannot write the RBAC catalog (permissions, role_permissions), and cannot rewrite audit_events or security_events"
+
 step_4b() {
   say "Step 4b — app_user's table privileges"
-  local narrow code query
-  query="select has_table_privilege('app_user', 'devices', 'SELECT') and not has_table_privilege('app_user', 'audit_events', 'UPDATE')"
+  local narrow code query="$narrowed_query"
   narrow="$(psql_admin "$query" 2>/dev/null | tr -d '[:space:]' || true)"
   if [ "$narrow" = t ]; then
-    skip "step 4b: app_user reads devices and cannot rewrite audit_events"
+    skip "step 4b: $narrowed_said"
     return 0
   fi
   act "docker compose up postgres-grants"
-  dc up postgres-grants
+  dc up postgres-grants || true   # its own exit code decides, next (as for migrate)
   code="$(oneshot_exit postgres-grants)"
   [ "$code" = 0 ] || die "postgres-grants exited $code" "docker compose logs postgres-grants" "$rerun"
   narrow="$(psql_admin "$query" | tr -d '[:space:]')"
   [ "$narrow" = t ] || die "after postgres-grants, app_user is not narrowed as postgres/grant-app-privileges.sql says" "docker compose logs postgres-grants" "$rerun"
-  ok "step 4b: app_user reads devices and cannot rewrite audit_events"
+  ok "step 4b: $narrowed_said"
 }
 
 step_5() {
@@ -869,8 +885,17 @@ step_5() {
   else
     act "32 random bytes into /var/lib/its/secrets/audit-hmac.key, mode 600"
     # `set -C`: the shell refuses to write over a key that is already there.
-    dc run --rm --no-deps --entrypoint sh api -c \
-      'set -C && head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && chmod 600 /var/lib/its/secrets/audit-hmac.key'
+    # Then it is there, and the check above did not find a key in it: empty
+    # (the api refuses an empty key, backend/app/core/audit.py, so nothing was
+    # ever signed with one), or unreadable. Only an empty one is removed, and
+    # only behind a typed DELETE (review of Task 3, m5).
+    if ! dc run --rm --no-deps --entrypoint sh api -c \
+         'set -C && head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && chmod 600 /var/lib/its/secrets/audit-hmac.key'; then
+      dc run --rm --no-deps --entrypoint sh api -c 'ls -l /var/lib/its/secrets/audit-hmac.key' || true
+      die "/var/lib/its/secrets/audit-hmac.key is there, so set -C refused to write a new one, but the check before found no key in it: it is empty, or it could not be read (its ls -l is above)" \
+          "# a key that is not empty is the audit chain's, and is never removed; one of 0 bytes never signed a record (the api refuses an empty key): the line below asks you to type DELETE, removes the file only if it is still empty, and runs this again" \
+          "$(guard DELETE "deletes the audit HMAC key file, only if it is empty") && docker compose run --rm --no-deps --entrypoint sh api -c 'test -f /var/lib/its/secrets/audit-hmac.key && test ! -s /var/lib/its/secrets/audit-hmac.key && rm /var/lib/its/secrets/audit-hmac.key' && $rerun"
+    fi
   fi
   dc run --rm --no-deps --entrypoint sh api -c 'ls -l /var/lib/its/secrets/audit-hmac.key'
 }
@@ -958,9 +983,12 @@ stack_state() {
         if [[ "$oneshots" == *" $svc "* ]] && [ "$code" = 0 ]; then continue; fi
         stack="fail" stack_text="$stack_text $svc(exited $code)" stack_names="$stack_names $svc" ;;
       running)
-        case "$health" in ''|healthy) continue ;; esac
+        # A one-shot is done when it has exited 0, not while it runs (review m2).
+        if [[ "$oneshots" != *" $svc "* ]]; then
+          case "$health" in ''|healthy) continue ;; esac
+        fi
         [ "$stack" = fail ] || stack="wait"
-        stack_text="$stack_text $svc($health)" stack_names="$stack_names $svc" ;;
+        stack_text="$stack_text $svc(${health:-running})" stack_names="$stack_names $svc" ;;
       *)
         [ "$stack" = fail ] || stack="wait"
         stack_text="$stack_text $svc($state)" stack_names="$stack_names $svc" ;;
@@ -972,7 +1000,8 @@ stack_state() {
 restart_counts() {
   local ids
   mapfile -t ids < <(dc ps -aq | sort)
-  [ "${#ids[@]}" = 0 ] || docker inspect -f '{{.Name}} {{.RestartCount}}' "${ids[@]}"
+  # The service, from its compose label, whatever the project is called (review m8).
+  [ "${#ids[@]}" = 0 ] || docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}} {{.RestartCount}}' "${ids[@]}"
 }
 
 # Every service up -- healthy where it has a health check -- and the three
@@ -996,7 +1025,6 @@ wait_stack() {
       if [ "$stack" = ok ]; then
         stack_text="" stack_names=""
         while read -r name _; do
-          name="${name#/it-suite-}" && name="${name%-1}"
           stack_text="$stack_text $name(restarted)" stack_names="$stack_names $name"
         done < <(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") | sed -n 's/^> //p')
       fi
@@ -1010,7 +1038,9 @@ step_7() {
   say "Step 7 — start everything; Traefik obtains the certificate for :443"
   local before after mode connect gateway_cert limits tls_args=()
   before="$(dc ps -aq | sort)"
-  dc up -d
+  # Fails when a dependency does: a one-shot that did not exit 0, a service
+  # that never turned healthy (review m1).
+  dc up -d || die "docker compose up -d failed (above)" "docker compose ps -a" "docker compose logs --tail 50" "$rerun"
   after="$(dc ps -aq | sort)"
   if [ -n "$before" ] && [ "$before" = "$after" ]; then
     skip "step 7: docker compose up -d created no container and recreated none"
@@ -1027,7 +1057,9 @@ step_7() {
            "# fix the cause, then restart Traefik, which asks for the certificate again, and run this again; OpenBao unseals itself, so it asks for no share:" \
            "docker compose restart traefik && $rerun"
   mode="$(dc exec -T traefik stat -c %a /etc/traefik/acme/acme.json 2>/dev/null | tr -d '[:space:]' || true)"
-  [ "$mode" = 600 ] || die "Traefik's acme.json is mode ${mode:-missing}, not 600" "docker compose logs traefik | grep -i acme" "$rerun"
+  [ "$mode" = 600 ] || die "Traefik's acme.json is mode ${mode:-missing}, not 600" \
+    "# Traefik writes acme.json itself, mode 600, into its traefik-acme volume, and refuses a looser one: another mode, or none, means it was made or changed by something else; its log says what Traefik made of it:" \
+    "docker compose logs traefik | grep -i acme" "$rerun"
   ok "step 7: Traefik's certificate store, acme.json, is mode 600"
   connect="$(env_get ITMS_BIND_IP)"
   case "$connect" in ''|0.0.0.0) connect=127.0.0.1 ;; esac
@@ -1048,10 +1080,10 @@ step_8() {
   local needed code
   needed="$(dc exec -T api python -c "import json, urllib.request; print(json.load(urllib.request.urlopen('http://localhost:8000/api/v1/setup/status', timeout=10))['needed'])" 2>/dev/null | tr -d '[:space:]' || true)"
   case "$needed" in
-    False) skip "step 8: the installation is claimed" ;;
+    False) skip "step 8: the installation is claimed"; claimed=yes ;;
     True)
-      code="$(dc exec -T api cat /var/lib/its/secrets/setup-code | tr -d '[:space:]')"
-      [ -n "$code" ] || die "the api wrote no install code" "docker compose logs api | grep -i 'install code'" "$rerun"
+      code="$(dc exec -T api cat /var/lib/its/secrets/setup-code 2>/dev/null | tr -d '[:space:]' || true)"
+      [ -n "$code" ] || die "the api wrote no install code to /var/lib/its/secrets/setup-code (none, or an empty one)" "docker compose logs api | grep -i 'install code'" "$rerun"
       if [ -t 1 ] || [ "$allow_nontty" = 1 ]; then
         printf '\n  install code  %s\n\n' "$code"
         note "open https://$host/ in a browser you trust and enter it (deploy/README.md, First boot, 2): it is a password until you have"
@@ -1063,10 +1095,16 @@ step_8() {
   esac
 }
 
+claimed=no
 finish() {
   say "First boot: every step is done."
-  note "Next, in a browser (deploy/README.md, First boot, 2): https://$host/ with the install code;"
-  note "your password, your second factor and its ten recovery codes; then an enrollment token at https://$host/enrollment."
+  if [ "$claimed" = yes ]; then
+    note "Next, in a browser (deploy/README.md, First boot, 2): the installation is claimed; sign in at https://$host/"
+    note "with your password and second factor; then an enrollment token at https://$host/enrollment."
+  else
+    note "Next, in a browser (deploy/README.md, First boot, 2): https://$host/ with the install code;"
+    note "your password, your second factor and its ten recovery codes; then an enrollment token at https://$host/enrollment."
+  fi
   note "Then: ./scripts/first-boot-check.sh"
   note "Custody, off this VPS (GO-LIVE.md §4 and §6): the five shares and the root token, RECOVERY keys now"
   note "(openbao-seal.sh disable, bao operator generate-root), not unseal keys; the key file $key_file,"
