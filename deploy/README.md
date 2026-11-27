@@ -432,6 +432,7 @@ and later `./scripts/first-boot-check.sh --tls-cafile /tmp/le-staging-roots.pem`
 ### 1. `first-boot.sh`
 
 ```sh
+cd /opt/it-suite/deploy
 ./scripts/first-boot.sh
 ```
 
@@ -544,6 +545,7 @@ Anything else: open `8443/tcp` at the provider's firewall.
 ### 3. `first-boot-check.sh`
 
 ```sh
+cd /opt/it-suite/deploy
 ./scripts/first-boot-check.sh
 ```
 

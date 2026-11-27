@@ -193,14 +193,16 @@ def test_after_a_reboot_openbao_unseals_itself_and_the_key_file_is_the_way_back(
 
 def test_the_first_boot_is_three_scripts() -> None:
     """Design §1 and §8, criterion 1: `prepare-host.sh` in the prerequisites,
-    then `first-boot.sh` and `first-boot-check.sh`, each alone in its block,
-    and nothing else to paste in First boot itself."""
+    then `first-boot.sh` and `first-boot-check.sh`, each in its block after a
+    `cd` to the checkout (prepare-host.sh ends asking for a new login, which
+    lands in the home directory, and the browser step may be a new SSH
+    session), and nothing else to paste in First boot itself."""
     blocks = _sh_blocks(_section(README.read_text(), PREREQUISITES))
     prereq = [c for b in blocks for c in _commands(b)]
     assert "sudo ./scripts/prepare-host.sh" in prereq
     assert [_commands(b) for b in _sh_blocks(_first_boot())] == [
-        ["./scripts/first-boot.sh"],
-        ["./scripts/first-boot-check.sh"],
+        ["cd /opt/it-suite/deploy", "./scripts/first-boot.sh"],
+        ["cd /opt/it-suite/deploy", "./scripts/first-boot-check.sh"],
     ]
     for script in ("prepare-host.sh", "first-boot.sh", "first-boot-check.sh"):
         assert (SCRIPTS / script).stat().st_mode & 0o111, f"{script} is not executable"
