@@ -46,6 +46,7 @@ first_boot_only="ITS_OPENBAO_TOKEN OPENBAO_TOKEN"
 while IFS='=' read -r key value; do
   case "$key" in ''|\#*) continue ;; esac
   [ "$value" = "change-me" ] || continue
+  # shellcheck disable=SC2086  # split on purpose: one key per line
   if printf '%s\n' $first_boot_only | grep -qx "$key"; then
     printf '  note    %s is still change-me -- expected before first boot; §3.2/§3.4 issue it\n' "$key"
   else
@@ -118,9 +119,18 @@ else
   ok "ITS_ACME_EMAIL is set"
 fi
 acme_ca="$(grep -E '^ITS_ACME_CA_SERVER=' .env | tail -1 | cut -d= -f2- || true)"
+# Let's Encrypt production however ITS_ACME_CA_SERVER spells it -- its host in
+# any case, with a final dot, an explicit :443, any path or a trailing slash,
+# spaces around it -- and when it is unset, which is what Traefik then uses.
+ca_host="$(printf '%s\n' "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" \
+           | tr '[:upper:]' '[:lower:]' \
+           | sed -nE 's|^[[:space:]]*[a-z][a-z0-9+.-]*://([^/:?#[:space:]]+)(:443)?([/?#][^[:space:]]*)?[[:space:]]*$|\1|p' || true)"
+le_production=no
+[ "${ca_host%.}" != acme-v02.api.letsencrypt.org ] || le_production=yes
 case "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" in
-  https://acme-v02.api.letsencrypt.org/directory) ok "ACME CA: Let's Encrypt production" ;;
-  https://*) printf '  note    ACME CA is %s, not Let'"'"'s Encrypt production: its certificates are for a rehearsal, and no browser trusts them\n' "$acme_ca" ;;
+  https://*) if [ "$le_production" = yes ]; then ok "ACME CA: Let's Encrypt production"
+             else printf '  note    ACME CA is %s, not Let'"'"'s Encrypt production: its certificates are for a rehearsal, and no browser trusts them\n' "$acme_ca"
+             fi ;;
   *) refuse "ITS_ACME_CA_SERVER=$acme_ca is not an https URL" ;;
 esac
 
@@ -151,17 +161,17 @@ esac
 # ITS_PREFLIGHT_SKIP_DNS=1 leaves the name unasked, and says so: for the CI's
 # `deploy` job and a rehearsal, where no public DNS holds the name and Pebble's
 # validator asks its own (design 2026-11-27-despliegue-automatizado §5). Never
-# against Let's Encrypt production, and so never on a real host: a name nobody
-# checked spends the 5 certificates a week production allows it, and that CA
-# is the one an unset ITS_ACME_CA_SERVER means (coordinator's ruling Q4,
-# 2026-11-27).
+# against Let's Encrypt production, however it is spelled (le_production,
+# above), and so never on a real host: a name nobody checked is a validation
+# that may fail, and production allows 5 failed validations per name and
+# hour, after which the name waits; and an unset ITS_ACME_CA_SERVER means
+# that CA (coordinator's ruling Q4, 2026-11-27).
 if [ "${ITS_PREFLIGHT_SKIP_DNS:-0}" = 1 ]; then
-  case "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" in
-    https://acme-v02.api.letsencrypt.org/directory)
-      refuse "ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA (ITS_ACME_CA_SERVER is ${acme_ca:-unset}): a name nobody asked DNS about would spend the 5 certificates a week production allows it. Unset ITS_PREFLIGHT_SKIP_DNS on a real host; a rehearsal sets ITS_ACME_CA_SERVER to staging or Pebble." ;;
-    *)
-      printf '  note    %s was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): the CI or a rehearsal, never a real host\n' "$public_host" ;;
-  esac
+  if [ "$le_production" = yes ]; then
+    refuse "ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA (ITS_ACME_CA_SERVER is ${acme_ca:-unset}): a name nobody asked DNS about may fail its validation, and production allows 5 failed validations per name and hour. Unset ITS_PREFLIGHT_SKIP_DNS on a real host; a rehearsal sets ITS_ACME_CA_SERVER to staging or Pebble."
+  else
+    printf '  note    %s was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): the CI or a rehearsal, never a real host\n' "$public_host"
+  fi
 elif [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
   if ! command -v getent >/dev/null 2>&1; then
     printf '  note    %s could not be resolved -- getent is not installed\n' "$public_host"
@@ -192,6 +202,7 @@ print(" ".join(sorted({f[4][0] for f in found if not f[4][0].startswith("::ffff:
       for a in $v4; do
         case " $mine " in *" $a "*) match="$a" ;; esac
       done
+      # shellcheck disable=SC2086  # $mine is split on purpose: one address per line
       if [ -n "$match" ]; then
         ok "$public_host resolves to $match, an address of this host"
       elif [ -z "$mine" ]; then

@@ -348,3 +348,42 @@ def test_the_dns_is_never_left_unasked_against_lets_encrypt_production(
     refusal = "REFUSE  ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA"
     assert refusal in run.stdout
     assert "was not asked of DNS" not in run.stdout
+
+
+@pytest.mark.parametrize(
+    "ca",
+    [
+        pytest.param("https://acme-v02.api.letsencrypt.org/directory/", id="trailing-slash"),
+        pytest.param("https://ACME-V02.api.letsencrypt.org/directory", id="upper-case"),
+        pytest.param("https://acme-v02.api.letsencrypt.org:443/directory", id="port-443"),
+        pytest.param("https://Acme-V02.API.LetsEncrypt.org.:443/directory/", id="all-of-them"),
+        pytest.param(" https://acme-v02.api.letsencrypt.org/directory", id="leading-space"),
+    ],
+)
+def test_lets_encrypt_production_is_production_however_it_is_spelled(
+    tmp_path: Path, ca: str
+) -> None:
+    """Review M2 (fix round, 2026-11-27): to Let's Encrypt, the name's case, a
+    trailing slash, a final dot and an explicit :443 are the same production
+    CA, so the name is never left unasked of DNS against any of them; and the
+    CA line says production, not rehearsal."""
+    env = {**GOOD_ENV, "ITS_ACME_CA_SERVER": ca}
+    run = _run(tmp_path, env, {**GOOD_HOST, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert run.returncode == 1, run.stdout
+    refusal = "REFUSE  ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA"
+    assert refusal in run.stdout
+    assert "was not asked of DNS" not in run.stdout
+    plain = _run(tmp_path, env, GOOD_HOST)
+    if ca.startswith("https://"):
+        assert plain.returncode == 0, plain.stdout
+        assert "ok      ACME CA: Let's Encrypt production" in plain.stdout
+    else:
+        assert "is not an https URL" in plain.stdout
+
+
+def test_staging_is_not_production_and_the_name_may_be_left_unasked(tmp_path: Path) -> None:
+    staging = "https://acme-staging-v02.api.letsencrypt.org/directory"
+    env = {**GOOD_ENV, "ITS_ACME_CA_SERVER": staging}
+    run = _run(tmp_path, env, {**GOOD_HOST, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert run.returncode == 0, run.stdout
+    assert "was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1)" in run.stdout
