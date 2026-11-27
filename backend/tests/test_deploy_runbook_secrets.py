@@ -41,6 +41,11 @@ RUNBOOKS = (
     REPO / "deploy" / "README.md",
     REPO / "deploy" / "GO-LIVE.md",
     REPO / "deploy" / "scripts" / "issue-gateway-cert.py",
+    # Since 2026-11-27 the first boot's commands are these scripts' too
+    # (design 2026-11-27-despliegue-automatizado §3: no secret on a command line).
+    REPO / "deploy" / "scripts" / "prepare-host.sh",
+    REPO / "deploy" / "scripts" / "first-boot.sh",
+    REPO / "deploy" / "scripts" / "first-boot-check.sh",
 )
 
 #: `-e NAME_TOKEN=value` / `--env NAME_TOKEN=value` on a command line.
@@ -66,7 +71,14 @@ REMOVED_MARKER = "[removed]"
 
 # GO-LIVE.md §5 held the one quotation of the removed invocation; it points at
 # README step 6b since 2026-11-24, and README quotes it in a ```text block.
-EXPECTED_MARKED_LINES = {"README.md": 0, "GO-LIVE.md": 0, "issue-gateway-cert.py": 1}
+EXPECTED_MARKED_LINES = {
+    "README.md": 0,
+    "GO-LIVE.md": 0,
+    "issue-gateway-cert.py": 1,
+    "prepare-host.sh": 0,
+    "first-boot.sh": 0,
+    "first-boot-check.sh": 0,
+}
 
 
 def _runnable_lines(path: Path) -> list[tuple[int, str]]:
@@ -107,7 +119,7 @@ def test_no_runbook_command_assigns_a_token_on_the_command_line(path: Path) -> N
     `README.md:481  -e BAO_TOKEN="$(grep ...)"` — the file, the line and the
     text to delete.
     """
-    scan = _all_lines(path) if path.suffix == ".py" else _runnable_lines(path)
+    scan = _all_lines(path) if path.suffix in (".py", ".sh") else _runnable_lines(path)
     offenders = [
         f"{path.name}:{number}  {line.strip()}"
         for number, line in scan

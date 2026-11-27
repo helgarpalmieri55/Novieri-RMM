@@ -6,6 +6,20 @@ audit-chain key backup, database backups.
 
 ## Status of this runbook
 
+**Since 2026-11-27 the first boot is three scripts** (design
+`docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md`):
+`prepare-host.sh` (P2 to P5), `first-boot.sh` (steps 1 to 3.6, OpenBao's
+auto-unseal, steps 4 to 7 and step 8's install code) and `first-boot-check.sh`
+(steps 10 to 12), with the moments that need a person in between ([First
+boot](#first-boot)). The blocks they run are in [the
+appendix](#appendix-what-each-script-does-by-hand), for a step a script stopped
+at or a first boot without them. CI's `deploy` job runs the last two on every
+push, against Pebble, with five shares; `prepare-host.sh` runs only against
+stubs. **OpenBao unseals itself**: the operator chose the static-key
+auto-unseal for every first boot on 2026-11-27, knowing its cost (GO-LIVE.md
+§4), and the five shares are recovery keys. None of the three has run on the
+VPS yet.
+
 **Rewritten on 2026-11-23 for a new VPS** (`rmm.novieri.com`, design
 `docs/superpowers/specs/2026-11-23-vps-y-marca-novieri-design.md`): the
 prerequisites, steps 1, 1b, 1c, 6b (new: the gateway certificate's renewal
@@ -17,12 +31,16 @@ certificate on `:443` is Let's Encrypt's, which Traefik asks for and renews
 commands that used a bearer token run inside the stack, or in the console.
 
 ⚠ **Rehearsed on 2026-11-24, not yet run on the VPS.** The whole First boot
-below was run block by block on 2026-11-24 (plan of 2026-11-23, Task 12), from
+of that day, now [the appendix](#appendix-what-each-script-does-by-hand)'s
+blocks, was run block by block on 2026-11-24 (plan of 2026-11-23, Task 12), from
 `/opt/it-suite/deploy` of a copy of this repository, in a container with Docker
 Engine 29.9.3 and Compose 5.7.1; then [After a reboot or a
-restart](#after-a-reboot-or-a-restart), with OpenBao restarted and sealed, and
-the upgrade's `./scripts/deploy.sh --plan`. Every block ran as written except
-for these substitutions:
+restart](#after-a-reboot-or-a-restart) as it was that day, on Shamir, with
+OpenBao restarted, sealed and unsealed with three shares; and the upgrade's `./scripts/deploy.sh --plan`. Every block ran as written except
+for these substitutions (and four blocks have changed since, to what the
+scripts run, as the appendix says at each: step 2 waits with `--wait`, step 5
+writes with `set -C`, step 6b reloads systemd before it enables the timer, and
+step 12 reads the journal with `sudo`):
 
 - **D1, Pebble for Let's Encrypt:** `COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml`
   and `PEBBLE_MINICA` in every command's environment, and `--acme-ca-server
@@ -257,99 +275,15 @@ id -nG
 ```
 
 The list contains `sudo`. Every command from here on runs as this account.
-
-### P2 — The firewall
-
-```sh
-sudo ufw allow 22/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 8443/tcp
-sudo ufw --force enable
-sudo ufw status verbose
-```
-
-Check that the output says `Status: active`, `Default: deny (incoming)`, and
-`ALLOW IN` for `22/tcp`, `443/tcp` and `8443/tcp`. ⚠ **UNVERIFIED** in this
-repository's rehearsal (Task 12 of the plan of 2026-11-23 ran in a container,
-without ufw). Docker's own documentation warns that ports Docker publishes
-bypass ufw ("when you expose container ports using Docker, these ports bypass
-your firewall rules"): this stack publishes 443 and 8443 and nothing else, so
-the firewall's job here is everything that is not Docker.
-
-### P3 — Security updates
-
-```sh
-sudo apt-get update
-sudo apt-get install -y unattended-upgrades
-printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades
-systemctl is-active unattended-upgrades
-```
-
-The `tee` prints the two lines it wrote, and the last command prints `active`.
-Ubuntu installs `unattended-upgrades` by default and these are its default two
-lines; writing them makes the state explicit rather than assumed.
-
-### P4 — The clock
-
-```sh
-timedatectl status | grep -E 'System clock synchronized|NTP service'
-```
-
-```
-System clock synchronized: yes
-              NTP service: active
-```
-
-If either says otherwise: `sudo timedatectl set-ntp true`, and check again.
-Certificates, second-factor codes and the audit log's times all depend on it.
-
-### P5 — Docker CE, from Docker's repository
-
-**Do not use Ubuntu's `docker.io` package.** An Engine too old refuses
-`traefik:v3.6`'s Docker provider, and Traefik then discovers no containers and
-every route answers a bare 404 while everything looks healthy. These are
-Docker's own Ubuntu instructions (docs.docker.com/engine/install/ubuntu),
-starting with its first: remove the distribution's packages that conflict
-with Docker's (some VPS images ship one; none installed is fine):
-
-```sh
-sudo apt-get remove -y $(dpkg --get-selections docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc 2>/dev/null | cut -f1)
-sudo apt-get install -y ca-certificates curl git openssl iproute2
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker "$USER"
-```
-
-Log out and in again, so the new group applies, then check the two versions
-that matter:
-
-```sh
-docker version --format '{{.Server.Version}}'
-docker compose version --short
-```
-
-The Engine must be **26 or newer** and Compose **2.24 or newer**
-(`scripts/preflight.sh` refuses older ones). Compose 2.24 is needed because
-`.env` is both Compose's project env file and the services' `env_file`, and
-entries like
-`ITS_DATABASE_URL=postgresql+asyncpg://app_user:${APP_DB_PASSWORD}@postgres:5432/itsuite`
-rely on Compose interpolating `${APP_DB_PASSWORD}` inside the env file.
-
-The `docker` group "grants root-level privileges to the user" (Docker's
-post-installation notes): that is why only the operator account is in it.
+`prepare-host.sh`, below, makes no account: it runs with `sudo` from this one,
+and run as `root` alone it refuses and points here. On a VPS that comes with
+only `root`, these lines, by hand, are the way.
 
 ### P6 — The checkout
+
+**Before P2 to P5** since 2026-11-27: `prepare-host.sh`, which does them, is in
+this checkout. Ubuntu Server 24.04 ships `git` and `ssh-keygen`; if `git
+--version` says the command is not found, `sudo apt-get install -y git` first.
 
 Over SSH with a **deploy key** — a read-only key scoped to this repository:
 
@@ -392,1010 +326,293 @@ git -C .. rev-parse --abbrev-ref HEAD
 The last line prints `main`: a deployment is always made from `main`. All
 commands below are run from `/opt/it-suite/deploy`.
 
+### P2 to P5 — `prepare-host.sh`
+
+From `/opt/it-suite/deploy`, the checkout P6 made, as your operator account:
+
+```sh
+sudo ./scripts/prepare-host.sh
+```
+
+It does P2 to P5 of [the appendix](#prepare-hostsh-p2-to-p5), in that order,
+and skips what it finds done: the firewall (22, 443 and 8443 in, nothing else,
+ufw on), unattended security updates, the clock (NTP on, if it is not), Docker
+CE from Docker's own repository, and your account -- the one that ran `sudo`
+-- in the `docker` group. It prints `run` before what it changes, `skip` for
+what is done already and `ok` for a check that held, and a `WARNING` if ufw
+also lets in a port this stack does not need. A `FAILED` line says what failed
+and the command to go on with, which names the script by its own absolute
+path, `sudo /opt/it-suite/deploy/scripts/prepare-host.sh`, so it works from
+any folder: run it again once the fix is made, and it picks up where it
+stopped. It ends:
+
+```text
+Docker's versions
+  ok      Docker Engine … (26 or newer)
+  ok      Docker Compose … (2.24 or newer)
+
+The host is ready for the first boot
+  note    log out, and log in again as rmmadmin: the docker group applies to a new login only
+  note    then, as rmmadmin: cd /opt/it-suite/deploy && ./scripts/first-boot.sh
+```
+
+Log out and log in again, as it says: `first-boot.sh` needs the `docker`
+group, and a group applies to a new login only. (A later run, with your
+account in the group already, says to do it if you have not since.) ⚠
+**UNVERIFIED** on a real VPS: its tests run it against stubbed commands
+(`backend/tests/test_prepare_host_script.py`); turning ufw on and installing
+Docker have still been run by nobody in this repository, as before 2026-11-27.
+
 ---
 
 ## First boot
 
-Start from genuinely empty state. If you are re-running after a failed attempt,
-`docker compose down -v` first — a half-initialised Postgres data directory or
-OpenBao barrier will hide the step that actually broke — and `rm .env`, because
-step 1 refuses to overwrite one. **A first boot after `down -v` asks Let's
+Three commands from `/opt/it-suite/deploy`, after the prerequisites, and the
+moments that need you in between: the secrets only you may see or keep, and
+what is done in the browser. Each script runs the blocks of [What each script
+does, by hand](#appendix-what-each-script-does-by-hand), the appendix, in the
+order they are numbered there, and checks each step before it runs it: a step
+done already prints `skip`, one it does prints `run`, a check that held prints
+`ok`. **Run a script again after any failure**, once the fix its `FAILED`
+report names is made: it picks up where it stopped, and never initialises
+OpenBao twice or overwrites `.env`, the audit key or a token file. CI's
+`deploy` job runs `first-boot.sh` and `first-boot-check.sh` on every push,
+against Pebble (design
+`docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md`).
+
+**A `FAILED` report of `first-boot.sh` can be pasted whole**, as it stands,
+from any folder. Its commands start with an absolute `cd /opt/it-suite/deploy`;
+what is not a command is a `#` comment; where there are two ways on, it says
+to run ONE, and each is a block of its own; and a line that asks for a
+password or a share is the last of its block. Every way on that destroys or
+undoes something asks first for a word typed in capitals -- `DESTROY` to start
+from zero, `DELETE` to delete an earlier first boot's key file or an empty
+audit key, `UNDO` to undo a seal migration left half-way, `SAVED` for the one
+that clears the screen holding the shares -- and so does every way on after
+the first. **That is deliberate**: pasted with the rest of the report, its
+prompt takes the next pasted line, or waits for the keyboard, and either way
+it is not the word, so nothing of that way runs. Type the word only when you
+mean that way.
+
+Start from genuinely empty state: a new VPS, where nothing of an earlier first
+boot is left. `first-boot.sh` refuses `.env`, OpenBao, the volumes and the
+files it keeps under `/etc/it-suite` when they come from two different first
+boots, and says how to go on. Starting over after a failed attempt, rather
+than running the script again, is the way on its refusals give behind
+`DESTROY`: it runs `docker compose down -v` -- a half-initialised Postgres data
+directory or OpenBao barrier hides the step that actually broke --, `rm .env`
+and
+`sudo rm -f /etc/it-suite/gateway-issuer.token /etc/it-suite/openbao-unseal/unseal.key`
+(keep the off-host copy of an earlier key file only as long as you keep
+backups of the vault it unsealed). **A first boot after `down -v` asks Let's
 Encrypt for a new certificate**: more than 5 in a week for `rmm.novieri.com`
-and production refuses, so a rehearsal uses staging (step 1).
+and production refuses.
 
-### Step 1 — `.env`
+**A rehearsal** -- a second first boot, a test of this runbook on another
+machine -- uses Let's Encrypt's staging directory, whose certificates no
+browser trusts and whose limits are far higher. Fetch staging's roots first,
+with the `curl` of [step 7 in the
+appendix](#step-7--start-everything-traefik-obtains-the-certificate-for-443)
+(into `/tmp/le-staging-roots.pem`), and give both scripts that file:
+`./scripts/first-boot.sh --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory --tls-cafile /tmp/le-staging-roots.pem`,
+and later `./scripts/first-boot-check.sh --tls-cafile /tmp/le-staging-roots.pem`.
 
-```sh
-./scripts/new-env.sh --host rmm.novieri.com
-```
-
-It asks for one thing: the contact address Traefik gives Let's Encrypt when it
-registers its account. Let's Encrypt stopped mailing expiry warnings on
-2025-06-04 and no longer keeps the address on the account (it passes it to
-ISRG's mailing list), so nothing about renewal depends on it. Then it
-writes `.env` from `.env.example`, mode 600: a fresh random value in every
-`change-me` except the two OpenBao tokens, `rmm.novieri.com` in every URL, and
-the ACME keys. It prints no secret, and it refuses to overwrite an existing
-`.env`.
-
-```
-wrote .env (mode 600)
-  host            rmm.novieri.com
-  ITS_ACME_EMAIL=…
-  ITS_ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory
-  ITS_S3_PUBLIC_ENDPOINT=https://rmm.novieri.com
-  ITS_GATEWAY_URL=wss://rmm.novieri.com:8443/agent
-  ITS_GATEWAY_RELAY_URL=wss://rmm.novieri.com:8443/relay
-  ITS_PUBLIC_CONSOLE_URL=https://rmm.novieri.com
-  new secrets     POSTGRES_ADMIN_PASSWORD APP_DB_PASSWORD PORTAL_DB_PASSWORD MINIO_ROOT_PASSWORD
-  still change-me ITS_OPENBAO_TOKEN OPENBAO_TOKEN (README step 3.5 fills them)
-```
+### 1. `first-boot.sh`
 
 ```sh
-stat -c %a .env
-grep -c '=change-me$' .env
+./scripts/first-boot.sh
 ```
 
-```
-600
-2
-```
-
-Exactly two `change-me` — the OpenBao pair, which step 3.5 fills. Real secrets
-never enter git; `.env` is gitignored.
-
-**A rehearsal** — a second first boot, a test of this runbook on another
-machine — uses Let's Encrypt's staging directory instead, whose certificates no
-browser trusts and whose limits are far higher:
-`./scripts/new-env.sh --host rmm.novieri.com --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory`.
-On a staging rehearsal, step 7's check needs the staging roots, and a later
-`./scripts/deploy.sh` prints **two** warnings and ends `Deployed with
-warnings` (exit status 1): `API returned 000 (expected 401)`, because its
-curl probe of `:443` has no staging CA, and the certificate refusal after its
-`--wait 60`, which has none either. Everything is up; those lines are the
-probes, not a failure.
-
-`ITS_PUBLIC_CONSOLE_URL` is the origin every sign-in write is checked against;
-it must stay exactly what the browser's address bar shows, `https://rmm.novieri.com`.
-
-**The per-address sign-in limits are optional** (`ITS_AUTH_LOGIN_IP_LIMIT` and
-`ITS_AUTH_FACTOR_IP_LIMIT`). Unset, one address may send 30 requests in 10
-minutes to the password step, and 30 to the second-factor steps; technicians
-behind one office NAT address share one budget. Raise them for that, within
-5-1000 (`.env.example` gives the costs); step 7 shows the values the api
-started with.
-
-### Step 1b — Tagged images
-
-```sh
-./scripts/build-images.sh
-v="$(git -C .. rev-parse --short HEAD)" && sed -i '/^IT_SUITE_VERSION=/d' .env && echo "IT_SUITE_VERSION=$v" >> .env && grep '^IT_SUITE_VERSION=' .env
-```
-
-`build-images.sh` builds `itsuite/backend` and `itsuite/web` tagged with the
-checkout's commit, and ends with `Recent tags:` — on this new host, the one tag
-it just built. **That list is the rollback target list, and there is no earlier
-entry:** until step 12 has taken the first backup, a new host has no way back
-but starting over (see [Rolling back a deployment](#rolling-back-a-deployment)).
-The second line writes the tag into `.env`, deleting any earlier line first.
-(Until 2026-11-24 this list read `(none yet)` whatever tags existed: row 17 of
-[What was broken](#what-was-broken-and-how-you-would-recognise-it). A
-`(none yet)` printed before then said nothing about a host's tags.)
-
-### Step 1c — The pre-flight
-
-```sh
-./scripts/preflight.sh
-```
-
-It checks `.env` (mode, secrets, tag), that `ITS_PUBLIC_HOST` is the console's
-host, that `rmm.novieri.com` resolves to this machine and has no `AAAA`
-record, that 443 and 8443 are free, and the Docker versions. A good first boot
-ends:
-
-```
-  note    ITS_OPENBAO_TOKEN is still change-me -- expected before first boot; §3.2/§3.4 issue it
-  note    OPENBAO_TOKEN is still change-me -- expected before first boot; §3.2/§3.4 issue it
-  ...
-  ok      ITS_PUBLIC_HOST=rmm.novieri.com is the console's host
-  ok      ITS_ACME_EMAIL is set
-  ok      ACME CA: Let's Encrypt production
-  ok      rmm.novieri.com resolves to …, an address of this host
-  ok      443 and 8443 are free
-  ok      Docker Engine …
-  ok      Docker Compose …
-  ok      .env is gitignored
-
-No known-bad state found. This does not mean the deployment is correct --
-work through GO-LIVE.md §2 (the first administrator), §4 (OpenBao seal), §5 (gateway cert)
-and §6 (back these up) before anything real touches it.
-```
-
-Any `REFUSE` names its fix; correct it and run the pre-flight again before
-going on.
-
-### Step 2 — Postgres
-
-```sh
-docker compose up -d postgres
-```
-
-First boot runs `postgres/init-app-user.sh`, which creates `app_user` and
-`portal_user` (both NOSUPERUSER, NOBYPASSRLS), grants `its_admin` BYPASSRLS
-(the migration/bootstrap role), and installs `app_user`'s standing `ALTER
-DEFAULT PRIVILEGES` so any table a future migration adds is usable with no
-manual step. No table exists yet, so `app_user` cannot use anything yet
-either — **step 4b is not optional**.
-
-```sh
-docker compose logs postgres | grep -E 'CREATE ROLE|ALTER DEFAULT|CREATE DATABASE'
-docker compose ps postgres --format '{{.Status}}'
-```
-
-```
-postgres-1  | CREATE DATABASE
-postgres-1  | CREATE ROLE
-postgres-1  | CREATE ROLE
-postgres-1  | ALTER DEFAULT PRIVILEGES
-postgres-1  | ALTER DEFAULT PRIVILEGES
-Up 15 seconds (healthy)
-```
-
-**If it exits 1 with `APP_DB_PASSWORD: APP_DB_PASSWORD must be set`** you
-skipped step 1. Fix `.env`, then `docker compose down -v postgres` — the init
-script only ever runs against a brand-new data directory, so a partially
-initialised volume must be destroyed, not restarted.
-
-### Step 3 — OpenBao: initialise, unseal, provision
-
-This is the step with the most moving parts, and every one of them is a place a
-first boot can dead-end. Take it in order.
-
-#### 3.1 Start it
-
-```sh
-docker compose up -d openbao
-docker compose exec openbao bao status
-```
-
-```
-Key                Value
----                -----
-Seal Type          shamir
-Initialized        false
-```
-
-`Initialized false` (and, below these lines, `Sealed true`) is correct. Its
-exit status is 2, not 0: `bao status` exits 2 for any sealed vault, initialised
-or not. (The `bao` CLI defaults to
-`https://`, but the listener is plaintext inside the compose network only;
-`BAO_ADDR=http://127.0.0.1:8200` is set on the service so these commands work
-as written. Without it every one of them fails with `http: server gave HTTP
-response to HTTPS client`.)
-
-#### 3.2 Initialise — this prints the only copy of the unseal keys
-
-```sh
-docker compose exec openbao bao operator init -key-shares=5 -key-threshold=3
-```
-
-**Five unseal key shares and one root token are printed exactly once and are
-never recoverable.** Before you go further:
-
-- copy the five shares to five different places — a password manager, sealed
-  envelopes with different custodians, an offline vault. Threshold is 3, so
-  three lost shares is a lost vault: the job-signing key, the agent CA and
-  every sealed credential become unrecoverable, and every enrolled endpoint
-  becomes uncontrollable.
-- copy the root token to your password manager.
-- **none of this goes into this repository, into `.env` (beyond the two token
-  variables), into a shell script, or into a log.** This runbook deliberately
-  shows no key material.
-
-#### 3.3 Unseal — three of the five shares
-
-```sh
-docker compose exec openbao bao operator unseal   # prompts; repeat ×3
-docker compose exec openbao bao status
-```
-
-```
-Initialized     true
-Sealed          false
-Total Shares    5
-Threshold       3
-```
-
-Then confirm the service reports healthy — the healthcheck is `bao status`, so
-it goes healthy only when unsealed:
-
-```sh
-docker compose ps openbao --format '{{.Status}}'
-```
-
-```
-Up 20 seconds (healthy)
-```
-
-> **This happens again every restart.** OpenBao returns **sealed** after any
-> `docker compose up -d` that recreates it, and after every host reboot. The
-> healthcheck plus `openbao-init`'s `service_healthy` dependency turn that into
-> a clean wait rather than a confusing cascade, but `docker compose up -d` will
-> block until you unseal. See GO-LIVE.md §4, which also describes the
-> optional auto-unseal (`./scripts/openbao-seal.sh enable`) and what it costs.
-
-#### 3.4 The runtime policies and their tokens
-
-Nothing must **run** with the root token. Two least-privilege policies are
-shipped and mounted into the container:
-
-| policy | file | who uses it | what it may do |
-|---|---|---|---|
-| `its-app` | `/bao/its-app.hcl` | api, gateway, worker (`ITS_OPENBAO_TOKEN`) | sign jobs, seal/unseal org secrets, sign agent CSRs, HMAC passwords with the sign-in pepper, sign the platform's own tokens |
-| `gateway-issuer` | `/bao/gateway-issuer.hcl` | `scripts/issue-gateway-cert.py` (step 6) | `update` on `pki/issue/gateway`, and nothing else |
-
-> **Do not paste the root token onto a command line.** `docker compose exec -e
-> BAO_TOKEN=<root-token> ...` puts it in the argv of `docker compose`, and
-> `/proc/<pid>/cmdline` is world-readable — any user on the host can read it out
-> of `ps` while the command runs, and your shell history keeps a copy
-> afterwards. Open one shell inside the container and read the token into it
-> with echo off instead. It never becomes an argument of anything.
-
-```sh
-docker compose exec openbao sh
-```
-
-then, inside that shell, this line on its own -- it waits for you to paste
-the root token and press Enter, and a `read` given more pasted lines would
-take the next one as the token:
-
-```sh
-stty -echo; read -r BAO_TOKEN; stty echo; echo; export BAO_TOKEN   # paste the root token, Enter
-```
-
-and then:
-
-```sh
-bao policy write its-app /bao/its-app.hcl
-bao policy write gateway-issuer /bao/gateway-issuer.hcl
-bao auth tune -max-lease-ttl=87600h token/
-bao token create -orphan -policy=its-app        -ttl=87600h
-bao token create -orphan -policy=gateway-issuer -ttl=87600h
-exit
-```
-
-```
-Success! Uploaded policy: its-app
-Success! Uploaded policy: gateway-issuer
-Success! Tuned the auth method at: token/
-```
-
-and the two `token create` commands each print a token — the first with
-`token_policies ["default" "its-app"]`, the second with
-`token_policies ["default" "gateway-issuer"]` — both `token_duration 87600h`.
-
-The `auth tune` is required: without it the default 32-day system max TTL caps
-the tokens, and the entire platform stops signing jobs a month after go-live.
-The 10-year TTL is a deliberate trade — nothing in the stack renews these tokens
-— so put a rotation reminder in GO-LIVE.md's schedule rather than trusting it.
-
-`-orphan` matters: a child of the root token dies when the root token is
-revoked.
-
-Keep the `gateway-issuer` token where step 6 and the step 6b timer can
-read it, and nowhere else:
-
-```sh
-sudo install -d -m 700 /etc/it-suite
-sudo install -m 600 /dev/null /etc/it-suite/gateway-issuer.token
-sudo tee /etc/it-suite/gateway-issuer.token >/dev/null   # paste, Ctrl-D
-```
-
-#### 3.5 Put both tokens in `.env`
-
-Run these three one block at a time: each of the first two asks for one
-token, without echoing it, and waits for your paste -- the `its-app` token
-from 3.4, then the root token from 3.2. `read` and `printf` are shell
-builtins, so neither token becomes an argument of any process, and each
-deletes the key's earlier value first, because a second line further down
-silently wins:
-
-```sh
-read -rsp 'its-app token (3.4): ' T && echo && [ -n "$T" ] && sed -i '/^ITS_OPENBAO_TOKEN=/d' .env && printf 'ITS_OPENBAO_TOKEN=%s\n' "$T" >> .env; unset T
-```
-
-```sh
-read -rsp 'root token (3.2): ' T && echo && [ -n "$T" ] && sed -i '/^OPENBAO_TOKEN=/d' .env && printf 'OPENBAO_TOKEN=%s\n' "$T" >> .env; unset T
-```
-
-```sh
-grep -c '^ITS_OPENBAO_TOKEN=\|^OPENBAO_TOKEN=' .env
-```
-
-```
-2
-```
-
-They are **two different values** and must stay that way. `ITS_OPENBAO_TOKEN`
-is what the api, gateway and worker use for every signature, every envelope
-encryption and every certificate; `OPENBAO_TOKEN` is used only by the one-shot
-`openbao-init` container, because enabling mounts needs privileges no runtime
-policy has.
-
-**The gateway certificate is no longer a third user of `OPENBAO_TOKEN`.** Step 6
-used to expand it into a `docker compose run` command line; it now takes the
-`gateway-issuer` token, on stdin or a prompt. `its-app.hcl` exists precisely so
-the application does not hold root, and a monthly timer reading a token off the
-host has the same claim on that reasoning: one capability on one path, instead
-of the credential that can re-key `transit/job-signing`.
-
-```sh
-grep -c 'change-me' .env
-```
-
-```
-0
-```
-
-#### 3.6 Provision the transit key and the PKI
-
-```sh
-docker compose up openbao-init
-```
-
-```
-openbao-init-1  | openbao provisioning complete
-openbao-init-1 exited with code 0
-```
-
-This creates the Ed25519 `job-signing` transit key, the `pki` mount with its
-root CA, the `agent` role (client certificates, Ed25519, with the
-`its://org/<org>/device/<device>` URI SAN the identity binding depends on) and
-the `gateway` role (the gateway's own server certificate). The credential vault
-(`ITS_VAULT_BACKEND=openbao`) reuses the same `transit` mount for its per-org
-keys, created on first use — nothing extra to provision.
-
-**Run in CI since own authentication phase 4.** The `deploy` job initialises
-OpenBao (one share), loads `its-app`, runs `openbao-init` and starts the api
-against it, then signs a person in and connects an AI app end to end through
-Traefik (`deploy/ci/mcp_flow.py`): transit `hmac` with the `auth-pepper` key
-and `sign` with `auth-signing` run live there. Five shares, the unseal by
-hand and a host reboot have still only been run by the people who wrote
-this section.
-
-Since own authentication phase 1 it also creates two transit keys for sign-in:
-`auth-pepper` (HMAC, the versioned pepper every password verifier is
-computed with) and `auth-signing` (ECDSA P-256, which signs the assistant's
-internal tokens and, from phase 3, MCP access tokens). Neither key ever leaves
-OpenBao. **On an install that ran `openbao-init` before, re-run it and re-load
-the policy** (`bao policy write its-app /bao/its-app.hcl`, as in 3.4), or the
-API cannot verify a password. **And add `ITS_AUTH_KEYS_BACKEND=openbao` to an
-existing `.env`** (a new one copied from `.env.example` has it): without it the
-api uses the `local` backend, which with `ITS_ENVIRONMENT=production` is
-refused at start (`LocalAuthKeysInProduction`), whether or not its files exist,
-so the api restart-loops:
-
-```sh
-sed -i '/^ITS_AUTH_KEYS_BACKEND=/d' .env && echo 'ITS_AUTH_KEYS_BACKEND=openbao' >> .env
-grep '^ITS_AUTH_KEYS_BACKEND=' .env
-```
-
-```
-ITS_AUTH_KEYS_BACKEND=openbao
-```
-
-**If this exits 2 with `Vault is sealed`,** unseal (3.3) and re-run. It is
-idempotent.
-
-### Step 4 — Migrations, then table privileges
-
-```sh
-docker compose up migrate
-```
-
-```
-migrate-1 exited with code 0
-```
-
-Alembic is quiet on success. Check the version directly:
-
-```sh
-docker compose exec -T postgres \
-  psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version;'
-```
-
-```
-0248
-```
-
-That must equal the highest file in `backend/migrations/versions/`, and it is
-the one number in this runbook that is stale the moment it is written. (The
-first-boot run reached `0048`; the chain was at `0079` on 2026-08-26, and at
-`0248` when this runbook was rehearsed on 2026-11-24 —
-**check the tree you pulled** rather than trusting either number. `ls
-backend/migrations/versions/ | sort | tail -1` is the authority.)
-
-#### 4b — `postgres-grants`
-
-```sh
-docker compose up postgres-grants
-```
-
-```
-postgres-grants-1  | GRANT
-postgres-grants-1  | GRANT
-postgres-grants-1  | REVOKE
-postgres-grants-1  | REVOKE
-postgres-grants-1  | REVOKE
-postgres-grants-1 exited with code 0
-```
-
-This applies `app_user`'s real table privileges
-(`postgres/grant-app-privileges.sql`): blanket read/write, narrowed so it
-cannot rewrite the audit log or the RBAC catalog. Skipping it is the difference
-between the app working and every request 500ing with
-`permission denied for table ...` — see "The app_user table-privilege gap"
-below for why it is two steps rather than one.
-
-`api`, `gateway` and `worker` all declare `postgres-grants` completing
-successfully as a hard dependency, so step 7 would run both of these anyway.
-They are written out because you want to see them succeed on their own.
-
-### Step 5 — The audit HMAC key
-
-The api, gateway and worker load this at startup and, with
-`ITS_ENVIRONMENT=production`, **refuse to start without it**
-(`FileNotFoundError: /var/lib/its/secrets/audit-hmac.key`). It lives on the
-shared `its-secrets` volume so all three read the *same bytes*; two different
-keys silently produce two divergent chains for one org.
-
-```sh
-docker compose run --rm --no-deps --entrypoint sh api -c \
-  'head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && \
-   chmod 600 /var/lib/its/secrets/audit-hmac.key'
-
-docker compose run --rm --no-deps --entrypoint sh api -c \
-  'ls -l /var/lib/its/secrets/audit-hmac.key'
-```
-
-```
--rw------- 1 its its 32 Aug  5 21:57 /var/lib/its/secrets/audit-hmac.key
-```
-
-**Back it up off this host immediately** —
-[`docs/07-backup-restore.md`](../docs/07-backup-restore.md). Restoring the
-database without it leaves the entire audit chain unverifiable, and there is no
-way to recompute it.
-
-### Step 6 — The gateway's certificate, and the client CA
-
-**Before** anything starts the gateway. The gateway loads its TLS material at
-startup and exits immediately if it is absent:
-
-```
-ctx.load_cert_chain(certfile, keyfile)
-FileNotFoundError: [Errno 2] No such file or directory
-```
-
-Issue it from the **internal** CA — not your public certificate; agents pin the
-internal CA at enrollment and will reject anything else. Pass the exact
-hostname agents dial in `ITS_GATEWAY_URL`. It prompts for the `gateway-issuer`
-token from step 3.4, with echo off:
-
-```sh
-docker compose run --rm --no-deps \
-  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
-```
-
-```
-OpenBao gateway-issuer token:
-gateway.crt  /var/lib/its/tls/gateway.crt  (CN=rmm.novieri.com, 365d)
-gateway.key  /var/lib/its/tls/gateway.key  (mode 0600)
-root.crt     /var/lib/its/ca/root.crt  (agent client CA)
-serial       57:d6:c9:f1:0a:85:72:29:6d:b0:3f:66:8a:1e:40:89:28:ee:a4:46
-```
-
-Or non-interactively, from the 0600 file step 3.4 wrote — note `-T`, which is
-what leaves stdin available:
-
-```sh
-sudo cat /etc/it-suite/gateway-issuer.token | docker compose run --rm --no-deps -T \
-  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
-```
-
-**A pipe, not a `< redirect`, and the `sudo` covers `cat` alone.** This step ran
-as `-bash: /etc/it-suite/gateway-issuer.token: Permission denied` on the first
-real deploy. A `<` redirect is opened by the *shell*, so it runs as the operator
-— and the token is deliberately `600 root:root` inside a `700` directory, which
-the operator therefore cannot read. The redirect form only works for a root
-shell, and this runbook's own prerequisites put you in an unprivileged one.
-
-Do not "fix" it by running the whole line under `sudo`: `docker compose` would
-then run as root, resolving a different `$PWD` and a different Docker context
-than every other command here. Do not chown the token to the operator either —
-Step 6b's renewal timer reads it as root, which is the reason for the
-mode. Elevating only `cat` keeps the token off argv and out of shell history,
-which is what the whole step is for.
-
-**Neither form puts the token on a command line, and that is the point.** The
-previous version of this step read (quoted, not `sh`-fenced — it is a line that
-was removed, and a copy-pasteable bad example is a bad example you will meet
-again):
+Steps 1 to 3.6; then OpenBao's auto-unseal -- `openbao-seal.sh enable`, and a
+restart of OpenBao that proves it comes back unsealed on its own; then steps 4
+to 7, with OpenBao unsealing itself, and step 8's install code. Run it in a
+terminal, with nothing redirected: with its input or its output not a
+terminal, it stops before `bao operator init`, which prints the shares. It
+stops for you four times:
+
+1. **The Let's Encrypt contact address** (step 1: `new-env.sh`'s question).
+   It is required, but Let's Encrypt no longer mails expiry warnings nor keeps
+   it on the account: a role mailbox will do.
+2. **The five unseal key shares and the root token, shown once** (step 3.2).
+   Copy each share to a different custodian and the root token to your
+   password manager, all of it **off this VPS**, then type `SAVED`, in
+   capitals. The screen and its scrollback are cleared after it. If anything
+   stops the script at that prompt -- Ctrl-C, the end of its input --, it says
+   first that the screen holds their only copy, then gives the two ways on:
+   they are stored, and behind `SAVED` it clears the screen and runs again; or
+   they are not, and behind `DESTROY` this host starts from zero, since on a
+   first boot nothing is in OpenBao yet. Lose the terminal before they are
+   copied, and they are lost with it: that second way is the only one.
+3. **Three of the five shares, hidden** (step 3.3). They unseal OpenBao and
+   prove your copies are good: each must be one of the five just printed, and
+   none twice. The script keeps the same three for the auto-unseal, right
+   after step 3.6, so you are not asked again. The root token is not asked
+   either: it is kept from step 3.2 and written into `.env` (step 3.5).
+4. **Your password, when `sudo` asks** -- for the files it keeps under
+   `/etc/it-suite` (the gateway-issuer token, step 3.4, and the auto-unseal's
+   key file), the auto-unseal itself and step 6b's timer.
+
+A good run proves the auto-unseal right after step 3.6, before step 4 starts
+anything, and ends with the code to type in the browser:
 
 ```text
-  -e BAO_TOKEN="$(grep '^OPENBAO_TOKEN=' .env | cut -d= -f2-)" \
+OpenBao restarts and unseals itself
+  run     docker compose restart openbao
+  ok      OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed
+
+Step 4 — migrations
+…
+
+Step 8 — the install code
+
+  install code  …
+
+  note    open https://rmm.novieri.com/ in a browser you trust and enter it (deploy/README.md, First boot, 2): it is a password until you have
+
+First boot: every step is done.
+  note    Next, in a browser (deploy/README.md, First boot, 2): https://rmm.novieri.com/ with the install code;
+  note    your password, your second factor and its ten recovery codes; then an enrollment token at https://rmm.novieri.com/enrollment.
+  note    Then: ./scripts/first-boot-check.sh
+  note    Custody, off this VPS (GO-LIVE.md §4 and §6): …
 ```
 
-which expands the **root** token into the argv of `docker compose`, readable by
-any user on the host through `ps` for as long as the container runs, and left in
-shell history afterwards — in the runbook for a script whose whole reason to
-exist is that key material must not touch shell history. `BAO_TOKEN` is still
-honoured when it is *already* in the environment (that is what the step 6b
-timer's `EnvironmentFile=` is for); nothing here constructs it.
+**Run it again after a failure** and it goes on from what is done. Once `bao
+operator init` has run, it no longer holds what it printed, and asks only for
+what it needs: the root token, hidden, if `.env` does not hold it yet (it
+checks the token is this OpenBao's); and, while the auto-unseal is not on yet,
+three shares, once. If OpenBao is sealed, they unseal it and move its
+seal. If it is unsealed, it asks for a typed `SEAL` after the three: it then
+seals OpenBao with the root token and unseals it with them, so a wrong share
+is asked again there, never in the middle of the seal migration. Without three
+shares at hand, stop at the first prompt (Ctrl-C), or type anything but
+`SEAL`: nothing changes. A seal migration `openbao-seal.sh` left half-way is
+named as such, with the line that finishes it and, behind `UNDO`, the one that
+undoes it. **From step 4 on, OpenBao unseals itself**: a failure there --
+step 7's certificate while DNS does not answer with this VPS yet, say -- is
+run again with no share at all, and the five shares are recovery keys now
+([GO-LIVE.md §4](GO-LIVE.md#4-openbao-seal)).
 
-It runs through the `gateway` service because that is the only container
-mounting both `its-gateway-tls` and `its-ca`, so the private key is written
-straight to the volume the gateway reads and never touches your shell history
-or the host filesystem. `root.crt` is the CA the gateway admits agent client
-certificates against (`ITS_GATEWAY_CLIENT_CA`).
+Run again once every step is done, it changes nothing: sixteen `skip` lines,
+from `step 1` to `step 7`, and not one `run` line; then step 8 prints the
+install code again or, once the installation is claimed, a seventeenth `skip`,
+`step 8: the installation is claimed`.
 
-**This certificate is 365 days and does not renew itself.** Step 6b, next,
-installs the timer that renews it every month.
-
-### Step 6b — Renew the gateway's certificate every month
-
-The certificate step 6 issued is valid for 365 days and **does not renew
-itself**, and it is the only server certificate every agent dials: the day it
-expires, the whole fleet disconnects at once. This timer re-issues it on the
-first of every month, as root, from the `0600` token of step 3.4 (the section
-"Renewing the gateway certificate" below says why a redirect is right here and
-a pipe in step 6):
-
-```sh
-sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'
-[Unit]
-Description=Renew the it-suite gateway server certificate
-[Service]
-Type=oneshot
-WorkingDirectory=/opt/it-suite/deploy
-# The token arrives on STDIN from a 0600 file, never as an argument. `-T` is
-# what keeps stdin available to redirect.
-ExecStart=/bin/bash -lc 'docker compose run --rm --no-deps -T \
-  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com \
-  < /etc/it-suite/gateway-issuer.token \
-  && docker compose restart gateway'
-EOF
-sudo tee /etc/systemd/system/its-gateway-cert.timer >/dev/null <<'EOF'
-[Unit]
-Description=Monthly it-suite gateway certificate renewal
-[Timer]
-OnCalendar=monthly
-Persistent=true
-[Install]
-WantedBy=timers.target
-EOF
-sudo systemctl enable --now its-gateway-cert.timer
-sudo systemctl list-timers its-gateway-cert.timer --no-pager
-```
-
-The last line lists `its-gateway-cert.timer` with `its-gateway-cert.service`
-under ACTIVATES and the first of next month under NEXT. Connected agents
-reconnect on their own within seconds of each renewal ([Renewing the gateway
-certificate](#renewing-the-gateway-certificate)). ⚠ **UNVERIFIED**: the
-rehearsal (plan of 2026-11-23, Task 12) ran in a container without systemd;
-it wrote both units and ran the service's command once by hand.
-
-### Step 7 — Start everything; Traefik obtains the certificate for `:443`
-
-```sh
-docker compose up -d
-docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
-```
-
-```
-SERVICE             STATUS
-api                 Up … (healthy)
-backup-replicator   Up …
-gateway             Up … (healthy)
-migrate             Exited (0) …
-minio               Up … (healthy)
-openbao             Up … (healthy)
-openbao-init        Exited (0) …
-postgres            Up … (healthy)
-postgres-grants     Exited (0) …
-redis               Up …
-traefik             Up …
-web                 Up … (healthy)
-worker              Up … (healthy)
-```
-
-The three `Exited (0)` services are the one-shot jobs; that is success.
-
-**The certificate.** Traefik asks Let's Encrypt for `rmm.novieri.com` as soon as
-it sees the routers (TLS-ALPN-01, answered on `:443`), stores it in the
-`traefik-acme` volume, and renews it by itself 30 days before it expires. Until
-it has one — and for good if it cannot get one — it serves its own self-signed
-"TRAEFIK DEFAULT CERT" **without failing**. So check, rather than trust:
-
-```sh
-./scripts/check-public-tls.sh
-```
-
-```
-ok      127.0.0.1:443 presents a trusted certificate for rmm.novieri.com
-        issuer=C = US, O = Let's Encrypt, CN = …
-        X509v3 Subject Alternative Name:
-            DNS:rmm.novieri.com
-        notAfter=…
-```
-
-It waits up to three minutes for the first issuance, and it also refuses a
-trusted certificate with **fewer than 28 days left**: Traefik renews at 30, so
-that is a renewal that has been failing (Let's Encrypt no longer mails expiry
-warnings). A `REFUSE` says what a browser would refuse; `docker compose logs traefik | grep -i acme` says why
-Let's Encrypt did not issue (the usual causes: the `A` record is not this
-machine's yet, `:443` closed at the provider's firewall, or an `AAAA` record
-of another machine). Fix the cause and `docker compose restart traefik`.
-
-On a **rehearsal against Let's Encrypt staging** the check refuses by design:
-staging's roots are in no trust store. `deploy.sh` has no such CA either, so a
-rehearsal's `deploy.sh` prints two warnings, the API probe (`API returned
-000 (expected 401)`) and the certificate refusal after `--wait 60`, and
-ends `Deployed with warnings` with exit status 1 although everything is up.
-Give the check the roots (the four Let's Encrypt lists on its staging page):
-
-```sh
-curl -fsS https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x1.pem https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x2.pem https://letsencrypt.org/certs/staging/gen-y/root-ye.pem https://letsencrypt.org/certs/staging/gen-y/root-yr.pem > /tmp/le-staging-roots.pem
-./scripts/check-public-tls.sh --cafile /tmp/le-staging-roots.pem
-```
-
-The certificate store Traefik writes must be readable by Traefik alone —
-Traefik refuses a looser `acme.json` itself, and the named volume is what
-creates its directory:
-
-```sh
-docker compose exec traefik stat -c %a /etc/traefik/acme/acme.json
-```
-
-```
-600
-```
-
-⚠ **UNVERIFIED with Let's
-Encrypt itself**: the rehearsal (plan of 2026-11-23, Task 12) and every CI run
-obtain it from Pebble, Let's Encrypt's own test CA, by the same path; the
-issuer line above is the one production's will be.
-
-**The agent-facing side must be the internal CA**, not Let's Encrypt:
-
-```sh
-echo | openssl s_client -connect 127.0.0.1:8443 -servername rmm.novieri.com 2>/dev/null \
-  | openssl x509 -noout -issuer -ext subjectAltName
-```
-
-```
-issuer=CN = Novieri RMM internal CA
-X509v3 Subject Alternative Name:
-    DNS:rmm.novieri.com
-```
-
-Two different issuers on the two ports is the correct picture. If `:8443`
-shows a Let's Encrypt issuer, an agent will never connect. The likeliest
-cause is an absent or unhealthy gateway: with no TCP router, Traefik answers
-`:8443` itself with the public certificate, which agents refuse because they
-trust only the CA pinned at enrollment. Check `docker compose ps gateway`
-first.
-
-**From a computer outside this VPS**, once: the check above dials this
-machine from itself and never crosses your provider's firewall, and Let's
-Encrypt's validation proves `:443` from the Internet but not `:8443`. On a
-Linux or macOS computer elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
+**Then, once, from a computer outside this VPS.** Step 7 checks `:8443` from
+this machine itself, which never crosses your provider's firewall, and Let's
+Encrypt's validation proves `:443` from the Internet but not `:8443`: no
+script on this VPS can make this check. On a Linux or macOS computer
+elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
 prints `issuer=CN = Novieri RMM internal CA`; on Windows,
 `Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
 Anything else: open `8443/tcp` at the provider's firewall.
 
-**The per-address sign-in limits the api started with** (step 1):
+### 2. In the browser: claim, your second factor, an enrollment token
+
+1. **Claim the installation** (step 8): open `https://rmm.novieri.com/` and
+   enter the install code `first-boot.sh` printed (`docker compose exec api cat /var/lib/its/secrets/setup-code`
+   prints it again), with your name, email, organization name and the
+   password you will sign in with (12 characters at least). The
+   organization's slug is `novieri`, from `.env`. Do it promptly, from a
+   browser you trust: the code is the only thing between a stranger and this
+   box. [Step 8 of the appendix](#step-8--claim-the-installation) says why.
+2. **Sign in and enrol your second factor** (step 9): at
+   `https://rmm.novieri.com/sign-in`, an authenticator app or a passkey, then
+   ten recovery codes, shown once: keep them where you keep the shares.
+3. **An enrollment token** (step 11b): at `https://rmm.novieri.com/enrollment`,
+   named `first endpoint`, valid for 24 hours, **one** use, for the site
+   **Principal** of your own organization's client. It is shown once: keep it
+   for the next command and nowhere else. **A run of `first-boot-check.sh`
+   that stops once it has the token retires its agent** on the way out, and
+   the next run enrols another: make a new enrollment token here, the same
+   way, before you run it again.
+
+### 3. `first-boot-check.sh`
 
 ```sh
-docker compose exec api python -c "from app.core.config import get_settings; s = get_settings(); print(s.auth_login_ip_limit, s.auth_factor_ip_limit)"
+./scripts/first-boot-check.sh
 ```
 
-```
-30 30
-```
+**It is safe to run again**, and its first two lines say what it does to this
+VPS:
 
-### Step 8 — Claim the installation
-
-**This replaces what used to be three steps: creating the first administrator by
-piping Python into `docker compose exec`, inserting the organization row by SQL,
-and granting the role by a second SQL statement.** All three now happen in one
-transaction behind one screen, through the same service code the Users tab uses.
-
-The setup screen sets the administrator's password itself and sends **no
-mail**; the first sign-in enrols the second factor (step 9). Account mail
-(invitations, password resets) is configured afterwards in Novieri RMM at
-**Settings → Email**.
-
-Then:
-
-1. **Open `https://rmm.novieri.com/`.** On an installation with no users it
-   shows the setup screen rather than redirecting to sign-in. That first request
-   is also what **generates** the install code — nothing runs earlier, so do this
-   before going to look for it.
-
-2. **Read the code.** The api writes it to `/var/lib/its/secrets/setup-code`,
-   mode 600, when the first request asks for it (and logs it once):
-
-   ```sh
-   docker compose exec api cat /var/lib/its/secrets/setup-code
-   ```
-
-3. **Enter it**, with your name, email, organization name and the password you
-   will sign in with (12 characters at least).
-
-That creates the organization, the administrator account and its `org-admin`
-grant **in one transaction** — either all three or none — and writes every part
-of it to the hash-chained audit log.
-
-**The organization's slug is `ITS_DEFAULT_ORG_SLUG` from `.env`** — `novieri`
-in the shipped example — not something you type, and not derived from the name
-you enter unless that setting is blank. That is deliberate: the sign-in, the
-OAuth server for AI apps and the recovery command all look people up in that
-one organization, and an organization created under any other slug is one its
-own administrator cannot sign in to.
-
-**The install code is the only thing between a stranger and this box.** An
-appliance answers on the network long before its owner sits down at it, and this
-screen must answer before any user exists, so it cannot be gated by a permission.
-Zero users alone is not a guard. Claim it promptly, from a browser you trust, and
-treat the code as a password until you have.
-
-### Step 9 — Sign in, and enrol your second factor
-
-Setup does not sign you in. Open `https://rmm.novieri.com/sign-in` and sign
-in with the address and the password you gave the setup screen. The first
-sign-in asks for a second factor before anything else -- an authenticator
-app (TOTP) or a passkey -- and then shows ten recovery codes, once. Keep them
-where you keep the OpenBao shares: an administrator who loses every factor
-needs one, or the [recovery
-link](#recovery-link-an-administrator-who-lost-every-second-factor).
-
-There is no identity admin console behind this product any more. Everything
-an administrator does with accounts -- inviting, disabling, resetting second
-factors, signing someone out everywhere -- is in **Settings → Users**, and
-Microsoft sign-in is in **Settings → Microsoft sign-in**.
-
-### Step 10 — Confirm you really are an administrator
-
-**Do not skip this.** Under the old runbook the role grant was a separate SQL
-statement and the classic failure was an account that authenticated and could do
-nothing. The claim now grants `org-admin` in the same transaction, so the check
-is quick — but "the code grants it" and "this deployment granted it" are
-different claims, and only one of them is about your box.
-
-In the console: **Settings → Users** lists your account with the **org-admin**
-role. Or from inside the stack, with no token at all (the console's API reads a
-session cookie, not a bearer token, since own authentication phase 1, so a
-`curl` with `Authorization: Bearer` is not a way to ask it):
-
-```sh
-docker compose exec -T postgres psql -U its_admin -d itsuite -tAc "select u.email, r.name from users u join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id where u.kind = 'staff'"
+```text
+  note    this enrols a throwaway agent on this VPS (step 11c) and retires it, with its key (11f).
+  note    It is safe to run again: a second run enrols and retires another; the first stays in the console, offline.
 ```
 
-One line: the address you gave the setup screen, then `|org-admin`.
+It asks OpenBao first (`bao status`: it must say `Sealed false`), then runs
+step 10 (an `org-admin` exists) and 11a (the API refuses a request with no
+session, `401`), builds the agent if a file of `agent/` is newer than the last
+build, asks for the token of 11b, hidden, and starts the throwaway agent of
+11c on this VPS. Then it says **when to press Run job → Collect inventory** on
+that device in the console -- this VPS's name, and the device id it prints --
+and waits up to ten minutes (`--wait-job` for longer) for that job to come back
+signed and succeeded (11d), its row in four columns, `id|type|status|signed`;
+then it verifies the audit chain (11e), retires the agent (11f) and takes the
+first backup (12). A good run ends:
 
-No line, or a role other than `org-admin`, means the role is not there. Seeded
-roles are `super-admin`, `org-admin`, `technician`, `auditor`, `read-only` and
-`requester`; a missing grant means the claim did not complete, and the fix is to
-look at the api log for that request rather than to insert a row by hand.
+```text
+Step 11d — round-trip a signed job
+  note    NOW, in the console: Devices -> …, the one that is online (device id …) -> Run job -> Collect inventory.
+…
+        …|inventory.collect|succeeded|t
+  ok      step 11d: signed by the server, verified by the agent before it ran, and its result back over :8443
+…
+Step 12 — the first backup, so that there is a way back
+  ok      step 12: the newest backup: …
+  note    That backup is on this VPS and goes with it. The off-host copy is recommended before anything
+  note    real is enrolled: deploy/README.md, The off-host copy, step by step.
 
-### Step 11 — Prove the platform actually works
-
-Everything so far only proves containers are running. This is the acceptance
-test.
-
-#### 11a — Authorization is enforced server-side
-
-Unauthenticated, through the real front door:
-
-```sh
-for p in /api/v1/devices /api/v1/jobs /api/v1/audit/verify /api/v1/enrollment-tokens; do
-  printf "  %-28s " "$p"; curl -s -o /dev/null -w "%{http_code}\n" https://rmm.novieri.com$p
-done
+First boot is complete.
+  note    Custody, off this VPS, now (deploy/README.md, First boot, 4): the five shares and the root token
+  note    (recovery keys), the unseal key file, the ten recovery codes, .env and the its-secrets, its-ca
+  note    and openbao-data volumes -- GO-LIVE.md §6.
 ```
 
-```
-  /api/v1/devices              401
-  /api/v1/jobs                 401
-  /api/v1/audit/verify         401
-  /api/v1/enrollment-tokens    401
-```
+**Run again after it stopped** -- a failed check, Ctrl-C, a dropped SSH
+session --: if it had the token by then, it retired its agent on the way out,
+with its token and key, and said so, and the next run enrols a new one, with a
+**new** enrollment token ([First boot,
+2](#2-in-the-browser-claim-your-second-factor-an-enrollment-token)).
+Only a run killed outright (SIGKILL, the OOM killer, a power cut), or a Docker
+that would not remove the container (it says so, with the command), can leave
+the agent up; the next run finds it running and goes on from 11d. **Run again
+after it finished**, it enrols and retires another, and the first stays in
+the console as a record, offline.
 
-All four must be `401`. A `404` on all of them means **Traefik is not routing**
-— see defect 7.
+**If it stops with `FAILED  INVARIANT 1 BROKEN`** -- a job that succeeded on
+the agent with no server signature --, that is a security failure, not a
+flake: no unsigned command path may exist (`CLAUDE.md`, security invariant
+1). **Do not put this host in service**, and do not run the check again:
+enrol nothing, publish no installer, give nobody its address. Leave the stack
+and its volumes as they are -- no `down -v` and no new first boot, which would
+destroy what shows how it happened --, keep the audit log and the api's logs
+(`docker compose logs --tail 100 api` shows the last of them), and raise it
+with whoever maintains this platform, with the job id the report printed. The
+script has retired the agent already, after printing its last log lines.
 
-#### 11b — Create an enrollment token
+### 4. Custody: off this VPS, now
 
-In the console, at `https://rmm.novieri.com/enrollment`: a new token named
-`first endpoint`, valid for 24 hours, **one** use, for the site **Principal**
-of your own organization's client. The console shows the token **once**; keep
-it for the next step and nowhere else. (Since own authentication phase 1 the
-console's API takes a session cookie, so the `curl -H "Authorization: Bearer …"`
-this step used to show cannot mint one; the console is the way, audited as
-`enrollment.token_created`.)
+- **The five shares and the root token** (step 3.2). With the auto-unseal they
+  are **recovery keys**: they authorize `openbao-seal.sh disable` and `bao
+  operator generate-root`, and they cannot unseal OpenBao.
+- **The auto-unseal's key file, `/etc/it-suite/openbao-unseal/unseal.key`**, off
+  this VPS and **apart from any copy of `openbao-data`**: someone with both
+  holds the job-signing key and the CA. If it is lost, OpenBao cannot be
+  unsealed at all, by anyone (GO-LIVE.md §4). It is 32 bytes, mode `0400`,
+  owned by the OpenBao user: `sudo install -m 600 -o "$USER" /etc/it-suite/openbao-unseal/unseal.key ~/unseal.key`
+  puts a copy you can read in your home directory; take it to your computer
+  with `scp`, then `shred -u ~/unseal.key` here.
+- **The audit HMAC key** (the `its-secrets` volume), the `its-ca` and
+  `openbao-data` volumes and `.env`, to a different place than the database
+  backups: GO-LIVE.md §6 and `docs/07-backup-restore.md` §1-2.
+- **The ten recovery codes** of step 9, with the shares.
 
-#### 11c — A throwaway agent on this VPS
-
-The first endpoint is this server itself, for a few minutes: the agent built
-from this checkout (Go in a container, as your user: the VPS needs no
-toolchain, and the binary in `agent/dist/` is yours, not root's), run in a
-container that shares the host's network and trusts the host's certificate
-roots. It reaches `https://rmm.novieri.com` through the same name, ports and
-TLS as an endpoint — the internal CA, mutual TLS on `:8443` — but its packets
-never leave this machine, so it does not cross your provider's firewall: step
-7's check from outside is what proves that.
-
-```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/../agent:/src" -w /src -e CGO_ENABLED=0 -e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod golang:1.24-bookworm go build -trimpath -o dist/novieri-agent ./cmd/agent
-install -d -m 700 /tmp/smoke-agent
-```
-
-The token from 11b, at a prompt that does not echo it. This block is one
-command on purpose: a prompt ends its block, so nothing pasted after it can be
-read as the token.
-
-```sh
-read -rsp 'Enrollment token (11b): ' T && echo && [ -n "$T" ] && (umask 077 && printf '%s' "$T" > /tmp/smoke-agent/enroll-token); unset T
-```
-
-Then the agent itself:
-
-```sh
-docker run -d --name smoke-agent --network host --user "$(id -u):$(id -g)" \
-  -v "$PWD/../agent/dist/novieri-agent:/usr/local/bin/novieri-agent:ro" \
-  -v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro \
-  -v /tmp/smoke-agent:/var/lib/novieri-agent \
-  -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \
-  busybox:1.36.1 /usr/local/bin/novieri-agent
-for _ in $(seq 1 30); do docker logs smoke-agent 2>&1 | grep -q 'gateway connected' && break; sleep 2; done
-docker logs smoke-agent 2>&1 | grep -E 'starting|enrolling|enrolled|gateway connected'
-```
-
-```
-time=… level=INFO msg="novieri-agent starting" version=dev data_dir=/var/lib/novieri-agent enrolled=false
-time=… level=INFO msg=enrolling url=https://rmm.novieri.com/enroll/v1 hostname=… os_family=linux via_install_link=false
-time=… level=INFO msg=enrolled device_id=… gateway_url=wss://rmm.novieri.com:8443/agent cert_not_after=…
-time=… level=INFO msg="gateway connected" url=wss://rmm.novieri.com:8443/agent
-```
-
-`enrolled` then `gateway connected` is the whole handshake: the CSR signed by
-the internal CA, the certificate and the CA pinned in the data directory, the
-outbound mutual-TLS WebSocket up. The token file is gone (`ls /tmp/smoke-agent`
-no longer lists `enroll-token`): the agent deletes it the moment it has a
-certificate. The device appears in the console's **Devices**, online.
-
-The packaged installers for real endpoints — the `.deb`, the macOS script, the
-Windows installer and the Group Policy MSI — are in
-[Publishing the agent to the console](#publishing-the-agent-to-the-console).
-⚠ **UNVERIFIED**: no Windows or macOS endpoint has been enrolled by anybody on
-this project; `docs/modules/agent-distribution/first-run-verification.md` is
-the procedure for that.
-
-#### 11d — Round-trip a signed job
-
-In the console, on the device from 11c: **Run job → Collect inventory**. Its
-row in **Job history** reaches **Succeeded** within a minute. From inside the
-stack, the same fact for the job a person asked for (the platform also
-schedules an inventory of its own when a device first connects, so the query
-leaves that one out):
-
-```sh
-docker compose exec -T postgres psql -U its_admin -d itsuite -tAc "select type, status, signature is not null from jobs where requested_by is not null order by issued_at desc limit 1"
-```
-
-```
-inventory.collect|succeeded|t
-```
-
-That is the platform working: the server signed the job envelope with the
-Ed25519 key that never leaves OpenBao, the agent verified the signature before
-executing anything (there is no unsigned command path), and the result came
-back up the same mTLS connection.
-
-#### 11e — The audit chain
-
-From inside the stack, with no token (the same check `docs/07-backup-restore.md`
-runs after a restore):
-
-```sh
-docker compose exec -T api python - <<'EOF'
-import asyncio
-import json
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-
-from app.core.audit import audit_service, load_audit_hmac_key
-from app.core.config import get_settings
-from app.models import Organization
-
-
-async def main() -> None:
-    settings = get_settings()
-    audit_service.set_hmac_key(load_audit_hmac_key(settings))
-    engine = create_async_engine(settings.database_admin_url)
-    try:
-        async with AsyncSession(engine) as session:
-            orgs = (await session.execute(select(Organization.id, Organization.slug))).all()
-            for org_id, slug in orgs:
-                r = await audit_service.verify(session, org_id)
-                broken = str(r.broken_at) if r.broken_at else None
-                print(slug, json.dumps({"ok": r.ok, "count": r.count, "broken_at": broken}))
-    finally:
-        await engine.dispose()
-
-
-asyncio.run(main())
-EOF
-```
-
-```
-novieri {"ok": true, "count": …, "broken_at": null}
-```
-
-The console shows the same check for the signed-in person's organization:
-**Audit log → Verify chain**. `ok: true` over a chain that includes the
-enrollment, the dispatch and the result is the end-to-end proof.
-
-#### 11f — Retire the throwaway agent
-
-```sh
-docker rm -f smoke-agent
-rm -rf /tmp/smoke-agent
-```
-
-The second line removes the device's private key and certificate. The device
-stays in the console as a record, offline; remove it there if you do not want
-it listed.
-
-The MinIO bucket (`ITS_S3_BUCKET`) needs no provisioning step — `ObjectStore`
-creates it on first use.
-
-### Step 12 — The first backup, so that there is a way back
-
-```sh
-sudo ./scripts/install-backup-timer.sh
-sudo systemctl start its-platform-backup.service
-journalctl -u its-platform-backup.service --no-pager -n 20
-sudo cat /var/lib/it-suite/backup/last-success
-```
-
-The last line prints the time of the backup just taken. Its objects line says
-how many files the bucket held; if nothing has stored an object yet (the
-backup replicator creates the bucket within a minute of step 7), it says `the
-bucket it-suite does not exist yet (nothing has been stored): nothing to
-mirror`, and the backup still succeeds. From now on one runs
-every night at 02:30 ([Platform
-backups](#platform-backups-nightly-off-host-and-a-monthly-drill)). **Until this
-step, a new host has no way back at all**: `build-images.sh` listed one tag
-(step 1b), the one running. After it, the way back is restoring this backup
-([Rolling back a deployment](#rolling-back-a-deployment)).
-
-**That backup is on this VPS, and goes with it.** Losing the machine or its
-disk loses every backup with it, and on a new host restoring a backup is the
-only way back. Sending each night's backup somewhere else, encrypted, is
-**recommended before anything real is enrolled** — it is not part of First
-boot, because the destination and its key are things only you have: [The
-off-host copy, step by step](#the-off-host-copy-step-by-step).
-
-**The key material is not in that backup and goes off this host by hand, now**
-— the OpenBao shares and root token (step 3.2), the `openbao-data`,
-`its-secrets` and `its-ca` volumes, and `.env` — to a different place than the
-database backups: GO-LIVE.md §6 and `docs/07-backup-restore.md` §1-2. The
-`traefik-acme` volume is not key material: losing it costs one new certificate.
+The nightly backup is on this VPS and goes with it: [the off-host
+copy](#the-off-host-copy-step-by-step) is recommended before anything real is
+enrolled. Until step 12, a new host has no way back at all; after it, the way
+back is restoring that backup ([Rolling back a
+deployment](#rolling-back-a-deployment)).
 
 **First boot is complete.**
 
@@ -2730,30 +1947,20 @@ platform and it is what turns "structurally tested" into "executed".
 
 ## After a reboot or a restart
 
-OpenBao comes back **sealed** after every host reboot and every `docker compose
-up -d` that recreates it, and a sealed OpenBao makes `docker compose up -d`
-**block**: `openbao-init` waits on a health check that passes only when it is
-unsealed. So this sequence always starts by asking, whatever else happened
-(`.env` must already hold `ITS_PUBLIC_HOST` and `ITS_ACME_EMAIL`, as it does
-on this VPS from step 1: Compose interpolates the whole file for every
-subcommand, `bao status` included):
+OpenBao **unseals itself** on this VPS: `first-boot.sh` turned the static-key
+auto-unseal on at the first boot (GO-LIVE.md §4). Ask it first anyway, alone,
+whatever else happened: a sealed OpenBao makes `docker compose up -d`
+**block** -- `openbao-init` waits on a health check that passes only when it
+is unsealed. (`.env` must already hold `ITS_PUBLIC_HOST` and `ITS_ACME_EMAIL`,
+as it does on this VPS from step 1: Compose interpolates the whole file for
+every subcommand, `bao status` included.)
 
 ```sh
 cd /opt/it-suite/deploy
 docker compose exec openbao bao status
 ```
 
-`Sealed false`: skip to `docker compose up -d` below. `Sealed true`: three of the
-five shares, each at the prompt, from three custodians (GO-LIVE.md §4):
-
-```sh
-docker compose exec openbao bao operator unseal
-docker compose exec openbao bao operator unseal
-docker compose exec openbao bao operator unseal
-docker compose exec openbao bao status
-```
-
-`Sealed false`. Then:
+`Sealed false`, with `Seal Type static`, and nobody typed a share: then
 
 ```sh
 docker compose up -d
@@ -2769,9 +1976,47 @@ signed in). A `503` there means the api is not healthy yet (Traefik answers 503
 for the api's paths while it is not): wait, and look at `docker compose logs
 api` if it lasts.
 
-If the optional static-key auto-unseal is on (`./scripts/openbao-seal.sh
-status`, GO-LIVE.md §4), `bao status` already says `Sealed false` and the three
-unseal lines are not needed.
+### If `bao status` says `Sealed true`
+
+Or that the `openbao` service is not running, which is what a missing key file
+does: OpenBao cannot start without it. With the auto-unseal on, a sealed
+OpenBao means its key file is missing, or is not this OpenBao's. **The five
+shares cannot unseal it**: they are recovery keys since the auto-unseal went
+on. Look, alone:
+
+```sh
+sudo ./scripts/openbao-seal.sh status
+docker compose logs --tail 50 openbao
+```
+
+`the key file is missing`; or it is there, and OpenBao's log says it could not
+unseal with it (a key of another first boot, or a damaged file): put back the
+copy you keep off this VPS. From your computer, copy it to this VPS with
+`scp`, as `unseal.key` in your home directory there (`~/unseal.key`); then, on
+this VPS:
+
+```sh
+sudo install -D -m 400 ~/unseal.key /etc/it-suite/openbao-unseal/unseal.key && sudo chmod 700 /etc/it-suite/openbao-unseal && shred -u ~/unseal.key
+sudo chown "$(docker compose run --rm --no-deps -T --entrypoint id openbao -u openbao):$(docker compose run --rm --no-deps -T --entrypoint id openbao -g openbao)" /etc/it-suite/openbao-unseal/unseal.key
+docker compose restart openbao
+docker compose exec openbao bao status
+```
+
+`Sealed false`: go on with `docker compose up -d` above. (A key file that is
+there and good, beside an OpenBao that is not running, leaves the log to say
+what else stopped it.) ⚠ **UNVERIFIED**: nobody has put a key file back yet --
+CI and `openbao-seal.sh`'s tests turn the auto-unseal on and restart OpenBao,
+and neither takes the file away. **If the key file is lost for good, OpenBao cannot
+be unsealed by anyone**, with the shares or without them, and neither can any
+copy of `openbao-data` taken since the auto-unseal went on: the job-signing
+key, the agent CA and every sealed credential go with it
+(`docs/07-backup-restore.md` §5).
+
+A host still on Shamir -- one from before 2026-11-27 that never ran
+`openbao-seal.sh enable`, or one that ran `disable` -- says `Seal Type
+shamir`, and unseals with three of the five shares, each at the prompt, from
+three custodians: `docker compose exec openbao bao operator unseal`, three
+times, then `bao status`.
 
 ---
 
@@ -2816,9 +2061,10 @@ cd /opt/it-suite/deploy
 docker compose exec openbao bao status
 ```
 
-`Sealed true` means unsealing as in [After a reboot or a
-restart](#after-a-reboot-or-a-restart) before anything else, since `deploy.sh`
-refuses to start on a sealed OpenBao. `Sealed false`:
+`Sealed true` means OpenBao's key file is missing or not its own: [After a
+reboot or a restart](#if-bao-status-says-sealed-true) says what to do, before
+anything else, since `deploy.sh` refuses to start on a sealed OpenBao.
+`Sealed false`:
 
 ```sh
 git -C .. pull --ff-only
@@ -2872,9 +2118,11 @@ agent release; each of those is reported for you to do.
 Since 2026-09-23 it also:
 
 - **stops before the pull if OpenBao is sealed or down**, with the unseal
-  commands, instead of letting `up -d` block; if the deploy itself recreates
-  OpenBao and it comes back sealed, an interactive run asks for the shares
-  at the prompt and `--yes` stops with the fix;
+  commands -- with the auto-unseal on, `openbao-seal.sh status` and OpenBao's
+  log instead, since then it is the key file --, rather than letting `up -d`
+  block; if the deploy itself recreates a Shamir OpenBao and it comes back
+  sealed, an interactive run asks for the shares at the prompt and `--yes`
+  stops with the fix;
 - **fails on any one-shot** (`migrate`, `postgres-grants`, `openbao-init`)
   that exits non-zero;
 - **reports the nightly backup timer**, or says how to install it
@@ -3030,9 +2278,12 @@ What remains unverified, precisely:
 
 Notes that apply to upgrades specifically:
 
-- **If OpenBao's container is recreated it comes back sealed.** Step 6 will
-  hang on the healthcheck until you unseal. This is the single most likely way
-  for an upgrade to appear stuck.
+- **On a host still on Shamir, if OpenBao's container is recreated it comes
+  back sealed.** Step 6 will hang on the healthcheck until you unseal. This is
+  the single most likely way for an upgrade to appear stuck. With the
+  auto-unseal, on every host since 2026-11-27, it unseals itself; if it does
+  not, its key file is the one to look at ([After a reboot or a
+  restart](#if-bao-status-says-sealed-true)).
 - **A pre-portal deployment additionally needs `portal_user` given a LOGIN
   password by hand** — see the "End-user portal" note below.
 - **A deployment initialised before `postgres-grants` existed** needs the
@@ -4585,3 +3836,1312 @@ no-training and no-retention terms with a hosted provider are **contractual**.
 This platform cannot enforce them and does not pretend to. A deployment that must
 not egress simply does not configure a provider of that kind — there is no key to
 leave in place by accident, because none ships.
+
+---
+
+## Appendix: what each script does, by hand
+
+The blocks the three scripts of [First boot](#first-boot) run, in their order:
+until 2026-11-27 they were the first boot itself, pasted one by one. For a
+step a script stopped at, or for a first boot without the scripts. A script
+runs exactly these commands, but where a step says what the script does
+instead (it holds a secret in memory where you would paste it, for one), and
+it checks each step before running it. Run from `/opt/it-suite/deploy`.
+
+### `prepare-host.sh`: P2 to P5
+
+`sudo ./scripts/prepare-host.sh`, from the operator account, runs these as
+root -- so without each line's `sudo` --, in this order, and skips each part
+it finds done. Where it does something besides, or otherwise:
+
+- **P2:** skipped when `ufw status verbose` says `Status: active`, `Default:
+  deny (incoming)` and `ALLOW IN` for the three ports; a `WARNING` names any
+  other port ufw lets in.
+- **P3:** skipped when `unattended-upgrades` is installed, its two lines are
+  on and its service is active; otherwise it runs these four lines, and
+  refuses if the last one says anything but `active`.
+- **P4:** `timedatectl set-ntp true` only when NTP is off, then up to 120 s
+  for the clock to say it is synchronised; then the block's line, which
+  prints the two lines below.
+- **P5:** skipped when `docker-ce` is installed with Engine 26 and Compose 2.24
+  or newer. It writes `docker.sources` with `printf | tee`, its codename read
+  from `/etc/os-release`, instead of the here-document; and it adds to the
+  `docker` group the account that ran `sudo` (`SUDO_USER`), since under `sudo`
+  `$USER` is `root`. Then it checks the two versions, as below.
+- It sets `DEBIAN_FRONTEND=noninteractive`, so no package asks a question in
+  the middle of a run.
+
+#### P2 — The firewall
+
+```sh
+sudo ufw allow 22/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 8443/tcp
+sudo ufw --force enable
+sudo ufw status verbose
+```
+
+Check that the output says `Status: active`, `Default: deny (incoming)`, and
+`ALLOW IN` for `22/tcp`, `443/tcp` and `8443/tcp`. ⚠ **UNVERIFIED** in this
+repository's rehearsal (Task 12 of the plan of 2026-11-23 ran in a container,
+without ufw). Docker's own documentation warns that ports Docker publishes
+bypass ufw ("when you expose container ports using Docker, these ports bypass
+your firewall rules"): this stack publishes 443 and 8443 and nothing else, so
+the firewall's job here is everything that is not Docker.
+
+#### P3 — Security updates
+
+```sh
+sudo apt-get update
+sudo apt-get install -y unattended-upgrades
+printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades
+systemctl is-active unattended-upgrades
+```
+
+The `tee` prints the two lines it wrote, and the last command prints `active`.
+Ubuntu installs `unattended-upgrades` by default and these are its default two
+lines; writing them makes the state explicit rather than assumed.
+
+#### P4 — The clock
+
+```sh
+timedatectl status | grep -E 'System clock synchronized|NTP service'
+```
+
+```
+System clock synchronized: yes
+              NTP service: active
+```
+
+If either says otherwise: `sudo timedatectl set-ntp true`, and check again.
+Certificates, second-factor codes and the audit log's times all depend on it.
+
+#### P5 — Docker CE, from Docker's repository
+
+**Do not use Ubuntu's `docker.io` package.** An Engine too old refuses
+`traefik:v3.6`'s Docker provider, and Traefik then discovers no containers and
+every route answers a bare 404 while everything looks healthy. These are
+Docker's own Ubuntu instructions (docs.docker.com/engine/install/ubuntu),
+starting with its first: remove the distribution's packages that conflict
+with Docker's (some VPS images ship one; none installed is fine):
+
+```sh
+sudo apt-get remove -y $(dpkg --get-selections docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc 2>/dev/null | cut -f1)
+sudo apt-get install -y ca-certificates curl git openssl iproute2
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"
+```
+
+Log out and in again, so the new group applies, then check the two versions
+that matter:
+
+```sh
+docker version --format '{{.Server.Version}}'
+docker compose version --short
+```
+
+The Engine must be **26 or newer** and Compose **2.24 or newer**
+(`scripts/preflight.sh` refuses older ones). Compose 2.24 is needed because
+`.env` is both Compose's project env file and the services' `env_file`, and
+entries like
+`ITS_DATABASE_URL=postgresql+asyncpg://app_user:${APP_DB_PASSWORD}@postgres:5432/itsuite`
+rely on Compose interpolating `${APP_DB_PASSWORD}` inside the env file.
+
+The `docker` group "grants root-level privileges to the user" (Docker's
+post-installation notes): that is why only the operator account is in it.
+
+### `first-boot.sh`: steps 1 to 7, with the auto-unseal after 3.6
+
+#### Step 1 — `.env`
+
+`first-boot.sh` runs `new-env.sh` only when there is no `.env` (with
+`--acme-email` and `--acme-ca-server` when it was given them), and checks the
+file is mode 600; with a `.env`, it says `skip` and takes the host from it.
+
+```sh
+./scripts/new-env.sh --host rmm.novieri.com
+```
+
+It asks for one thing: the contact address Traefik gives Let's Encrypt when it
+registers its account. Let's Encrypt stopped mailing expiry warnings on
+2025-06-04 and no longer keeps the address on the account (it passes it to
+ISRG's mailing list), so nothing about renewal depends on it. Then it
+writes `.env` from `.env.example`, mode 600: a fresh random value in every
+`change-me` except the two OpenBao tokens, `rmm.novieri.com` in every URL, and
+the ACME keys. It prints no secret, and it refuses to overwrite an existing
+`.env`.
+
+```
+wrote .env (mode 600)
+  host            rmm.novieri.com
+  ITS_ACME_EMAIL=…
+  ITS_ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory
+  ITS_S3_PUBLIC_ENDPOINT=https://rmm.novieri.com
+  ITS_GATEWAY_URL=wss://rmm.novieri.com:8443/agent
+  ITS_GATEWAY_RELAY_URL=wss://rmm.novieri.com:8443/relay
+  ITS_PUBLIC_CONSOLE_URL=https://rmm.novieri.com
+  new secrets     POSTGRES_ADMIN_PASSWORD APP_DB_PASSWORD PORTAL_DB_PASSWORD MINIO_ROOT_PASSWORD
+  still change-me ITS_OPENBAO_TOKEN OPENBAO_TOKEN (README step 3.5 fills them)
+```
+
+```sh
+stat -c %a .env
+grep -c '=change-me$' .env
+```
+
+```
+600
+2
+```
+
+Exactly two `change-me` — the OpenBao pair, which step 3.5 fills. Real secrets
+never enter git; `.env` is gitignored.
+
+**A rehearsal** — a second first boot, a test of this runbook on another
+machine — uses Let's Encrypt's staging directory instead, whose certificates no
+browser trusts and whose limits are far higher:
+`./scripts/new-env.sh --host rmm.novieri.com --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory`.
+On a staging rehearsal, step 7's check needs the staging roots, and a later
+`./scripts/deploy.sh` prints **two** warnings and ends `Deployed with
+warnings` (exit status 1): `API returned 000 (expected 401)`, because its
+curl probe of `:443` has no staging CA, and the certificate refusal after its
+`--wait 60`, which has none either. Everything is up; those lines are the
+probes, not a failure.
+
+`ITS_PUBLIC_CONSOLE_URL` is the origin every sign-in write is checked against;
+it must stay exactly what the browser's address bar shows, `https://rmm.novieri.com`.
+
+**The per-address sign-in limits are optional** (`ITS_AUTH_LOGIN_IP_LIMIT` and
+`ITS_AUTH_FACTOR_IP_LIMIT`). Unset, one address may send 30 requests in 10
+minutes to the password step, and 30 to the second-factor steps; technicians
+behind one office NAT address share one budget. Raise them for that, within
+5-1000 (`.env.example` gives the costs); step 7 shows the values the api
+started with.
+
+#### Step 1b — Tagged images
+
+`first-boot.sh` skips both lines when `IT_SUITE_VERSION` in `.env` is this
+checkout's commit and both images exist.
+
+```sh
+./scripts/build-images.sh
+v="$(git -C .. rev-parse --short HEAD)" && sed -i '/^IT_SUITE_VERSION=/d' .env && echo "IT_SUITE_VERSION=$v" >> .env && grep '^IT_SUITE_VERSION=' .env
+```
+
+`build-images.sh` builds `itsuite/backend` and `itsuite/web` tagged with the
+checkout's commit, and ends with `Recent tags:` — on this new host, the one tag
+it just built. **That list is the rollback target list, and there is no earlier
+entry:** until step 12 has taken the first backup, a new host has no way back
+but starting over (see [Rolling back a deployment](#rolling-back-a-deployment)).
+The second line writes the tag into `.env`, deleting any earlier line first.
+(Until 2026-11-24 this list read `(none yet)` whatever tags existed: row 17 of
+[What was broken](#what-was-broken-and-how-you-would-recognise-it). A
+`(none yet)` printed before then said nothing about a host's tags.)
+
+#### Step 1c — The pre-flight
+
+```sh
+./scripts/preflight.sh
+```
+
+It checks `.env` (mode, secrets, tag), that `ITS_PUBLIC_HOST` is the console's
+host, that `rmm.novieri.com` resolves to this machine and has no `AAAA`
+record, that 443 and 8443 are free, and the Docker versions. A good first boot
+ends:
+
+```
+  note    ITS_OPENBAO_TOKEN is still change-me -- expected before first boot; §3.2/§3.4 issue it
+  note    OPENBAO_TOKEN is still change-me -- expected before first boot; §3.2/§3.4 issue it
+  ...
+  ok      ITS_PUBLIC_HOST=rmm.novieri.com is the console's host
+  ok      ITS_ACME_EMAIL is set
+  ok      ACME CA: Let's Encrypt production
+  ok      rmm.novieri.com resolves to …, an address of this host
+  ok      443 and 8443 are free
+  ok      Docker Engine …
+  ok      Docker Compose …
+  ok      .env is gitignored
+
+No known-bad state found. This does not mean the deployment is correct --
+work through GO-LIVE.md §2 (the first administrator), §4 (OpenBao seal), §5 (gateway cert)
+and §6 (back these up) before anything real touches it.
+```
+
+Any `REFUSE` names its fix; correct it and run the pre-flight again before
+going on.
+
+#### Step 2 — Postgres
+
+`--wait` returns once Postgres is healthy, so the checks below find it
+ready; `first-boot.sh` adds `--wait-timeout 120`, and checks with `psql` that
+`app_user` and `portal_user` exist.
+
+```sh
+docker compose up -d --wait postgres
+```
+
+First boot runs `postgres/init-app-user.sh`, which creates `app_user` and
+`portal_user` (both NOSUPERUSER, NOBYPASSRLS), grants `its_admin` BYPASSRLS
+(the migration/bootstrap role), and installs `app_user`'s standing `ALTER
+DEFAULT PRIVILEGES` so any table a future migration adds is usable with no
+manual step. No table exists yet, so `app_user` cannot use anything yet
+either — **step 4b is not optional**.
+
+```sh
+docker compose logs postgres | grep -E 'CREATE ROLE|ALTER DEFAULT|CREATE DATABASE'
+docker compose ps postgres --format '{{.Status}}'
+```
+
+```
+postgres-1  | CREATE DATABASE
+postgres-1  | CREATE ROLE
+postgres-1  | CREATE ROLE
+postgres-1  | ALTER DEFAULT PRIVILEGES
+postgres-1  | ALTER DEFAULT PRIVILEGES
+Up 15 seconds (healthy)
+```
+
+**If it exits 1 with `APP_DB_PASSWORD: APP_DB_PASSWORD must be set`** you
+skipped step 1. Fix `.env`, then remove postgres and its volume, and only
+that one -- `docker compose rm -s -f postgres`, then `docker volume rm
+it-suite_postgres-data`, which DESTROYS what is in it --: the init script only
+ever runs against a brand-new data directory, so a partially initialised
+volume must be destroyed, not restarted. `first-boot.sh` stops when postgres
+does not turn healthy, with its log; and when the two roles are missing -- a
+data directory older than this `.env`, which the init script never ran on --
+it gives those two commands as one line, behind a typed `DESTROY`.
+
+#### Step 3 — OpenBao: initialise, unseal, provision
+
+This is the step with the most moving parts, and every one of them is a place a
+first boot can dead-end. Take it in order.
+
+##### 3.1 Start it
+
+`first-boot.sh` starts OpenBao unless it answers already, waits up to 90 s for
+`bao status -format=json` to answer, and reads `initialized`, `sealed` and the
+seal's `type` from it: on a new host, `ok      step 3.1: OpenBao answers:
+initialised false, sealed true, seal shamir`. A `.env` holding OpenBao tokens
+beside an OpenBao never initialised is from another first boot, and it
+refuses.
+
+```sh
+docker compose up -d openbao
+docker compose exec openbao bao status
+```
+
+```
+Key                Value
+---                -----
+Seal Type          shamir
+Initialized        false
+```
+
+`Initialized false` (and, below these lines, `Sealed true`) is correct. Its
+exit status is 2, not 0: `bao status` exits 2 for any sealed vault, initialised
+or not. (The `bao` CLI defaults to
+`https://`, but the listener is plaintext inside the compose network only;
+`BAO_ADDR=http://127.0.0.1:8200` is set on the service so these commands work
+as written. Without it every one of them fails with `http: server gave HTTP
+response to HTTPS client`.)
+
+##### 3.2 Initialise — this prints the only copy of the unseal keys
+
+`first-boot.sh` runs it only on an OpenBao never initialised, and only on a
+terminal: with its input or its output redirected it refuses before `bao
+operator init`. It prints the five shares and the root token once, between two
+rules, holds them in its memory only, and waits for a typed `SAVED`; then it
+clears the screen and its scrollback. Stopped at that prompt, it says first
+that the screen holds their only copy.
+
+```sh
+docker compose exec openbao bao operator init -key-shares=5 -key-threshold=3
+```
+
+**Five unseal key shares and one root token are printed exactly once and are
+never recoverable.** Before you go further:
+
+- copy the five shares to five different places — a password manager, sealed
+  envelopes with different custodians, an offline vault. Threshold is 3, so
+  three lost shares is a lost vault: the job-signing key, the agent CA and
+  every sealed credential become unrecoverable, and every enrolled endpoint
+  becomes uncontrollable.
+- copy the root token to your password manager.
+- **none of this goes into this repository, into `.env` (beyond the two token
+  variables), into a shell script, or into a log.** This runbook deliberately
+  shows no key material.
+
+##### 3.3 Unseal — three of the five shares
+
+`first-boot.sh` asks for the three shares itself, hidden: each must be one of
+the five it printed, when the same run printed them, and none typed twice. It
+sends the three together, each to `bao write sys/unseal` on stdin, never in an
+argv, after resetting any unseal in progress; still sealed, it says one of
+them is not this OpenBao's and asks for three again, three rounds at most. It
+keeps the three that unsealed OpenBao for the auto-unseal after 3.6.
+
+```sh
+docker compose exec openbao bao operator unseal   # prompts; repeat ×3
+docker compose exec openbao bao status
+```
+
+```
+Initialized     true
+Sealed          false
+Total Shares    5
+Threshold       3
+```
+
+Then confirm the service reports healthy — the healthcheck is `bao status`, so
+it goes healthy only when unsealed:
+
+```sh
+docker compose ps openbao --format '{{.Status}}'
+```
+
+```
+Up 20 seconds (healthy)
+```
+
+> **Without the auto-unseal, this happens again every restart** -- the
+> auto-unseal, right after step 3.6, turns that off. OpenBao returns
+> **sealed** after any `docker compose up -d` that recreates it, and after
+> every host reboot. The healthcheck plus `openbao-init`'s `service_healthy`
+> dependency turn that into a clean wait rather than a confusing cascade, but
+> `docker compose up -d` will block until you unseal. See GO-LIVE.md §4, which
+> describes the auto-unseal every first boot turns on since 2026-11-27
+> (`./scripts/openbao-seal.sh enable`) and what it costs.
+
+##### 3.4 The runtime policies and their tokens
+
+`first-boot.sh` opens no shell: it sends the root token it kept from 3.2 on
+the stdin of each `bao` command (`sh -c 'read -r BAO_TOKEN && export
+BAO_TOKEN && exec "$@"'`), reads each new token with `-field=token`, and
+writes the `gateway-issuer` one with `printf | sudo tee`, as below. A token it
+finds -- in `.env`, or in the token file -- counts as done only once this
+OpenBao knows it (`bao token lookup`, the token on stdin); one this OpenBao
+does not know is from another first boot, and it refuses.
+
+Nothing must **run** with the root token. Two least-privilege policies are
+shipped and mounted into the container:
+
+| policy | file | who uses it | what it may do |
+|---|---|---|---|
+| `its-app` | `/bao/its-app.hcl` | api, gateway, worker (`ITS_OPENBAO_TOKEN`) | sign jobs, seal/unseal org secrets, sign agent CSRs, HMAC passwords with the sign-in pepper, sign the platform's own tokens |
+| `gateway-issuer` | `/bao/gateway-issuer.hcl` | `scripts/issue-gateway-cert.py` (step 6) | `update` on `pki/issue/gateway`, and nothing else |
+
+> **Do not paste the root token onto a command line.** `docker compose exec -e
+> BAO_TOKEN=<root-token> ...` puts it in the argv of `docker compose`, and
+> `/proc/<pid>/cmdline` is world-readable — any user on the host can read it out
+> of `ps` while the command runs, and your shell history keeps a copy
+> afterwards. Open one shell inside the container and read the token into it
+> with echo off instead. It never becomes an argument of anything.
+
+```sh
+docker compose exec openbao sh
+```
+
+then, inside that shell, this line on its own -- it waits for you to paste
+the root token and press Enter, and a `read` given more pasted lines would
+take the next one as the token:
+
+```sh
+stty -echo; read -r BAO_TOKEN; stty echo; echo; export BAO_TOKEN   # paste the root token, Enter
+```
+
+and then:
+
+```sh
+bao policy write its-app /bao/its-app.hcl
+bao policy write gateway-issuer /bao/gateway-issuer.hcl
+bao auth tune -max-lease-ttl=87600h token/
+bao token create -orphan -policy=its-app        -ttl=87600h
+bao token create -orphan -policy=gateway-issuer -ttl=87600h
+exit
+```
+
+```
+Success! Uploaded policy: its-app
+Success! Uploaded policy: gateway-issuer
+Success! Tuned the auth method at: token/
+```
+
+and the two `token create` commands each print a token — the first with
+`token_policies ["default" "its-app"]`, the second with
+`token_policies ["default" "gateway-issuer"]` — both `token_duration 87600h`.
+
+The `auth tune` is required: without it the default 32-day system max TTL caps
+the tokens, and the entire platform stops signing jobs a month after go-live.
+The 10-year TTL is a deliberate trade — nothing in the stack renews these tokens
+— so put a rotation reminder in GO-LIVE.md's schedule rather than trusting it.
+
+`-orphan` matters: a child of the root token dies when the root token is
+revoked.
+
+Keep the `gateway-issuer` token where step 6 and the step 6b timer can
+read it, and nowhere else:
+
+```sh
+sudo install -d -m 700 /etc/it-suite
+sudo install -m 600 /dev/null /etc/it-suite/gateway-issuer.token
+sudo tee /etc/it-suite/gateway-issuer.token >/dev/null   # paste, Ctrl-D
+```
+
+##### 3.5 Put both tokens in `.env`
+
+`first-boot.sh` writes them the same way, from memory. Run again after 3.2 in
+another run, it asks for the root token once, hidden, checks it is this
+OpenBao's root token, and mints whichever runtime token is not there yet.
+
+Run these three one block at a time: each of the first two asks for one
+token, without echoing it, and waits for your paste -- the `its-app` token
+from 3.4, then the root token from 3.2. `read` and `printf` are shell
+builtins, so neither token becomes an argument of any process, and each
+deletes the key's earlier value first, because a second line further down
+silently wins:
+
+```sh
+read -rsp 'its-app token (3.4): ' T && echo && [ -n "$T" ] && sed -i '/^ITS_OPENBAO_TOKEN=/d' .env && printf 'ITS_OPENBAO_TOKEN=%s\n' "$T" >> .env; unset T
+```
+
+```sh
+read -rsp 'root token (3.2): ' T && echo && [ -n "$T" ] && sed -i '/^OPENBAO_TOKEN=/d' .env && printf 'OPENBAO_TOKEN=%s\n' "$T" >> .env; unset T
+```
+
+```sh
+grep -c '^ITS_OPENBAO_TOKEN=\|^OPENBAO_TOKEN=' .env
+```
+
+```
+2
+```
+
+They are **two different values** and must stay that way. `ITS_OPENBAO_TOKEN`
+is what the api, gateway and worker use for every signature, every envelope
+encryption and every certificate; `OPENBAO_TOKEN` is used only by the one-shot
+`openbao-init` container, because enabling mounts needs privileges no runtime
+policy has.
+
+**The gateway certificate is no longer a third user of `OPENBAO_TOKEN`.** Step 6
+used to expand it into a `docker compose run` command line; it now takes the
+`gateway-issuer` token, on stdin or a prompt. `its-app.hcl` exists precisely so
+the application does not hold root, and a monthly timer reading a token off the
+host has the same claim on that reasoning: one capability on one path, instead
+of the credential that can re-key `transit/job-signing`.
+
+```sh
+grep -c 'change-me' .env
+```
+
+```
+0
+```
+
+##### 3.6 Provision the transit key and the PKI
+
+`first-boot.sh` runs it unless `openbao-init` has exited 0 already, and judges
+it by that exit code.
+
+```sh
+docker compose up openbao-init
+```
+
+```
+openbao-init-1  | openbao provisioning complete
+openbao-init-1 exited with code 0
+```
+
+This creates the Ed25519 `job-signing` transit key, the `pki` mount with its
+root CA, the `agent` role (client certificates, Ed25519, with the
+`its://org/<org>/device/<device>` URI SAN the identity binding depends on) and
+the `gateway` role (the gateway's own server certificate). The credential vault
+(`ITS_VAULT_BACKEND=openbao`) reuses the same `transit` mount for its per-org
+keys, created on first use — nothing extra to provision.
+
+**Run in CI since own authentication phase 4.** The `deploy` job initialises
+OpenBao -- with one share until 2026-11-27, and since then through
+`first-boot.sh`, with five and a threshold of three, the auto-unseal and its
+restart --, loads `its-app`, runs `openbao-init` and starts the api against
+it, then signs a person in and connects an AI app end to end through Traefik
+(`deploy/ci/mcp_flow.py`): transit `hmac` with the `auth-pepper` key and
+`sign` with `auth-signing` run live there. The unseal typed by hand and a host
+reboot have still only been run by the people who wrote this section.
+
+Since own authentication phase 1 it also creates two transit keys for sign-in:
+`auth-pepper` (HMAC, the versioned pepper every password verifier is
+computed with) and `auth-signing` (ECDSA P-256, which signs the assistant's
+internal tokens and, from phase 3, MCP access tokens). Neither key ever leaves
+OpenBao. **On an install that ran `openbao-init` before, re-run it and re-load
+the policy** (`bao policy write its-app /bao/its-app.hcl`, as in 3.4), or the
+API cannot verify a password. **And add `ITS_AUTH_KEYS_BACKEND=openbao` to an
+existing `.env`** (a new one copied from `.env.example` has it): without it the
+api uses the `local` backend, which with `ITS_ENVIRONMENT=production` is
+refused at start (`LocalAuthKeysInProduction`), whether or not its files exist,
+so the api restart-loops:
+
+```sh
+sed -i '/^ITS_AUTH_KEYS_BACKEND=/d' .env && echo 'ITS_AUTH_KEYS_BACKEND=openbao' >> .env
+grep '^ITS_AUTH_KEYS_BACKEND=' .env
+```
+
+```
+ITS_AUTH_KEYS_BACKEND=openbao
+```
+
+**If this exits 2 with `Vault is sealed`,** unseal (3.3) and re-run. It is
+idempotent.
+
+#### The auto-unseal, and the restart that proves it
+
+On every first boot since 2026-11-27 (the operator's decision, GO-LIVE.md §4),
+right after step 3.6 and before step 4 starts anything else: OpenBao's seal
+moves from the five shares to a static key in a file on this host, and OpenBao
+unseals itself after every restart and reboot -- so a step from 4 on that
+fails is run again with no share. Three shares, hidden, at its prompts:
+
+```sh
+sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file /etc/it-suite/openbao-unseal/unseal.key
+```
+
+It snapshots `openbao-data` to `/var/backups/it-suite/openbao-seal/` first,
+writes the key (`0400`, the OpenBao user's), adds `COMPOSE_FILE` and
+`OPENBAO_UNSEAL_KEY_FILE` to `.env`, migrates the seal with the shares, and
+proves it with a restart of its own; by hand it asks `Proceed? [y/N]` first.
+`first-boot.sh` adds `--yes` and gives it the three shares of step 3.3 on its
+stdin. Run again with no share in memory and OpenBao unsealed, it asks for
+three, then a typed `SEAL`, and seals OpenBao with the root token and unseals
+it with them before `openbao-seal.sh` sees them (First boot, 1). `env
+-u COMPOSE_FILE` changes nothing on this VPS, where only `.env` sets
+`COMPOSE_FILE`; it matters where the environment sets one (CI's Pebble
+overlay, a rehearsal's), which would win over the line the script writes into
+`.env` and recreate OpenBao without its new seal. Then the proof, by hand as
+the script does it:
+
+```sh
+docker compose restart openbao
+docker compose exec openbao bao status
+```
+
+```
+Seal Type          static
+Initialized        true
+Sealed             false
+```
+
+`Sealed false`, with no share typed. The five shares are **recovery keys**
+from now on: they authorize `openbao-seal.sh disable` and `bao operator
+generate-root`, and cannot unseal.
+
+#### Step 4 — Migrations, then table privileges
+
+`first-boot.sh` runs `migrate` unless `alembic_version` is this checkout's
+newest revision file already, and judges it by `migrate`'s own exit code and
+by that number after it.
+
+```sh
+docker compose up migrate
+```
+
+```
+migrate-1 exited with code 0
+```
+
+Alembic is quiet on success. Check the version directly:
+
+```sh
+docker compose exec -T postgres \
+  psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version;'
+```
+
+```
+0248
+```
+
+That must equal the highest file in `backend/migrations/versions/`, and it is
+the one number in this runbook that is stale the moment it is written. (The
+first-boot run reached `0048`; the chain was at `0079` on 2026-08-26, and at
+`0248` when this runbook was rehearsed on 2026-11-24 —
+**check the tree you pulled** rather than trusting either number. `ls
+backend/migrations/versions/ | sort | tail -1` is the authority.)
+
+##### 4b — `postgres-grants`
+
+```sh
+docker compose up postgres-grants
+```
+
+```
+postgres-grants-1  | GRANT
+postgres-grants-1  | GRANT
+postgres-grants-1  | REVOKE
+postgres-grants-1  | REVOKE
+postgres-grants-1  | REVOKE
+postgres-grants-1 exited with code 0
+```
+
+This applies `app_user`'s real table privileges
+(`postgres/grant-app-privileges.sql`): blanket read/write, narrowed so it
+cannot rewrite the audit log or the RBAC catalog. Skipping it is the difference
+between the app working and every request 500ing with
+`permission denied for table ...` — see "The app_user table-privilege gap"
+below for why it is two steps rather than one.
+
+`api`, `gateway` and `worker` all declare `postgres-grants` completing
+successfully as a hard dependency, so step 7 would run both of these anyway.
+They are written out because you want to see them succeed on their own.
+
+What only `postgres-grants` applies is the RBAC catalog's narrowing: after
+`migrate`, `app_user` still holds every privilege on `permissions` and
+`role_permissions` (`audit_events` and `security_events` are narrowed by
+migrations too). So this is the question that says it ran, and
+`first-boot.sh` asks it before `postgres-grants`, which it runs unless the
+answer is `t`, and again after:
+
+```sh
+docker compose exec -T postgres psql -X -U its_admin -d itsuite -tAc "select has_table_privilege('app_user', 'devices', 'SELECT') and not has_table_privilege('app_user', 'permissions', 'INSERT, UPDATE, DELETE') and not has_table_privilege('app_user', 'role_permissions', 'INSERT, UPDATE, DELETE') and not has_table_privilege('app_user', 'audit_events', 'UPDATE, DELETE') and not has_table_privilege('app_user', 'security_events', 'UPDATE, DELETE')"
+```
+
+```
+t
+```
+
+The script says what it found, after the line
+`run     docker compose up postgres-grants`:
+
+```text
+  ok      step 4b: app_user reads devices, cannot write the RBAC catalog (permissions, role_permissions), and cannot rewrite audit_events or security_events
+```
+
+#### Step 5 — The audit HMAC key
+
+The api, gateway and worker load this at startup and, with
+`ITS_ENVIRONMENT=production`, **refuse to start without it**
+(`FileNotFoundError: /var/lib/its/secrets/audit-hmac.key`). It lives on the
+shared `its-secrets` volume so all three read the *same bytes*; two different
+keys silently produce two divergent chains for one org.
+
+`set -C` makes the shell refuse to write over a key that is there already:
+replacing it would leave every audit chain written so far unverifiable.
+`first-boot.sh` runs this only when `test -s` finds no key, and if `set -C`
+still refuses -- a key file of 0 bytes, which never signed a record -- it
+stops, and removes it only behind a typed `DELETE`, and only if it is still
+empty.
+
+```sh
+docker compose run --rm --no-deps --entrypoint sh api -c \
+  'set -C && head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && \
+   chmod 600 /var/lib/its/secrets/audit-hmac.key'
+
+docker compose run --rm --no-deps --entrypoint sh api -c \
+  'ls -l /var/lib/its/secrets/audit-hmac.key'
+```
+
+```
+-rw------- 1 its its 32 Aug  5 21:57 /var/lib/its/secrets/audit-hmac.key
+```
+
+**Back it up off this host immediately** —
+[`docs/07-backup-restore.md`](../docs/07-backup-restore.md). Restoring the
+database without it leaves the entire audit chain unverifiable, and there is no
+way to recompute it.
+
+#### Step 6 — The gateway's certificate, and the client CA
+
+`first-boot.sh` runs the second form below, from the `0600` file of step 3.4,
+unless the certificate, its key and the CA all exist already.
+
+**Before** anything starts the gateway. The gateway loads its TLS material at
+startup and exits immediately if it is absent:
+
+```
+ctx.load_cert_chain(certfile, keyfile)
+FileNotFoundError: [Errno 2] No such file or directory
+```
+
+Issue it from the **internal** CA — not your public certificate; agents pin the
+internal CA at enrollment and will reject anything else. Pass the exact
+hostname agents dial in `ITS_GATEWAY_URL`. It prompts for the `gateway-issuer`
+token from step 3.4, with echo off:
+
+```sh
+docker compose run --rm --no-deps \
+  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
+  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
+```
+
+```
+OpenBao gateway-issuer token:
+gateway.crt  /var/lib/its/tls/gateway.crt  (CN=rmm.novieri.com, 365d)
+gateway.key  /var/lib/its/tls/gateway.key  (mode 0600)
+root.crt     /var/lib/its/ca/root.crt  (agent client CA)
+serial       57:d6:c9:f1:0a:85:72:29:6d:b0:3f:66:8a:1e:40:89:28:ee:a4:46
+```
+
+Or non-interactively, from the 0600 file step 3.4 wrote — note `-T`, which is
+what leaves stdin available:
+
+```sh
+sudo cat /etc/it-suite/gateway-issuer.token | docker compose run --rm --no-deps -T \
+  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
+  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com
+```
+
+**A pipe, not a `< redirect`, and the `sudo` covers `cat` alone.** This step ran
+as `-bash: /etc/it-suite/gateway-issuer.token: Permission denied` on the first
+real deploy. A `<` redirect is opened by the *shell*, so it runs as the operator
+— and the token is deliberately `600 root:root` inside a `700` directory, which
+the operator therefore cannot read. The redirect form only works for a root
+shell, and this runbook's own prerequisites put you in an unprivileged one.
+
+Do not "fix" it by running the whole line under `sudo`: `docker compose` would
+then run as root, resolving a different `$PWD` and a different Docker context
+than every other command here. Do not chown the token to the operator either —
+Step 6b's renewal timer reads it as root, which is the reason for the
+mode. Elevating only `cat` keeps the token off argv and out of shell history,
+which is what the whole step is for.
+
+**Neither form puts the token on a command line, and that is the point.** The
+previous version of this step read (quoted, not `sh`-fenced — it is a line that
+was removed, and a copy-pasteable bad example is a bad example you will meet
+again):
+
+```text
+  -e BAO_TOKEN="$(grep '^OPENBAO_TOKEN=' .env | cut -d= -f2-)" \
+```
+
+which expands the **root** token into the argv of `docker compose`, readable by
+any user on the host through `ps` for as long as the container runs, and left in
+shell history afterwards — in the runbook for a script whose whole reason to
+exist is that key material must not touch shell history. `BAO_TOKEN` is still
+honoured when it is *already* in the environment (that is what the step 6b
+timer's `EnvironmentFile=` is for); nothing here constructs it.
+
+It runs through the `gateway` service because that is the only container
+mounting both `its-gateway-tls` and `its-ca`, so the private key is written
+straight to the volume the gateway reads and never touches your shell history
+or the host filesystem. `root.crt` is the CA the gateway admits agent client
+certificates against (`ITS_GATEWAY_CLIENT_CA`).
+
+**This certificate is 365 days and does not renew itself.** Step 6b, next,
+installs the timer that renews it every month.
+
+#### Step 6b — Renew the gateway's certificate every month
+
+`first-boot.sh` writes the same two units, byte for byte (with this
+checkout's `deploy/` and host), with `printf | sudo tee`, and skips the step
+when both are there as written and the timer is enabled. It reloads systemd
+before it enables the timer, as the block below does since 2026-11-27.
+
+The certificate step 6 issued is valid for 365 days and **does not renew
+itself**, and it is the only server certificate every agent dials: the day it
+expires, the whole fleet disconnects at once. This timer re-issues it on the
+first of every month, as root, from the `0600` token of step 3.4 (the section
+"Renewing the gateway certificate" below says why a redirect is right here and
+a pipe in step 6):
+
+```sh
+sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'
+[Unit]
+Description=Renew the it-suite gateway server certificate
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/it-suite/deploy
+# The token arrives on STDIN from a 0600 file, never as an argument. `-T` is
+# what keeps stdin available to redirect.
+ExecStart=/bin/bash -lc 'docker compose run --rm --no-deps -T \
+  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
+  --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com \
+  < /etc/it-suite/gateway-issuer.token \
+  && docker compose restart gateway'
+EOF
+sudo tee /etc/systemd/system/its-gateway-cert.timer >/dev/null <<'EOF'
+[Unit]
+Description=Monthly it-suite gateway certificate renewal
+[Timer]
+OnCalendar=monthly
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now its-gateway-cert.timer
+sudo systemctl list-timers its-gateway-cert.timer --no-pager
+```
+
+The last line lists `its-gateway-cert.timer` with `its-gateway-cert.service`
+under ACTIVATES and the first of next month under NEXT. Connected agents
+reconnect on their own within seconds of each renewal ([Renewing the gateway
+certificate](#renewing-the-gateway-certificate)). ⚠ **UNVERIFIED**: the
+rehearsal (plan of 2026-11-23, Task 12) ran in a container without systemd;
+it wrote both units and ran the service's command once by hand.
+
+#### Step 7 — Start everything; Traefik obtains the certificate for `:443`
+
+```sh
+docker compose up -d
+docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
+```
+
+```
+SERVICE             STATUS
+api                 Up … (healthy)
+backup-replicator   Up …
+gateway             Up … (healthy)
+migrate             Exited (0) …
+minio               Up … (healthy)
+openbao             Up … (healthy)
+openbao-init        Exited (0) …
+postgres            Up … (healthy)
+postgres-grants     Exited (0) …
+redis               Up …
+traefik             Up …
+web                 Up … (healthy)
+worker              Up … (healthy)
+```
+
+The three `Exited (0)` services are the one-shot jobs; that is success.
+`first-boot.sh` waits up to five minutes for that table, and then 15 seconds
+more with no container restarting: a service that restarts for ever is up for
+a moment at a time (row 15 of [What
+was broken](#what-was-broken-and-how-you-would-recognise-it)). It then runs
+the checks below, the one of `:8443` against this VPS itself; the check from
+a computer outside is yours ([First boot, 1](#1-first-bootsh)).
+
+**The certificate.** Traefik asks Let's Encrypt for `rmm.novieri.com` as soon as
+it sees the routers (TLS-ALPN-01, answered on `:443`), stores it in the
+`traefik-acme` volume, and renews it by itself 30 days before it expires. Until
+it has one — and for good if it cannot get one — it serves its own self-signed
+"TRAEFIK DEFAULT CERT" **without failing**. So check, rather than trust:
+
+```sh
+./scripts/check-public-tls.sh
+```
+
+```
+ok      127.0.0.1:443 presents a trusted certificate for rmm.novieri.com
+        issuer=C = US, O = Let's Encrypt, CN = …
+        X509v3 Subject Alternative Name:
+            DNS:rmm.novieri.com
+        notAfter=…
+```
+
+It waits up to three minutes for the first issuance, and it also refuses a
+trusted certificate with **fewer than 28 days left**: Traefik renews at 30, so
+that is a renewal that has been failing (Let's Encrypt no longer mails expiry
+warnings). A `REFUSE` says what a browser would refuse; `docker compose logs traefik | grep -i acme` says why
+Let's Encrypt did not issue (the usual causes: the `A` record is not this
+machine's yet, `:443` closed at the provider's firewall, or an `AAAA` record
+of another machine). Fix the cause and `docker compose restart traefik`.
+
+On a **rehearsal against Let's Encrypt staging** the check refuses by design:
+staging's roots are in no trust store. `deploy.sh` has no such CA either, so a
+rehearsal's `deploy.sh` prints two warnings, the API probe (`API returned
+000 (expected 401)`) and the certificate refusal after `--wait 60`, and
+ends `Deployed with warnings` with exit status 1 although everything is up.
+Give the check the roots (the four Let's Encrypt lists on its staging page):
+
+```sh
+curl -fsS https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x1.pem https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x2.pem https://letsencrypt.org/certs/staging/gen-y/root-ye.pem https://letsencrypt.org/certs/staging/gen-y/root-yr.pem > /tmp/le-staging-roots.pem
+./scripts/check-public-tls.sh --cafile /tmp/le-staging-roots.pem
+```
+
+The certificate store Traefik writes must be readable by Traefik alone —
+Traefik refuses a looser `acme.json` itself, and the named volume is what
+creates its directory:
+
+```sh
+docker compose exec traefik stat -c %a /etc/traefik/acme/acme.json
+```
+
+```
+600
+```
+
+⚠ **UNVERIFIED with Let's
+Encrypt itself**: the rehearsal (plan of 2026-11-23, Task 12) and every CI run
+obtain it from Pebble, Let's Encrypt's own test CA, by the same path; the
+issuer line above is the one production's will be.
+
+**The agent-facing side must be the internal CA**, not Let's Encrypt:
+
+```sh
+echo | openssl s_client -connect 127.0.0.1:8443 -servername rmm.novieri.com 2>/dev/null \
+  | openssl x509 -noout -issuer -ext subjectAltName
+```
+
+```
+issuer=CN = Novieri RMM internal CA
+X509v3 Subject Alternative Name:
+    DNS:rmm.novieri.com
+```
+
+Two different issuers on the two ports is the correct picture. If `:8443`
+shows a Let's Encrypt issuer, an agent will never connect. The likeliest
+cause is an absent or unhealthy gateway: with no TCP router, Traefik answers
+`:8443` itself with the public certificate, which agents refuse because they
+trust only the CA pinned at enrollment. Check `docker compose ps gateway`
+first.
+
+**From a computer outside this VPS**, once: the check above dials this
+machine from itself and never crosses your provider's firewall, and Let's
+Encrypt's validation proves `:443` from the Internet but not `:8443`. On a
+Linux or macOS computer elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
+prints `issuer=CN = Novieri RMM internal CA`; on Windows,
+`Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
+Anything else: open `8443/tcp` at the provider's firewall.
+
+**The per-address sign-in limits the api started with** (step 1):
+
+```sh
+docker compose exec api python -c "from app.core.config import get_settings; s = get_settings(); print(s.auth_login_ip_limit, s.auth_factor_ip_limit)"
+```
+
+```
+30 30
+```
+
+### In the browser: steps 8 and 9
+
+`first-boot.sh` asks the api for `/api/v1/setup/status` itself -- that first
+request is what generates the install code -- and prints the code, on a
+terminal only; by hand, the browser's first visit does it, as below. These
+two steps are yours either way (First boot, 2).
+
+#### Step 8 — Claim the installation
+
+**This replaces what used to be three steps: creating the first administrator by
+piping Python into `docker compose exec`, inserting the organization row by SQL,
+and granting the role by a second SQL statement.** All three now happen in one
+transaction behind one screen, through the same service code the Users tab uses.
+
+The setup screen sets the administrator's password itself and sends **no
+mail**; the first sign-in enrols the second factor (step 9). Account mail
+(invitations, password resets) is configured afterwards in Novieri RMM at
+**Settings → Email**.
+
+Then:
+
+1. **Open `https://rmm.novieri.com/`.** On an installation with no users it
+   shows the setup screen rather than redirecting to sign-in. That first request
+   is also what **generates** the install code — nothing runs earlier, so do this
+   before going to look for it.
+
+2. **Read the code.** The api writes it to `/var/lib/its/secrets/setup-code`,
+   mode 600, when the first request asks for it (and logs it once):
+
+   ```sh
+   docker compose exec api cat /var/lib/its/secrets/setup-code
+   ```
+
+3. **Enter it**, with your name, email, organization name and the password you
+   will sign in with (12 characters at least).
+
+That creates the organization, the administrator account and its `org-admin`
+grant **in one transaction** — either all three or none — and writes every part
+of it to the hash-chained audit log.
+
+**The organization's slug is `ITS_DEFAULT_ORG_SLUG` from `.env`** — `novieri`
+in the shipped example — not something you type, and not derived from the name
+you enter unless that setting is blank. That is deliberate: the sign-in, the
+OAuth server for AI apps and the recovery command all look people up in that
+one organization, and an organization created under any other slug is one its
+own administrator cannot sign in to.
+
+**The install code is the only thing between a stranger and this box.** An
+appliance answers on the network long before its owner sits down at it, and this
+screen must answer before any user exists, so it cannot be gated by a permission.
+Zero users alone is not a guard. Claim it promptly, from a browser you trust, and
+treat the code as a password until you have.
+
+#### Step 9 — Sign in, and enrol your second factor
+
+Setup does not sign you in. Open `https://rmm.novieri.com/sign-in` and sign
+in with the address and the password you gave the setup screen. The first
+sign-in asks for a second factor before anything else -- an authenticator
+app (TOTP) or a passkey -- and then shows ten recovery codes, once. Keep them
+where you keep the OpenBao shares: an administrator who loses every factor
+needs one, or the [recovery
+link](#recovery-link-an-administrator-who-lost-every-second-factor).
+
+There is no identity admin console behind this product any more. Everything
+an administrator does with accounts -- inviting, disabling, resetting second
+factors, signing someone out everywhere -- is in **Settings → Users**, and
+Microsoft sign-in is in **Settings → Microsoft sign-in**.
+
+### `first-boot-check.sh`: steps 10 to 12
+
+Before step 10 it asks `docker compose exec openbao bao status`, and stops
+unless OpenBao is unsealed.
+
+#### Step 10 — Confirm you really are an administrator
+
+`first-boot-check.sh` runs the query below and looks for `|org-admin` in it.
+
+**Do not skip this.** Under the old runbook the role grant was a separate SQL
+statement and the classic failure was an account that authenticated and could do
+nothing. The claim now grants `org-admin` in the same transaction, so the check
+is quick — but "the code grants it" and "this deployment granted it" are
+different claims, and only one of them is about your box.
+
+In the console: **Settings → Users** lists your account with the **org-admin**
+role. Or from inside the stack, with no token at all (the console's API reads a
+session cookie, not a bearer token, since own authentication phase 1, so a
+`curl` with `Authorization: Bearer` is not a way to ask it):
+
+```sh
+docker compose exec -T postgres psql -U its_admin -d itsuite -tAc "select u.email, r.name from users u join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id where u.kind = 'staff'"
+```
+
+One line: the address you gave the setup screen, then `|org-admin`.
+
+No line, or a role other than `org-admin`, means the role is not there. Seeded
+roles are `super-admin`, `org-admin`, `technician`, `auditor`, `read-only` and
+`requester`; a missing grant means the claim did not complete, and the fix is to
+look at the api log for that request rather than to insert a row by hand.
+
+#### Step 11 — Prove the platform actually works
+
+Everything so far only proves containers are running. This is the acceptance
+test.
+
+##### 11a — Authorization is enforced server-side
+
+`first-boot-check.sh` runs the same loop (with `--cacert` for its
+`--tls-cafile`).
+
+Unauthenticated, through the real front door:
+
+```sh
+for p in /api/v1/devices /api/v1/jobs /api/v1/audit/verify /api/v1/enrollment-tokens; do
+  printf "  %-28s " "$p"; curl -s -o /dev/null -w "%{http_code}\n" https://rmm.novieri.com$p
+done
+```
+
+```
+  /api/v1/devices              401
+  /api/v1/jobs                 401
+  /api/v1/audit/verify         401
+  /api/v1/enrollment-tokens    401
+```
+
+All four must be `401`. A `404` on all of them means **Traefik is not routing**
+— see defect 7.
+
+##### 11b — Create an enrollment token
+
+`first-boot-check.sh` says where to make it, then asks for it, hidden. **Each
+run needs a new one** after a run that stopped once it had the token: every
+way out but success retires that run's agent (11f), and the next run enrols
+another.
+
+In the console, at `https://rmm.novieri.com/enrollment`: a new token named
+`first endpoint`, valid for 24 hours, **one** use, for the site **Principal**
+of your own organization's client. The console shows the token **once**; keep
+it for the next step and nowhere else. (Since own authentication phase 1 the
+console's API takes a session cookie, so the `curl -H "Authorization: Bearer …"`
+this step used to show cannot mint one; the console is the way, audited as
+`enrollment.token_created`.)
+
+##### 11c — A throwaway agent on this VPS
+
+`first-boot-check.sh` builds the agent only when a file of `agent/` is newer
+than `agent/dist/novieri-agent`, writes the token from its memory the same way
+(`umask 077`, `printf`), runs the same `docker run`, waits up to 60 s for
+`gateway connected`, and checks the token file is gone.
+
+The first endpoint is this server itself, for a few minutes: the agent built
+from this checkout (Go in a container, as your user: the VPS needs no
+toolchain, and the binary in `agent/dist/` is yours, not root's), run in a
+container that shares the host's network and trusts the host's certificate
+roots. It reaches `https://rmm.novieri.com` through the same name, ports and
+TLS as an endpoint — the internal CA, mutual TLS on `:8443` — but its packets
+never leave this machine, so it does not cross your provider's firewall: step
+7's check from outside is what proves that.
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/../agent:/src" -w /src -e CGO_ENABLED=0 -e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod golang:1.24-bookworm go build -trimpath -o dist/novieri-agent ./cmd/agent
+install -d -m 700 /tmp/smoke-agent
+```
+
+The token from 11b, at a prompt that does not echo it. This block is one
+command on purpose: a prompt ends its block, so nothing pasted after it can be
+read as the token.
+
+```sh
+read -rsp 'Enrollment token (11b): ' T && echo && [ -n "$T" ] && (umask 077 && printf '%s' "$T" > /tmp/smoke-agent/enroll-token); unset T
+```
+
+Then the agent itself:
+
+```sh
+docker run -d --name smoke-agent --network host --user "$(id -u):$(id -g)" \
+  -v "$PWD/../agent/dist/novieri-agent:/usr/local/bin/novieri-agent:ro" \
+  -v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro \
+  -v /tmp/smoke-agent:/var/lib/novieri-agent \
+  -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \
+  busybox:1.36.1 /usr/local/bin/novieri-agent
+for _ in $(seq 1 30); do docker logs smoke-agent 2>&1 | grep -q 'gateway connected' && break; sleep 2; done
+docker logs smoke-agent 2>&1 | grep -E 'starting|enrolling|enrolled|gateway connected'
+```
+
+```
+time=… level=INFO msg="novieri-agent starting" version=dev data_dir=/var/lib/novieri-agent enrolled=false
+time=… level=INFO msg=enrolling url=https://rmm.novieri.com/enroll/v1 hostname=… os_family=linux via_install_link=false
+time=… level=INFO msg=enrolled device_id=… gateway_url=wss://rmm.novieri.com:8443/agent cert_not_after=…
+time=… level=INFO msg="gateway connected" url=wss://rmm.novieri.com:8443/agent
+```
+
+`enrolled` then `gateway connected` is the whole handshake: the CSR signed by
+the internal CA, the certificate and the CA pinned in the data directory, the
+outbound mutual-TLS WebSocket up. The token file is gone (`ls /tmp/smoke-agent`
+no longer lists `enroll-token`): the agent deletes it the moment it has a
+certificate. The device appears in the console's **Devices**, online.
+
+The packaged installers for real endpoints — the `.deb`, the macOS script, the
+Windows installer and the Group Policy MSI — are in
+[Publishing the agent to the console](#publishing-the-agent-to-the-console).
+⚠ **UNVERIFIED**: no Windows or macOS endpoint has been enrolled by anybody on
+this project; `docs/modules/agent-distribution/first-run-verification.md` is
+the procedure for that.
+
+##### 11d — Round-trip a signed job
+
+`first-boot-check.sh` reads the device's id from the agent's `msg=enrolled`
+line, says when to press the button, and asks every 3 s, for up to ten
+minutes (`--wait-job`), for the newest job a person asked for **on that
+device**, issued since its agent enrolled. Its row has four columns,
+`id|type|status|signed`, the job's id first, not the three of the query
+below. It goes on at `succeeded` and `t`; it stops at `failed`, `expired`,
+`refused` or `cancelled`; and at `succeeded` and `f` it stops at once with
+`INVARIANT 1 BROKEN`: a job that ran with no server signature, and a host not
+to be put in service ([First boot, 3](#3-first-boot-checksh)).
+
+In the console, on the device from 11c: **Run job → Collect inventory**. Its
+row in **Job history** reaches **Succeeded** within a minute. From inside the
+stack, the same fact for the job a person asked for (the platform also
+schedules an inventory of its own when a device first connects, so the query
+leaves that one out):
+
+```sh
+docker compose exec -T postgres psql -U its_admin -d itsuite -tAc "select type, status, signature is not null from jobs where requested_by is not null order by issued_at desc limit 1"
+```
+
+```
+inventory.collect|succeeded|t
+```
+
+That is the platform working: the server signed the job envelope with the
+Ed25519 key that never leaves OpenBao, the agent verified the signature before
+executing anything (there is no unsigned command path), and the result came
+back up the same mTLS connection.
+
+##### 11e — The audit chain
+
+From inside the stack, with no token (the same check `docs/07-backup-restore.md`
+runs after a restore):
+
+```sh
+docker compose exec -T api python - <<'EOF'
+import asyncio
+import json
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from app.core.audit import audit_service, load_audit_hmac_key
+from app.core.config import get_settings
+from app.models import Organization
+
+
+async def main() -> None:
+    settings = get_settings()
+    audit_service.set_hmac_key(load_audit_hmac_key(settings))
+    engine = create_async_engine(settings.database_admin_url)
+    try:
+        async with AsyncSession(engine) as session:
+            orgs = (await session.execute(select(Organization.id, Organization.slug))).all()
+            for org_id, slug in orgs:
+                r = await audit_service.verify(session, org_id)
+                broken = str(r.broken_at) if r.broken_at else None
+                print(slug, json.dumps({"ok": r.ok, "count": r.count, "broken_at": broken}))
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(main())
+EOF
+```
+
+```
+novieri {"ok": true, "count": …, "broken_at": null}
+```
+
+The console shows the same check for the signed-in person's organization:
+**Audit log → Verify chain**. `ok: true` over a chain that includes the
+enrollment, the dispatch and the result is the end-to-end proof.
+
+##### 11f — Retire the throwaway agent
+
+```sh
+docker rm -f smoke-agent
+rm -rf /tmp/smoke-agent
+```
+
+The second line removes the device's private key and certificate. The device
+stays in the console as a record, offline; remove it there if you do not want
+it listed.
+
+The MinIO bucket (`ITS_S3_BUCKET`) needs no provisioning step — `ObjectStore`
+creates it on first use.
+
+#### Step 12 — The first backup, so that there is a way back
+
+`first-boot-check.sh` skips it when the timer is installed and a backup
+exists already (`last-success`); otherwise it runs these four, and on a
+failure of the service shows its journal first. `journalctl` has `sudo`
+since 2026-11-27: an account made as in P1 is in neither `adm` nor
+`systemd-journal`, the groups that may read the system's journal.
+
+```sh
+sudo ./scripts/install-backup-timer.sh
+sudo systemctl start its-platform-backup.service
+sudo journalctl -u its-platform-backup.service --no-pager -n 20
+sudo cat /var/lib/it-suite/backup/last-success
+```
+
+The last line prints the time of the backup just taken. Its objects line says
+how many files the bucket held; if nothing has stored an object yet (the
+backup replicator creates the bucket within a minute of step 7), it says `the
+bucket it-suite does not exist yet (nothing has been stored): nothing to
+mirror`, and the backup still succeeds. From now on one runs
+every night at 02:30 ([Platform
+backups](#platform-backups-nightly-off-host-and-a-monthly-drill)). **Until this
+step, a new host has no way back at all**: `build-images.sh` listed one tag
+(step 1b), the one running. After it, the way back is restoring this backup
+([Rolling back a deployment](#rolling-back-a-deployment)).
+
+**That backup is on this VPS, and goes with it.** Losing the machine or its
+disk loses every backup with it, and on a new host restoring a backup is the
+only way back. Sending each night's backup somewhere else, encrypted, is
+**recommended before anything real is enrolled** — it is not part of First
+boot, because the destination and its key are things only you have: [The
+off-host copy, step by step](#the-off-host-copy-step-by-step).
+
+**The key material is not in that backup and goes off this host by hand, now**
+— the OpenBao shares and root token (step 3.2); the auto-unseal's key file,
+apart from any copy of `openbao-data`; the `openbao-data`, `its-secrets` and
+`its-ca` volumes; and `.env` — to a different place than the
+database backups: GO-LIVE.md §6 and `docs/07-backup-restore.md` §1-2. The
+`traefik-acme` volume is not key material: losing it costs one new certificate.

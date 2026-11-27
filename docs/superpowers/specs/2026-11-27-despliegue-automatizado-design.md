@@ -31,15 +31,20 @@ CI en cada cambio.
 
 ## 2. El recorrido del operador
 
+Las tres órdenes se lanzan desde `deploy/` de la copia que hace P6
+(`/opt/it-suite/deploy`), como `./scripts/…` (decisión del coordinador del
+2026-11-27, Task 6 del plan): es donde el runbook deja al operador tras P6, y
+donde corren los bloques del apéndice.
+
 0. **Antes** (operador): el VPS; la clave de despliegue en GitHub (P6); si el
    VPS no trae una cuenta con `sudo`, P1 a mano (cuatro líneas como `root`).
    El registro `A` lo crea el coordinador con el conector de Cloudflare cuando
    el operador le da la IPv4: enseña el cambio, lo aplica tras el «sí» del
    operador, `proxied: false`, ningún `AAAA`, y comprueba la respuesta en un DNS
    público.
-1. `sudo deploy/scripts/prepare-host.sh` — P2 a P5. Salir y volver a entrar
+1. `sudo ./scripts/prepare-host.sh` — P2 a P5. Salir y volver a entrar
    (grupo `docker`).
-2. `deploy/scripts/first-boot.sh` — pasos 1 a 7 del runbook y el desellado
+2. `./scripts/first-boot.sh` — pasos 1 a 7 del runbook y el desellado
    automático. Se para solo para:
    - la dirección de contacto de Let's Encrypt (la pregunta de `new-env.sh`);
    - **enseñar una vez** las cinco partes de OpenBao y el token raíz, y esperar
@@ -56,7 +61,7 @@ CI en cada cambio.
 3. **Navegador** (operador): reclamar la instalación con ese código, la
    contraseña, el segundo factor y los diez códigos de recuperación; el token
    de inscripción (11b).
-4. `deploy/scripts/first-boot-check.sh` — pasos 10, 11 y 12: pide el token de
+4. `./scripts/first-boot-check.sh` — pasos 10, 11 y 12: pide el token de
    inscripción (oculto), levanta el agente de prueba (11c), dice cuándo pulsar
    **Run job → Collect inventory** y espera el resultado (11d), verifica la
    cadena de auditoría (11e), retira el agente (11f) y hace la primera copia
@@ -87,10 +92,18 @@ los que ya hay (`new-env.sh`, `openbao-seal.sh`, `preflight.sh`): mensajes
   una terminal** (`[ -t 1 ]`); con la salida redirigida, el guion se niega antes
   de `bao operator init`, salvo en la CI (§5), que lo pide explícitamente.
 - **Errores.** Cada `die` dice qué falló y la orden para seguir.
+- **Desde `deploy/`.** Los tres se lanzan desde `deploy/` de la copia, como
+  `./scripts/…` (§2), y cada uno hace `cd` a `deploy/` por su propia ruta. Lo
+  que imprimen para seguir: `prepare-host.sh` se nombra por su ruta absoluta
+  (`sudo /opt/it-suite/deploy/scripts/prepare-host.sh`), que vale desde
+  cualquier carpeta; cada bloque `FAILED` de `first-boot.sh` empieza con un
+  `cd` absoluto a `deploy/`; y `first-boot-check.sh` da
+  `./scripts/first-boot-check.sh`, desde `deploy/`.
 
-**`prepare-host.sh`** (con `sudo`, desde la cuenta de operador): P2 cortafuegos,
-P3 actualizaciones, P4 reloj (activa NTP si hace falta), P5 Docker CE del
-repositorio de Docker, y el grupo `docker` para la cuenta que lo llama
+**`prepare-host.sh`** (con `sudo`, desde la cuenta de operador y desde
+`deploy/`): P2 cortafuegos, P3 actualizaciones, P4 reloj (activa NTP si hace
+falta), P5 Docker CE del repositorio de Docker, y el grupo `docker` para la
+cuenta que lo llama
 (`SUDO_USER`). No crea ninguna cuenta: P1 se hace a mano (§2, paso 0), y
 lanzado como `root` sin `sudo` se niega y lo dice (decisión del coordinador del
 2026-11-27, pregunta Q5 del plan). Termina comprobando las versiones mínimas
@@ -106,8 +119,8 @@ con entrada oculta; y si OpenBao está sellado y aún sin desellado automático,
 pide las tres partes. Desde el paso 4, OpenBao se desella solo, y un fallo se
 relanza sin partes. Nunca vuelve a inicializar un OpenBao ya inicializado.
 
-**`first-boot-check.sh`**: pasos 10 (las comprobaciones de API que no
-necesitan navegador), 11a, 11c a 11f y 12.
+**`first-boot-check.sh`** (la cuenta de operador, desde `deploy/`): pasos 10
+(las comprobaciones de API que no necesitan navegador), 11a, 11c a 11f y 12.
 
 ## 4. El desellado automático, siempre
 
@@ -156,6 +169,9 @@ necesitan navegador), 11a, 11c a 11f y 12.
   (`test_runbook_first_boot.py` y las demás) se adaptan sin debilitarse.
 - `deploy/GO-LIVE.md` §4: desellado automático por defecto, con la fecha de la
   decisión y la custodia del archivo de clave.
+- `docs/07-backup-restore.md`: la fila 5 de §1, §2.3, el paso 5 de §3 y §5, que
+  desellaban con partes; con el desellado automático las partes ya no desellan
+  (decisión del coordinador del 2026-11-27, pregunta Q7 del plan).
 - El informe de despliegue se rehace sobre el runbook nuevo (mismo
   `report_sequence.py`, adaptado si hace falta).
 
