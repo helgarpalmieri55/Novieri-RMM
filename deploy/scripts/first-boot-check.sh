@@ -40,6 +40,18 @@ case "$-" in
        exit 1 ;;
 esac
 
+# No name a caller exported in lowercase stays exported, as in first-boot.sh:
+# bash hands a child even a variable the script later assigns, if the
+# environment exported its name, so a caller exporting `token` would give the
+# enrollment token to `install` below. The proxy variables stay: docker reads
+# them. (tests/test_first_boot_check_script.py checks it, review N2.)
+while IFS= read -r name; do
+  case "$name" in
+    [a-z]*_proxy) ;;
+    [a-z]*) export -n "${name?}" ;;
+  esac
+done < <(compgen -e)
+
 if [ -t 1 ]; then bold=$'\033[1m'; plain=$'\033[0m'; else bold=""; plain=""; fi
 step="starting"
 say()  { step="$*"; printf '\n%s%s%s\n' "$bold" "$*" "$plain"; }
@@ -152,7 +164,8 @@ dc exec -T openbao bao status >/dev/null 2>&1 || rc=$?
 case "$rc" in
   0) ok "OpenBao answers, unsealed (bao status: Sealed false)" ;;
   2) die "OpenBao is sealed" "deploy/README.md, After a reboot or a restart: sudo ./scripts/openbao-seal.sh status" "then: ./scripts/first-boot-check.sh" ;;
-  *) die "OpenBao does not answer" "docker compose up -d && docker compose exec openbao bao status" "then: ./scripts/first-boot-check.sh" ;;
+  *) die "OpenBao does not answer" "docker compose exec openbao bao status" \
+         "what its answer means, and what to do: deploy/README.md, After a reboot or a restart; then: ./scripts/first-boot-check.sh" ;;
 esac
 
 # ------------------------------------------------------------ step 10
@@ -274,7 +287,13 @@ while :; do
   sleep 3
 done
 printf '        %s\n' "$row"
-ok "step 11d: signed by the server, verified by the agent before it ran, and its result back over :8443"
+# What this host can see is the row: a job a person asked for, its signature
+# on record, succeeded. An agent that never checked the signature leaves the
+# same row (review I-11d): the proof that it does is CI's, not this script's.
+ok "step 11d: a job you asked for, signed by the server (its signature is on record), ran on the agent, and its result came back over :8443"
+note "whether the agent checked that signature before it ran the job cannot be seen from this host:"
+note "CI's deploy job proves it on every push (7c-bis: the same agent code refuses a hello signed by a key it does not pin)."
+note "Deploy only a main commit whose deploy job is green."
 
 # ----------------------------------------------------------- step 11e
 

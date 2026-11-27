@@ -204,15 +204,25 @@ protected **at rest**, below.
 
 - **The 5 shares and the root token, OFF this host**, split across different
   custodians. `bao operator init` prints them **exactly once**. With the
-  auto-unseal they are **recovery keys**: they authorize `openbao-seal.sh
-  disable` and `bao operator generate-root`, and they **cannot unseal**
-  OpenBao.
+  auto-unseal the shares are **recovery keys**: they authorize `openbao-seal.sh
+  disable`, and, with the root token, `bao operator generate-root`: they are no
+  way back from a lost root token; they **cannot unseal** OpenBao. **The root
+  token's off-host copy is the only way back to root**: measured on OpenBao
+  2.6.1 (2026-11-27), `bao operator generate-root` with no token is refused
+  (`403`, `permission denied`), the old unauthenticated endpoint answers
+  `405`, and with the root token it asks for three shares. Whether that
+  unauthenticated endpoint is open is OpenBao's
+  `disable_unauthed_generate_root_endpoints` setting, which
+  `openbao/config.hcl` does not set: changing it is a security decision the
+  operator has not taken.
 - **The key file, `/etc/it-suite/openbao-unseal/unseal.key`** (mode `0400`,
-  owned by the OpenBao user): off this host, **apart from any copy of
-  `openbao-data`**. Whoever has both has the job-signing key and the CA. **If
-  it is lost, OpenBao cannot be unsealed at all**, by anyone: the shares do not
-  unseal it, and no copy of `openbao-data` taken since the auto-unseal went on
-  opens without it (`docs/07-backup-restore.md` §5).
+  owned by uid:gid `100:1000`, OpenBao's user in its image; `ls -l` shows
+  whatever names this host has for those numbers, or the numbers): off this
+  host, **apart from any copy of `openbao-data`**. Whoever has both has the
+  job-signing key and the CA. **If it is lost, OpenBao cannot be unsealed at
+  all**, by anyone: the shares do not unseal it, and no copy of `openbao-data`
+  taken since the auto-unseal went on opens without it
+  (`docs/07-backup-restore.md` §5).
 - **After a reboot OpenBao unseals itself.** `docker compose exec openbao bao
   status` says `Sealed false` and `Seal Type static`; `Sealed true`, or an
   `openbao` that does not start, means the key file is missing or not its own,
@@ -253,7 +263,11 @@ protected **at rest**, below.
   writes the key to `/etc/it-suite/openbao-unseal/unseal.key` (or
   `--key-file`), adds `COMPOSE_FILE` and `OPENBAO_UNSEAL_KEY_FILE` to `.env`,
   and finishes by restarting OpenBao and checking it unsealed with no shares.
-  That snapshot is Shamir-sealed: delete it once you are satisfied.
+  That snapshot is Shamir-sealed, and three shares should open it (not
+  rehearsed): keep it until the
+  off-host copy of the key file has been compared with this host's
+  (`sha256sum`, on both), since until then it may be the one copy of this
+  vault that does not need the key file; then delete it.
 - **The host must not swap, or must swap to an encrypted device.** OpenBao 2.x
   dropped `mlock` entirely, so the process cannot pin its own memory.
 - **Rotate `ITS_OPENBAO_TOKEN` on a schedule.** It is created with a 10-year

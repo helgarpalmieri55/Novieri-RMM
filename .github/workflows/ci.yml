@@ -376,8 +376,9 @@ jobs:
     # before stays: the certificate by ACME from Pebble, the 503 with the api
     # stopped, the compiled agent enrolled over :443 and connected over :8443
     # running a signed `hello`, the audit chain, app_user's privileges, the
-    # backup and the restore. And two are new: OpenBao unseals itself after a
-    # restart, and first-boot.sh run again changes nothing.
+    # backup and the restore. And three are new: OpenBao unseals itself after a
+    # restart, first-boot.sh run again changes nothing, and (7c-bis) the same
+    # agent, pinning a key the server does not hold, refuses a signed hello.
     #
     # It exists because the test suite provisions app_user's privileges itself
     # (backend/tests/conftest.py::_run_migrations), so the backend job above

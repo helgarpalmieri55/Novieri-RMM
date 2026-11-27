@@ -131,8 +131,11 @@ relanza sin partes. Nunca vuelve a inicializar un OpenBao ya inicializado.
   (debe decir `Sealed false` solo); si dice `Sealed true`, el archivo de clave
   falta o está mal, y el runbook dice cómo seguir.
 - Las cinco partes pasan a ser **claves de recuperación**: autorizan
-  `openbao-seal.sh disable` y `bao operator generate-root`, no desellan. El
-  runbook y GO-LIVE §4 lo dicen.
+  `openbao-seal.sh disable` y, **junto con el token raíz**, `bao operator
+  generate-root`; no desellan, y no sirven para recuperar un token raíz
+  perdido. Medido el 2026-11-27 con OpenBao 2.6.1: sin token, `generate-root`
+  responde `403 permission denied`. Por eso la copia del token raíz fuera del
+  VPS es la única vuelta a root. El runbook y GO-LIVE §4 lo dicen.
 - La decisión del operador queda en GO-LIVE §4 con fecha, y en
   `.git/sdd/decisiones-p34.md` de la sesión.
 - Sin cambio en las invariantes de `CLAUDE.md`: los trabajos siguen firmados y

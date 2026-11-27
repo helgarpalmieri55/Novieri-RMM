@@ -56,7 +56,7 @@ esac
     "apt-get": r"""#!/bin/sh
 echo "apt-get $*" >> "$STUB_LOG"
 case "$*" in
-  "update") [ -z "$FAKE_APT_UPDATE_RC" ] || exit "$FAKE_APT_UPDATE_RC" ;;
+  update|*" update") [ -z "$FAKE_APT_UPDATE_RC" ] || exit "$FAKE_APT_UPDATE_RC" ;;
   *"install -y unattended-upgrades"*) touch "$STUB_STATE/pkg-unattended-upgrades" ;;
   *"install -y docker-ce "*) touch "$STUB_STATE/pkg-docker-ce" ;;
 esac
@@ -122,18 +122,19 @@ FIRST_RUN = [
     "ufw allow 443/tcp",
     "ufw allow 8443/tcp",
     "ufw --force enable",
-    "apt-get update",
-    "apt-get install -y unattended-upgrades",
+    "apt-get -o DPkg::Lock::Timeout=300 update",
+    "apt-get -o DPkg::Lock::Timeout=300 install -y unattended-upgrades",
     "tee /etc/apt/apt.conf.d/20auto-upgrades",
     "timedatectl set-ntp true",
-    "apt-get remove -y docker.io",
-    "apt-get install -y ca-certificates curl git openssl iproute2",
+    "apt-get -o DPkg::Lock::Timeout=300 remove -y docker.io",
+    "apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl git openssl iproute2",
     "install -m 0755 -d /etc/apt/keyrings",
     "curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc",
     "chmod a+r /etc/apt/keyrings/docker.asc",
     "tee /etc/apt/sources.list.d/docker.sources",
-    "apt-get update",
-    "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin"
+    "apt-get -o DPkg::Lock::Timeout=300 update",
+    "apt-get -o DPkg::Lock::Timeout=300 install -y docker-ce docker-ce-cli containerd.io"
+    " docker-buildx-plugin"
     " docker-compose-plugin",
     "usermod -aG docker rmmadmin",
 ]
@@ -242,7 +243,7 @@ def test_a_clock_that_never_synchronises_stops_the_run(tmp_path: Path) -> None:
     done = box.run(FAKE_NEVER_SYNC="1")
     assert done.returncode == 1
     assert "the clock is not synchronised after 120 s" in done.stderr
-    assert not any(c.startswith("apt-get install -y docker-ce ") for c in box.calls())
+    assert not any(c.startswith(LOCK + "install -y docker-ce ") for c in box.calls())
 
 
 def test_it_refuses_to_run_as_anyone_but_root(tmp_path: Path) -> None:
@@ -304,7 +305,7 @@ def test_ubuntus_own_docker_is_replaced_not_kept(tmp_path: Path) -> None:
     box = Box(tmp_path)
     done = box.run(FAKE_OLD_ENGINE="1", FAKE_ENGINE="26.1.3")
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "apt-get remove -y docker.io" in box.changes()
+    assert LOCK + "remove -y docker.io" in box.changes()
 
 
 def test_an_extra_open_port_is_warned_about(tmp_path: Path) -> None:
@@ -375,9 +376,27 @@ def test_p3_is_not_skipped_when_the_package_is_missing(tmp_path: Path) -> None:
     )
     done = box.run()
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "apt-get install -y unattended-upgrades" in box.changes()
+    assert LOCK + "install -y unattended-upgrades" in box.changes()
 
 
 def test_the_os_release_switch_says_it_was_used(tmp_path: Path) -> None:
     done = Box(tmp_path).run()
     assert "ITS_OS_RELEASE is set" in done.stdout
+
+
+#: Review N6 (2026-11-27): cloud-init or unattended-upgrades may hold dpkg's lock
+#: on a VPS minutes old; each apt-get waits up to 300 s for it.
+LOCK = "apt-get -o DPkg::Lock::Timeout=300 "
+
+
+def test_every_apt_get_waits_for_the_lock_instead_of_stopping(tmp_path: Path) -> None:
+    code = [line.strip() for line in SCRIPT.read_text().splitlines()
+            if not line.lstrip().startswith("#")]  # fmt: skip
+    calls = [line for line in code if line.startswith("apt-get")]
+    assert len(calls) == 6, calls
+    assert all(line.startswith(LOCK) for line in calls), calls
+    box = Box(tmp_path)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    apt = [c for c in box.calls() if c.startswith("apt-get")]
+    assert len(apt) == 6 and all(c.startswith(LOCK) for c in apt), apt
