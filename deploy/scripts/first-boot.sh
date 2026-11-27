@@ -42,7 +42,10 @@
 #
 # WHEN IT FAILS it prints FAILED, what failed, and the commands to go on with,
 # each on its own line and starting with a `cd` to deploy/, so they can be
-# pasted from any folder.
+# pasted from any folder; what is not a command is a `#` comment. Where there
+# are two ways on, each is a block of its own, after a line that says to run
+# ONE of them; and no line comes after one that asks for a password or a
+# share, so a block pasted whole never types into a prompt.
 #
 # Options: --host NAME (a new .env only; default rmm.novieri.com),
 # --acme-email ADDRESS and --acme-ca-server URL (passed to new-env.sh),
@@ -85,23 +88,50 @@ deploy_dir="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 printf -v deploy_q '%q' "$deploy_dir"
 rerun="./scripts/first-boot.sh"
 
-# die WHAT [LINE...]: what failed, then what to do. A LINE is a command, at
-# the eight-space indent, for the operator to paste as it stands; or, when it
-# starts with "# ", prose, at two spaces and without the "# ". The first
-# command is preceded by the `cd` to deploy/.
-die() {
-  trap - EXIT   # this is the report: the exit trap must not print a second one
+# report WHAT [LINE...] [--or LINE...]...: what failed, then what to do, on
+# stderr. A LINE is a command, at the eight-space indent, to paste as it
+# stands; or, when it starts with "# ", prose, printed as that shell comment,
+# so that a block pasted whole runs none of it. Each way on starts with the
+# `cd` to deploy/. With --or between them the ways on are alternatives: each
+# is a block of its own, after a line that says to run ONE of them. In a way
+# on, a line that may read the terminal (sudo, a hidden prompt, this script)
+# is the last: pasted whole, nothing after it is typed into its prompt.
+# (tests/first_boot_support.py, failed_block_problems, checks all of it.)
+report() {
+  local line ways=1 cd_said=no
   printf '\nFAILED  %s\n' "$1" >&2
   shift
-  local line cd_said=no
+  for line in "$@"; do [ "$line" != --or ] || ways=$((ways + 1)); done
+  if [ "$ways" -gt 1 ]; then
+    printf '  # run ONE of the following, never more than one: each block below is one whole way on, to paste on its own\n\n' >&2
+  fi
   for line in "$@"; do
     case "$line" in
-      "# "*) printf '  %s\n' "${line#\# }" >&2 ;;
+      --or) printf '\n' >&2; cd_said=no ;;
+      "# "*) printf '  %s\n' "$line" >&2 ;;
       *) if [ "$cd_said" = no ]; then printf '        cd %s\n' "$deploy_q" >&2; cd_said=yes; fi
          printf '        %s\n' "$line" >&2 ;;
     esac
   done
+}
+die() {
+  trap - EXIT   # this is the report: the exit trap must not print a second one
+  report "$@"
   exit 1
+}
+# The SAVED prompt is the one moment the five shares and the root token are on
+# the screen and nowhere else. Whatever stops the run there -- the input
+# ending, Ctrl-C, a TERM, the terminal hanging up -- says so, before anything
+# clears the screen, and how to go on either way.
+at_saved=no
+custody_lost() {
+  printf '\n' >&2   # off the prompt's line
+  warn "the five shares and the root token on this screen are their only copy: copy them off this VPS before anything clears it"
+  die "$1: OpenBao is initialised already, and the five shares and the root token on this screen are their only copy" \
+      "# they are stored off this VPS: run it again, and it asks for the root token and three shares" "$rerun" \
+      --or \
+      "# they are not, and cannot be any more: three lost shares are a vault nobody can open, and on a first boot nothing is in it yet, so this host starts from zero" \
+      "${start_from_zero[@]}"
 }
 # Anything that stops the run outside `die` -- a command that fails where no
 # check waits for it, Ctrl-C -- ends here: FAILED, the step, and the way on.
@@ -109,14 +139,14 @@ on_exit() {
   local rc="$1"
   trap - EXIT
   [ "$rc" != 0 ] || return 0
-  printf '\nFAILED  %s: a command failed (exit %s); what it printed is above, and running it again goes on from what is done\n' "$step" "$rc" >&2
-  printf '        cd %s\n' "$deploy_q" >&2
-  printf '        %s\n' "$rerun" >&2
+  [ "$at_saved" != yes ] || custody_lost "stopped at the SAVED prompt (exit $rc), before the screen was cleared"
+  report "$step: a command failed (exit $rc); what it printed is above, and running it again goes on from what is done" "$rerun"
   exit 1
 }
 trap 'on_exit $?' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 host="" email="" ca_server="" tls_cafile=""
 while [ $# -gt 0 ]; do
@@ -150,10 +180,12 @@ token_file="$etc_dir/gateway-issuer.token"
 key_file="$etc_dir/openbao-unseal/unseal.key"
 printf -v token_file_q '%q' "$token_file"
 printf -v key_file_q '%q' "$key_file"
-seal_status="sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh status"
+# A FAILED block names openbao-seal.sh's view in prose: as a command line it
+# would ask sudo for a password, and so be the last line of its block.
+seal_status_note="# what openbao-seal.sh sees: sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh status"
 command -v docker >/dev/null 2>&1 || die "docker is not on PATH" \
-  "# prepare-host.sh installs Docker and puts you in the docker group, which applies from your next login:" \
-  "sudo ./scripts/prepare-host.sh" "# then log out, log in again, and run:" "$rerun"
+  "# prepare-host.sh installs Docker and puts you in the docker group, which applies from your next login: run it, log out, log in again, and run ./scripts/first-boot.sh again" \
+  "sudo ./scripts/prepare-host.sh"
 
 # ------------------------------------------------------------- helpers
 
@@ -300,14 +332,14 @@ show_shares() {
 
 confirm_saved() {
   local answer=""
+  at_saved=yes
   while :; do
     read -r -p "Type SAVED once the five shares and the root token are stored off this VPS: " answer \
-      || die "the input ended before SAVED" \
-             "# OpenBao is initialised and its shares were printed above, once: copy them off this VPS now." \
-             "# Run again, it asks for the root token and three shares:" "$rerun"
+      || custody_lost "the input ended before SAVED"
     [ "$answer" = SAVED ] && break
     note "type SAVED, in capitals, to go on"
   done
+  at_saved=no
   # The screen and its scrollback: the shares stay only where you copied them.
   if [ -t 1 ]; then printf '\033[H\033[2J\033[3J'; fi
   ok "step 3.2: the shares and the root token are in your custody"
@@ -330,7 +362,8 @@ read_share() {
     if [ "${#shares[@]}" = 5 ] && ! is_one_of "$share" "${shares[@]}"; then
       wrong=$((wrong + 1))
       [ "$wrong" -lt 3 ] || die "three times not one of the five shares printed above" \
-        "# check your copies against what you stored, then run it again:" "$rerun"
+        "# your copies are not what was printed: check them against what you stored, then run it again" "$rerun" \
+        "${lost_shares[@]}"
       note "that is not one of the five shares printed above: check your copy"; continue
     fi
     return 0
@@ -355,19 +388,23 @@ not_answering() {
 
 # unseal_with_three OK: up to three rounds of three shares, each round from
 # a clean start; OK is the line a round that unseals OpenBao prints. The three
-# that did are kept in $typed: openbao-seal.sh needs three good ones.
+# of a round are all typed before any is submitted; three already in $typed
+# are the first round's. The three that unseal it stay in $typed:
+# openbao-seal.sh needs three good ones.
 unseal_with_three() {
-  local said="$1" round n
+  local said="$1" round n held=no
+  [ "${#typed[@]}" != 3 ] || held=yes
   for round in 1 2 3; do
     bao_state
     [ "$bao_up" = yes ] || not_answering "before round $round of the unseal"
-    typed=()
+    if [ "$held" = yes ]; then
+      held=no
+    else
+      typed=()
+      for n in 1 2 3; do read_share "$n"; typed+=("$share"); done
+    fi
     reset_unseal
-    for n in 1 2 3; do
-      read_share "$n"
-      typed+=("$share")
-      submit_share "$share"
-    done
+    for share in "${typed[@]}"; do submit_share "$share"; done
     share=""
     bao_state
     [ "$bao_up" = yes ] || not_answering "while it was being unsealed"
@@ -379,7 +416,8 @@ unseal_with_three() {
   done
   typed=()
   die "OpenBao is still sealed after three rounds of three shares" \
-      "# check the copies with their custodians, then run it again:" "$rerun"
+      "# the copies are wrong: check them with their custodians, then run it again" "$rerun" \
+      "${lost_shares[@]}"
 }
 
 read_root_token() {
@@ -396,11 +434,18 @@ read_root_token() {
 # What an earlier first boot leaves outside deploy/: its gateway-issuer token,
 # which no new OpenBao knows, and its auto-unseal key, which openbao-seal.sh
 # would reuse for the new one (it keeps any 32-byte key it finds).
+# The removal runs the script again on the same line: sudo may ask for a
+# password, so nothing can come after it in a block.
 earlier_files=(
-  "# with them the earlier first boot's gateway-issuer token and auto-unseal key go too; keep that key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one:"
-  "sudo rm -f $token_file_q $key_file_q")
-start_from_zero=("# to start from zero, which DESTROYS this stack's volumes and everything in them:"
-                 "docker compose down -v && rm .env" "${earlier_files[@]}" "$rerun")
+  "# with them the earlier first boot's gateway-issuer token and auto-unseal key go too; keep that key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one"
+  "sudo rm -f $token_file_q $key_file_q && $rerun")
+start_from_zero=("# to start from zero, which DESTROYS this stack's volumes and everything in them"
+                 "docker compose down -v && rm .env" "${earlier_files[@]}")
+# The other way on when shares do not unseal: lost, they are a vault nobody
+# can open, and on a first boot there is nothing in it yet.
+lost_shares=(--or
+  "# the shares are lost: OpenBao cannot be opened without three of them, ever; on a first boot nothing is stored in it yet, and this host starts from zero"
+  "${start_from_zero[@]}")
 
 # A seal migration openbao-seal.sh enable left half-way: it writes the overlay
 # into .env and recreates OpenBao in seal-migration mode BEFORE it reads a
@@ -408,18 +453,15 @@ start_from_zero=("# to start from zero, which DESTROYS this stack's volumes and 
 # it did not just write). The way back is its own recover_help's.
 pending_migration() {
   die "OpenBao is half-way through the seal migration openbao-seal.sh enable started: .env has the auto-unseal overlay, and OpenBao (seal ${bao_type:-unknown}, migration ${bao_migration:-not said}) still waits for three shares to move to its static key. The key file is not the problem." \
-    "# to finish the migration, three shares, one at each prompt (hidden), then the restart that proves it:" \
-    "docker compose exec openbao bao operator unseal -migrate" \
-    "docker compose exec openbao bao operator unseal -migrate" \
-    "docker compose exec openbao bao operator unseal -migrate" \
-    "docker compose restart openbao" \
-    "$rerun" \
-    "# or to undo it, back to the shares alone (the next run proves three and moves the seal again):" \
+    "# to finish the migration: the line below runs three prompts in turn, and each asks for one share (hidden); then it restarts OpenBao, which proves it unseals itself, and runs this again. Paste it on its own; if a share was wrong, paste it again" \
+    "# afterwards, as openbao-seal.sh says when it finishes one itself: copy $key_file OFF this host, stored apart from any openbao-data backup; keep the five shares, which are recovery keys now; and delete its Shamir-sealed snapshot under /var/backups/it-suite/openbao-seal/ once you are satisfied" \
+    "$seal_status_note" \
+    "for n in 1 2 3; do docker compose exec openbao bao operator unseal -migrate; done && docker compose restart openbao && $rerun" \
+    --or \
+    "# to undo it, back to the shares alone, as openbao-seal.sh's own way back does; the run after it proves three shares and moves the seal again" \
     "sed -i '/^COMPOSE_FILE=/d;/^OPENBAO_UNSEAL_KEY_FILE=/d;/^OPENBAO_SEAL_STANZA=/d' .env" \
     "docker compose up -d --no-deps openbao" \
-    "$rerun" \
-    "# what openbao-seal.sh sees:" \
-    "$seal_status"
+    "$rerun"
 }
 
 # --------------------------------------------------------------- steps
@@ -440,20 +482,21 @@ check_state_before_anything() {
   volumes="${volumes//$'\n'/ }"
   if [ -n "${volumes// /}" ]; then
     die "mixed state: this host has the volumes of an earlier first boot (${volumes% }) but no .env, and a new .env would not open them" \
-        "# if that first boot's .env is in its off-host custody, copy it back to $deploy_dir/.env and run:" \
+        "# that first boot's .env is in its off-host custody: copy it back to $deploy_dir/.env, then" \
         "chmod 600 .env" "$rerun" \
-        "# to start from zero instead, which DESTROYS those volumes and everything in them:" \
+        --or \
+        "# it is not: start from zero, which DESTROYS those volumes and everything in them" \
         "docker ps -aq --filter label=com.docker.compose.project=it-suite | xargs -r docker rm -f" \
         "docker volume ls -q --filter label=com.docker.compose.project=it-suite | xargs -r docker volume rm" \
-        "${earlier_files[@]}" "$rerun"
+        "${earlier_files[@]}"
   fi
   for f in "$token_file" "$key_file"; do
     if sudo test -e "$f"; then found+=("$(printf '%q' "$f")"); fi
   done
   if [ "${#found[@]}" -gt 0 ]; then
     die "mixed state: no .env and no it-suite volume, but this host keeps files of an earlier first boot (${found[*]}): no OpenBao here knows them" \
-        "# the gateway-issuer token is of an OpenBao that is gone; keep the auto-unseal key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one:" \
-        "sudo rm -f ${found[*]}" "$rerun"
+        "# no OpenBao on this host knows them, and the new first boot makes its own; keep an auto-unseal key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one" \
+        "sudo rm -f ${found[*]} && $rerun"
   fi
   ok "no .env, no it-suite volume and no file of an earlier first boot: a new host"
 }
@@ -465,8 +508,8 @@ step_1() {
     in_env="$(env_get ITS_PUBLIC_HOST)"
     if [ -n "$host" ] && [ "$host" != "$in_env" ]; then
       die "--host $host, but .env is for ${in_env:-no host}" \
-          "# .env decides the host once it exists; run it without --host:" \
-          "./scripts/first-boot.sh$rerun_kept" "${start_from_zero[@]}"
+          "# .env decides the host once it exists: run it without --host" \
+          "./scripts/first-boot.sh$rerun_kept" --or "${start_from_zero[@]}"
     fi
     host="$in_env"
     [ -n "$host" ] || die ".env has no ITS_PUBLIC_HOST" "${start_from_zero[@]}"
@@ -530,7 +573,9 @@ step_3_1() {
     if ! dc up -d openbao; then
       if auto_unseal_on; then
         die "docker compose up -d openbao failed (above): with the auto-unseal on, its key file ($key_file) is the first suspect" \
-            "$seal_status" "docker compose logs --tail 50 openbao" "$rerun"
+            "$seal_status_note" \
+            "# deploy/README.md, After a reboot or a restart, says how to put the key file back; then run it again" \
+            "docker compose logs --tail 50 openbao" "$rerun"
       fi
       die "docker compose up -d openbao failed (above)" "docker compose logs --tail 50 openbao" "$rerun"
     fi
@@ -590,9 +635,9 @@ step_3_3() {
   elif auto_unseal_on; then
     note "the auto-unseal is on: waiting for OpenBao to unseal itself"
     wait_unsealed || die "OpenBao is sealed although the auto-unseal is on, with its static key: its key file is missing or wrong" \
-      "$seal_status" "docker compose logs --tail 50 openbao" \
-      "# deploy/README.md, After a reboot or a restart, says how to put the key file back; then run it again:" \
-      "$rerun"
+      "$seal_status_note" \
+      "# deploy/README.md, After a reboot or a restart, says how to put the key file back; then run it again" \
+      "docker compose logs --tail 50 openbao" "$rerun"
     ok "step 3.3: OpenBao unsealed itself (seal $bao_type)"
   else
     unseal_with_three "step 3.3: OpenBao is unsealed: three shares, and your copies of them are good"
@@ -617,7 +662,7 @@ step_3_4() {
   if sudo test -s "$token_file"; then
     sudo cat "$token_file" | token_has gateway-issuer \
       || die "mixed state: $token_file holds a token this OpenBao does not know, or not a gateway-issuer one: it is from another first boot" \
-             "# this OpenBao issues a new one once the file is gone:" "sudo rm -f $token_file_q" "$rerun"
+             "# this OpenBao issues a new one once the file is gone" "sudo rm -f $token_file_q && $rerun"
     need_gw=no
   fi
   if [ "$need_app" = no ] && [ "$need_gw" = no ] && env_token_set OPENBAO_TOKEN; then
@@ -645,8 +690,8 @@ step_3_4() {
     printf '%s\n' "$gw" | sudo tee "$token_file" >/dev/null || die "$token_file could not be written (above)" "$rerun"
     gw=""
     sudo cat "$token_file" | token_has gateway-issuer \
-      || die "$token_file does not hold the gateway-issuer token just issued" "sudo rm -f $token_file_q" "$rerun"
-    [ "$(sudo stat -c %a "$token_file")" = 600 ] || die "$token_file is not mode 600" "sudo chmod 600 $token_file_q" "$rerun"
+      || die "$token_file does not hold the gateway-issuer token just issued" "sudo rm -f $token_file_q && $rerun"
+    [ "$(sudo stat -c %a "$token_file")" = 600 ] || die "$token_file is not mode 600" "sudo chmod 600 $token_file_q && $rerun"
     ok "step 3.4: $token_file (mode 600, written with sudo) holds this OpenBao's gateway-issuer token"
   fi
   if [ "$need_app" = yes ]; then
@@ -660,8 +705,9 @@ step_3_4() {
     env_put OPENBAO_TOKEN "$root"
   fi
   [ "$(grep -c 'change-me' .env || true)" = 0 ] || die ".env still has a change-me value" "grep -n change-me .env" "$rerun"
-  if ! { env_get ITS_OPENBAO_TOKEN | token_has its-app && is_root_token "$(env_get OPENBAO_TOKEN)" \
-         && [ "$(env_get ITS_OPENBAO_TOKEN)" != "$(env_get OPENBAO_TOKEN)" ]; }; then
+  # Two different values, as the ok line says, follow from these two checks:
+  # a root token's policies are exactly "root", and that is not its-app.
+  if ! { env_get ITS_OPENBAO_TOKEN | token_has its-app && is_root_token "$(env_get OPENBAO_TOKEN)"; }; then
     die "ITS_OPENBAO_TOKEN and OPENBAO_TOKEN in .env are not this OpenBao's its-app and root tokens, two different values" "${start_from_zero[@]}"
   fi
   ok "step 3.5: ITS_OPENBAO_TOKEN (its-app) and OPENBAO_TOKEN (root) are in .env, two different values"
@@ -684,6 +730,7 @@ step_3_6() {
 enabled_now=no
 auto_unseal() {
   say "OpenBao's auto-unseal, with a static key (GO-LIVE.md §4; decided 2026-11-27)"
+  local n answer
   bao_state
   if auto_unseal_on && [ "$bao_type" = static ] && [ "$bao_sealed" = false ]; then
     skip "auto-unseal: on, and OpenBao is unsealed with its static key"
@@ -691,17 +738,30 @@ auto_unseal() {
   fi
   if [ "$bao_type" != shamir ] || [ "$bao_sealed" != false ]; then
     die "OpenBao reports seal ${bao_type:-unknown}, sealed ${bao_sealed:-unknown}: openbao-seal.sh enable needs it unsealed, with shares" \
-        "$seal_status" "$rerun"
+        "$seal_status_note" "$rerun"
   fi
   # The three must be good BEFORE openbao-seal.sh gets them: it writes .env
   # and recreates OpenBao in seal-migration mode first, and a wrong one then
   # stops it half-way (review I2). Three that unsealed OpenBao in this run
   # are; three typed now are proved the same way: OpenBao sealed again with
-  # the root token, and unsealed with them, three rounds at most.
+  # the root token, and unsealed with them, three rounds at most. The three
+  # are typed, and the seal confirmed, BEFORE it (review m1): without the
+  # shares at hand, the operator stops at a prompt and nothing has changed.
   if [ "${#typed[@]}" != 3 ]; then
     note "openbao-seal.sh needs three shares to move the seal, and this run holds none: type them"
-    note "they are proved first: the root token seals OpenBao again, and the three you type unseal it, so a wrong one is asked again here, never inside the seal migration"
+    note "they are proved first: once the three are typed and you confirm, the root token seals OpenBao and the three unseal it, so a wrong one is asked again here, never inside the seal migration. OpenBao stays sealed until three good shares unseal it: without them at hand, stop at the first prompt (Ctrl-C), and nothing changes"
     [ -n "$root" ] || read_root_token
+    typed=()
+    for n in 1 2 3; do read_share "$n"; typed+=("$share"); done
+    share=""
+    answer=""
+    read -r -p "OpenBao is sealed next, and only three good shares unseal it: type SEAL to seal it now and unseal it with these three (anything else stops here, and nothing changes): " answer \
+      || answer=""
+    if [ "$answer" != SEAL ]; then
+      typed=()
+      die "stopped before the seal, as asked: nothing was changed, and OpenBao is unsealed as it was" \
+          "# run it again with three shares at hand" "$rerun"
+    fi
     act "bao operator seal, with the root token on its stdin"
     bao_with "$root" bao operator seal >/dev/null || die "bao operator seal failed (above)" "docker compose logs --tail 50 openbao" "$rerun"
     bao_state
@@ -713,10 +773,10 @@ auto_unseal() {
   # one would win over it and recreate OpenBao without the seal it migrates to.
   printf '%s\n' "${typed[@]}" | sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file "$key_file" --yes \
     || die "openbao-seal.sh enable failed (above, with its way back)" \
-           "# run again: if it stopped half-way through the seal migration, step 3.3 says how to finish it or undo it" \
-           "$seal_status" "$rerun"
+           "# run it again: if openbao-seal.sh stopped half-way through the seal migration, step 3.3 says how to finish it or undo it" \
+           "$seal_status_note" "$rerun"
   typed=()
-  auto_unseal_on || die "openbao-seal.sh enable did not put the auto-unseal overlay into .env" "$seal_status" "$rerun"
+  auto_unseal_on || die "openbao-seal.sh enable did not put the auto-unseal overlay into .env" "$seal_status_note" "$rerun"
   follow_auto_unseal
   enabled_now=yes
 }
@@ -730,8 +790,8 @@ restart_proof() {
   act "docker compose restart openbao"
   dc restart openbao || die "docker compose restart openbao failed (above)" "docker compose logs --tail 50 openbao" "$rerun"
   wait_unsealed || die "OpenBao came back sealed after a restart: the auto-unseal does not work" \
-    "$seal_status" "docker compose logs --tail 50 openbao" "$rerun"
-  [ "$bao_type" = static ] || die "OpenBao unsealed, but its seal is $bao_type, not static" "$seal_status" "$rerun"
+    "$seal_status_note" "docker compose logs --tail 50 openbao" "$rerun"
+  [ "$bao_type" = static ] || die "OpenBao unsealed, but its seal is $bao_type, not static" "$seal_status_note" "$rerun"
   ok "OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed"
 }
 

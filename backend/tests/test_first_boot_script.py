@@ -18,21 +18,27 @@ every FAILED block (checked by `Host.run` on every run) is one block whose
 command lines can be pasted.
 """
 
+import os
 import re
 import shlex
+import signal
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from tests.first_boot_support import SCRIPT, Host, lines
+from tests.first_boot_support import SCRIPT, Host, failed_block_problems, lines
 
 ALLOW = {"ITS_FIRST_BOOT_ALLOW_NONTTY": "1"}
 RESTART_SKIP = "the restart that proves it"
 SAVED_PROMPT = "Type SAVED once the five shares and the root token are stored off this VPS: "
 ROOT_PROMPT = "OpenBao root token, printed by step 3.2 (hidden): "
 CLEAR = "\x1b[H\x1b[2J\x1b[3J"
+SEAL_PROMPT = (
+    "OpenBao is sealed next, and only three good shares unseal it: type SEAL to seal it now "
+    "and unseal it with these three (anything else stops here, and nothing changes): "
+)
 
 
 def _saved_and_three(host: Host, picks: tuple[int, ...] = (1, 3, 4)) -> str:
@@ -74,8 +80,20 @@ def _code() -> str:
 
 def _recipe_removes_the_earlier_boots_files(host: Host, stderr: str) -> None:
     token, key = host.etc / "gateway-issuer.token", host.etc / "openbao-unseal" / "unseal.key"
-    assert f"        sudo rm -f {token} {key}" in stderr.splitlines(), stderr
+    assert f"        sudo rm -f {token} {key} && ./scripts/first-boot.sh" in stderr.splitlines()
     assert "openbao-seal.sh would reuse it" in stderr
+
+
+def _ways(stderr: str) -> list[list[str]]:
+    """The FAILED block's lines, split at its blank lines."""
+    block = stderr[stderr.index("FAILED  ") :].splitlines()[1:]
+    ways: list[list[str]] = [[]]
+    for line in block:
+        if line.strip():
+            ways[-1].append(line)
+        else:
+            ways.append([])
+    return [w for w in ways if w]
 
 
 def test_the_script_parses() -> None:
@@ -349,7 +367,8 @@ def test_a_token_file_left_by_an_earlier_first_boot_is_refused_on_a_new_host(
     done = host.run(stdin=_saved_and_three(host), env=ALLOW)
     assert done.returncode == 1
     assert "mixed state: no .env and no it-suite volume, but this host keeps" in done.stderr
-    assert f"        sudo rm -f {host.etc}/gateway-issuer.token" in done.stderr.splitlines()
+    removal = f"        sudo rm -f {host.etc}/gateway-issuer.token && ./scripts/first-boot.sh"
+    assert removal in done.stderr.splitlines()
     assert "new-env.sh" not in host.argv() and host.state["bao"]["init"] is False
     assert host.state["bao"]["tokens"] == {}
 
@@ -380,7 +399,8 @@ def test_a_token_file_this_openbao_does_not_know_is_refused(tmp_path: Path) -> N
     done = host.run()
     assert done.returncode == 1
     assert "gateway-issuer.token holds a token this OpenBao does not know" in done.stderr
-    assert f"        sudo rm -f {host.etc}/gateway-issuer.token" in done.stderr.splitlines()
+    removal = f"        sudo rm -f {host.etc}/gateway-issuer.token && ./scripts/first-boot.sh"
+    assert removal in done.stderr.splitlines()
 
 
 def test_tokens_in_env_and_an_openbao_never_initialised_are_a_mixed_state(tmp_path: Path) -> None:
@@ -497,7 +517,8 @@ def test_a_run_after_a_failed_auto_unseal_asks_for_three_shares(tmp_path: Path) 
     first = host.run(stdin=_saved_and_three(host), env={**ALLOW, "FAKE_SEAL_FAIL": "1"})
     assert first.returncode == 1 and "openbao-seal.sh enable failed" in first.stderr
     shares = host.secrets["shares"]
-    again = host.run(stdin="".join(s + "\n" for s in (shares[0], shares[2], shares[4])))
+    held = "".join(s + "\n" for s in (shares[0], shares[2], shares[4]))
+    again = host.run(stdin=held + "SEAL\n")
     assert again.returncode == 0, again.stdout + again.stderr
     assert "this run holds none: type them" in again.stdout
     assert host.state["seal_stdin"] == 3 and host.state["bao"]["type"] == "static"
@@ -519,7 +540,7 @@ def test_shares_typed_on_a_rerun_are_proved_before_openbao_seal_sh_gets_them(
     assert first.returncode == 1 and "openbao-init exited 1" in first.stderr
     host.state["oneshot_exit"] = {}
     shares = host.secrets["shares"]
-    typed = ("a-typo", shares[0], shares[1], shares[0], shares[1], shares[2])
+    typed = ("a-typo", shares[0], shares[1], "SEAL", shares[0], shares[1], shares[2])
     again = host.run(stdin="".join(s + "\n" for s in typed))
     assert again.returncode == 0, again.stdout + again.stderr
     assert again.stderr.count("one of those three is not a share of this OpenBao") == 1
@@ -545,14 +566,26 @@ def test_a_seal_migration_left_half_way_is_named_with_the_ways_out(tmp_path: Pat
     err = again.stderr
     assert "half-way through the seal migration" in err
     assert "key file is missing" not in err, "the key file is blamed for a migration"
-    commands = [line.strip() for line in err.splitlines() if line.startswith("        ")]
-    assert commands.count("docker compose exec openbao bao operator unseal -migrate") == 3
-    assert (
-        "sed -i '/^COMPOSE_FILE=/d;/^OPENBAO_UNSEAL_KEY_FILE=/d;/^OPENBAO_SEAL_STANZA=/d' .env"
-        in commands
+    # Review m3: ONE of two ways, each a block of its own; the hidden prompts last.
+    header, finish, undo = _ways(err)
+    assert header == ["  # run ONE of the following, never more than one: each block below is "
+                      "one whole way on, to paste on its own"]  # fmt: skip
+    assert finish[-1] == (
+        "        for n in 1 2 3; do docker compose exec openbao bao operator unseal -migrate; done"
+        " && docker compose restart openbao && ./scripts/first-boot.sh"
     )
-    assert "docker compose up -d --no-deps openbao" in commands
-    assert "sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh status" in commands
+    assert any("asks for one share" in line for line in finish if line.startswith("  # "))
+    assert undo[-3:] == [
+        "        sed -i '/^COMPOSE_FILE=/d;/^OPENBAO_UNSEAL_KEY_FILE=/d;"
+        "/^OPENBAO_SEAL_STANZA=/d' .env",
+        "        docker compose up -d --no-deps openbao",
+        "        ./scripts/first-boot.sh",
+    ]
+    prose = " ".join(line for line in err.splitlines() if line.startswith("  # "))
+    assert "sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh status" in prose
+    # Review m6: openbao-seal.sh's closing note, which this way does not reach.
+    key = host.etc / "openbao-unseal" / "unseal.key"
+    assert any(f"copy {key} OFF this host" in line for line in finish), finish
     assert "openbao-seal.sh" not in host.argv()
 
 
@@ -745,7 +778,19 @@ SCENARIOS: dict[str, Callable[[Host], subprocess.CompletedProcess[str]]] = {
     "a failure outside die": lambda host: host.run(
         stdin=_saved_and_three(host), env={**ALLOW, "FAKE_DOCKER_FAIL": "psql"}
     ),
+    "a leftover unseal key": lambda host: _leftover_key_run(host),
+    "stopped before the seal": lambda host: _not_sealed_run(host),
 }
+
+
+def _leftover_key_run(host: Host) -> subprocess.CompletedProcess[str]:
+    _leftover_key(host)
+    return host.run(env=ALLOW)
+
+
+def _not_sealed_run(host: Host) -> subprocess.CompletedProcess[str]:
+    _no_shares_in_memory(host)
+    return host.run(stdin="".join(s + "\n" for s in host.secrets["shares"][:3]) + "no\n")
 
 
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS))
@@ -759,4 +804,150 @@ def test_every_command_of_a_failed_block_can_be_pasted(tmp_path: Path, scenario:
     block = done.stderr[done.stderr.index("FAILED  ") :].splitlines()
     commands = [line[8:] for line in block if line.startswith("        ")]
     assert commands[0] == f"cd {host.deploy}"
-    assert any(c.startswith("./scripts/first-boot.sh") for c in commands), commands
+    assert any("./scripts/first-boot.sh" in c for c in commands), commands
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 2 (re-review of 2026-11-27, findings m1 to m6)
+# --------------------------------------------------------------------------- #
+
+
+def _no_shares_in_memory(host: Host) -> None:
+    """A run that failed in openbao-seal.sh before it changed anything:
+    OpenBao is unsealed, with Shamir, and the next run holds no share."""
+    first = host.run(stdin=_saved_and_three(host), env={**ALLOW, "FAKE_SEAL_FAIL": "1"})
+    assert first.returncode == 1
+    assert host.state["bao"]["sealed"] is False and host.state["bao"]["type"] == "shamir"
+
+
+def _leftover_key(host: Host) -> Path:
+    key = host.etc / "openbao-unseal" / "unseal.key"
+    key.parent.mkdir(parents=True)
+    key.write_bytes(os.urandom(32))
+    return key
+
+
+@pytest.mark.parametrize("answer", [None, "no"], ids=["at-the-first-prompt", "not-SEAL"])
+def test_without_three_shares_at_hand_the_run_stops_before_the_seal(
+    tmp_path: Path, answer: str | None
+) -> None:
+    """Review m1: the three are read and held first, and the seal waits for a
+    SEAL. Stopping at the first prompt, or answering anything but SEAL after
+    the third, changes nothing: OpenBao stays unsealed."""
+    host = Host(tmp_path)
+    _no_shares_in_memory(host)
+    shares = host.secrets["shares"]
+    stdin = "" if answer is None else "".join(s + "\n" for s in shares[:3]) + answer + "\n"
+    again = host.run(stdin=stdin)
+    assert again.returncode == 1
+    assert host.state["bao"]["sealed"] is False and host.state["bao"]["type"] == "shamir"
+    assert "operator seal" not in host.argv()
+    assert "openbao-seal.sh" not in host.argv()
+    assert host.leaks() == []
+
+
+def test_under_a_terminal_the_seal_is_named_and_confirmed_before_it_happens(
+    tmp_path: Path,
+) -> None:
+    """Review m1: what is about to happen is said before the first share is
+    asked for, and confirmed after the third, before the seal."""
+    host = Host(tmp_path)
+    _no_shares_in_memory(host)
+    shares = host.secrets["shares"]
+    answers: list[tuple[str, str | int]] = [
+        (_share_prompt(n), shares[i]) for n, i in ((1, 1), (2, 3), (3, 4))
+    ]
+    answers.append((SEAL_PROMPT, "SEAL"))
+    rc, shown = host.run_pty(answers=answers)
+    assert rc == 0, shown
+    said = shown.index("OpenBao stays sealed until three good shares unseal it")
+    assert said < shown.index(_share_prompt(1))
+    assert shown.index(_share_prompt(3)) < shown.index(SEAL_PROMPT)
+    assert shown.index(SEAL_PROMPT) < shown.index("run     bao operator seal")
+    for share in shares:
+        assert share not in shown
+    assert host.state["bao"]["type"] == "static" and host.state["seal_stdin"] == 3
+    assert host.leaks() == []
+
+
+def test_three_wrong_rounds_give_the_way_out_of_lost_shares(tmp_path: Path) -> None:
+    """Review m2: lost shares are a vault nobody can open; on a first boot,
+    nothing is in it yet, and the way out is to start from zero."""
+    host = Host(tmp_path)
+    _after_init(host)
+    done = host.run(stdin="".join(f"bad-{n}\n" for n in range(9)))
+    assert done.returncode == 1
+    header, copies, lost = _ways(done.stderr)
+    assert header[0].startswith("  # run ONE of the following")
+    assert copies[-1] == "        ./scripts/first-boot.sh"
+    assert any("the shares are lost" in line for line in lost), lost
+    assert "        docker compose down -v && rm .env" in lost
+
+
+@pytest.mark.parametrize(
+    ("block", "problem"),
+    [
+        pytest.param("  # fine prose\n        cd {d}\n        ./scripts/first-boot.sh", None,
+                     id="a-good-block"),
+        pytest.param("  fix it, then:\n        cd {d}\n        ./scripts/first-boot.sh",
+                     "neither a command nor prose", id="prose-without-#"),
+        pytest.param("        cd {d}\n        ./scripts/first-boot.sh\n\n"
+                     "        cd {d}\n        ./scripts/first-boot.sh",
+                     "without `# run ONE of the following`", id="two-ways-no-header"),
+        pytest.param("        cd {d}\n        ./scripts/first-boot.sh\n        chmod 600 .env",
+                     "may read the terminal is not the last", id="a-rerun-not-last"),
+        pytest.param("        cd {d}\n        sudo rm -f x\n        ./scripts/first-boot.sh",
+                     "may read the terminal is not the last", id="sudo-not-last"),
+        pytest.param("        cd {d}\n        docker compose exec openbao bao operator unseal"
+                     " -migrate\n        docker compose restart openbao",
+                     "may read the terminal is not the last", id="hidden-prompt-not-last"),
+        pytest.param("        cd {d}\n        ./scripts/first-boot.sh, without --host",
+                     "not a command the operator runs", id="prose-as-a-command"),
+        pytest.param("        cd {d}\n        sed -i 's/x/<sha printed>/' .env",
+                     "a placeholder", id="a-placeholder"),
+    ],
+)  # fmt: skip
+def test_the_failed_block_check_fails_what_it_must(block: str, problem: str | None) -> None:
+    """Review m3: the check `Host.run` makes on every run can fail."""
+    deploy = Path("/srv/it-suite/deploy")
+    problems = failed_block_problems("\nFAILED  something\n" + block.format(d=deploy), deploy)
+    if problem is None:
+        assert problems == []
+    else:
+        assert any(problem in found for found in problems), problems
+
+
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP],
+                         ids=["INT", "TERM", "HUP"])  # fmt: skip
+def test_stopped_at_saved_it_says_the_shares_on_screen_are_the_only_copy(
+    tmp_path: Path, sig: signal.Signals
+) -> None:
+    """Review m4: Ctrl-C (or a TERM, or the terminal hanging up) at the SAVED
+    prompt. The screen is not cleared, and the run says what is at stake."""
+    host = Host(tmp_path)
+    rc, shown = host.run_pty(answers=[(SAVED_PROMPT, int(sig))])
+    text = shown.replace("\r", "")
+    assert rc == 1, text
+    assert CLEAR not in text, "the screen was cleared"
+    assert all(share in text for share in host.secrets["shares"]), "the shares left the screen"
+    assert "the five shares and the root token on this screen are their only copy" in text
+    assert "OpenBao is initialised already" in text
+    header, saved, lost = _ways(text)
+    assert header[0].startswith("  # run ONE of the following")
+    assert saved[-1] == "        ./scripts/first-boot.sh"
+    assert "        docker compose down -v && rm .env" in lost
+    assert lost[-1].startswith("        sudo rm -f ")
+    assert lost[-1].endswith(" && ./scripts/first-boot.sh")
+    assert failed_block_problems(text, host.deploy) == []
+    assert host.state["bao"]["init"] is True
+
+
+def test_a_leftover_unseal_key_alone_is_refused_on_a_new_host(tmp_path: Path) -> None:
+    """Review m5: the key file of an earlier first boot, with no token file."""
+    host = Host(tmp_path)
+    key = _leftover_key(host)
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 1
+    assert "mixed state: no .env and no it-suite volume, but this host keeps" in done.stderr
+    assert f"        sudo rm -f {key} && ./scripts/first-boot.sh" in done.stderr.splitlines()
+    assert "new-env.sh" not in host.argv() and host.state["bao"]["init"] is False

@@ -42,6 +42,7 @@ import subprocess
 import sys
 import termios
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -583,38 +584,90 @@ _PLACEHOLDER = re.compile(r"<[A-Za-z][^<>]*>")
 
 
 def failed_block_problems(stderr: str, deploy: Path) -> list[str]:
-    """What is wrong with the FAILED block of STDERR, if it has one (M4, M6):
-    more than one FAILED line; a line after it that is neither a command, at
-    the eight-space indent, nor prose, at two; a command line that is not a
-    shell command the operator can paste, from COMMAND_WORDS, with no
-    placeholder; a first command that is not the `cd` to deploy/."""
+    """What is wrong with the FAILED block of STDERR, if it has one (M4, M6, m3):
+    - more than one FAILED line;
+    - a line after it that is neither a command, at the eight-space indent,
+      nor prose printed as a comment (`  # ...`), nor the blank line between
+      two ways on;
+    - more than one way on without the `# run ONE of the following` line
+      before them, or that line with a single way;
+    - a way on whose first command is not the `cd` to deploy/;
+    - a command line that is not a shell command the operator can paste, from
+      COMMAND_WORDS, with no placeholder;
+    - a way on in which a line that may read the terminal -- sudo, a hidden
+      prompt, first-boot.sh itself -- is not the last line: pasted whole, the
+      lines after it would be read as a password or a share. So a way on runs
+      first-boot.sh once at most, and last."""
     text = stderr.splitlines()
     starts = [i for i, line in enumerate(text) if line.startswith("FAILED  ")]
     if not starts:
         return []
     problems = [f"{len(starts)} FAILED lines"] if len(starts) > 1 else []
-    commands = []
+    groups: list[list[str]] = [[]]
     for line in text[starts[0] + 1 :]:
-        if line.startswith("        ") and line[8:9] != " ":
-            commands.append(line[8:])
-        elif not (line.startswith("  ") and line[2:3] not in (" ", "")):
-            problems.append(f"neither a command nor prose: {line!r}")
-    if not commands:
-        problems.append("no command to go on with")
-    elif _segments(commands[0]) != [["cd", str(deploy)]]:
-        problems.append(f"the first command is not the cd to {deploy}: {commands[0]!r}")
-    for command in commands:
-        if subprocess.run([BASH, "-n", "-c", command], capture_output=True).returncode:
-            problems.append(f"not shell: {command!r}")
+        if not line.strip():
+            groups.append([])
+        elif (line.startswith("        ") and line[8:9] != " ") or line.startswith("  # "):
+            groups[-1].append(line)
+        else:
+            problems.append(f"neither a command nor prose as a comment: {line!r}")
+    groups = [g for g in groups if g]
+    if groups and groups[0][0].startswith("  # run ONE of the following"):
+        if len(groups[0]) != 1:
+            problems.append("the `run ONE of the following` line is not a block of its own")
+        ways = groups[1:]
+        if len(ways) < 2:
+            problems.append("`run ONE of the following` before a single way on")
+    else:
+        ways = groups
+        if len(ways) > 1:
+            problems.append(f"{len(ways)} ways on, without `# run ONE of the following`")
+    for way in ways:
+        commands = [line[8:] for line in way if line.startswith("        ")]
+        if not commands:
+            problems.append(f"a way on with no command: {way!r}")
             continue
-        if _PLACEHOLDER.search(command.replace("2>/dev/null", "")):
-            problems.append(f"a placeholder: {command!r}")
-        for words in _segments(command):
-            while words[:1] == ["sudo"] or words[:2] == ["env", "-u"]:
-                words = words[1:] if words[0] == "sudo" else words[3:]
-            if not words or words[0] not in COMMAND_WORDS:
-                problems.append(f"not a command the operator runs: {command!r}")
+        if _segments(commands[0]) != [["cd", str(deploy)]]:
+            problems.append(f"the first command is not the cd to {deploy}: {commands[0]!r}")
+        for n, line in enumerate(way):
+            if line.startswith("        ") and _reads_the_terminal(line[8:]) and n != len(way) - 1:
+                problems.append(f"a line that may read the terminal is not the last: {line!r}")
+        for command in commands:
+            if subprocess.run([BASH, "-n", "-c", command], capture_output=True).returncode:
+                problems.append(f"not shell: {command!r}")
+                continue
+            if _PLACEHOLDER.search(command.replace("2>/dev/null", "")):
+                problems.append(f"a placeholder: {command!r}")
+            for words in _segments(command):
+                words = _bare(words)
+                if words and words[0] in ("for", "done"):
+                    continue
+                if not words or words[0] not in COMMAND_WORDS:
+                    problems.append(f"not a command the operator runs: {command!r}")
     return problems
+
+
+def _bare(words: list[str]) -> list[str]:
+    """A simple command without the `do`, `sudo` and `env -u NAME` before it."""
+    while words[:1] in (["do"], ["sudo"]) or words[:2] == ["env", "-u"]:
+        words = words[1:] if words[0] in ("do", "sudo") else words[3:]
+    return words
+
+
+def _reads_the_terminal(command: str) -> bool:
+    """sudo (its password), first-boot.sh and the other scripts (their
+    prompts), and an interactive `docker compose exec` (a hidden share)."""
+    for words in _segments(command):
+        if words[:1] == ["do"]:
+            words = words[1:]
+        if words[:1] == ["sudo"]:
+            return True
+        words = _bare(words)
+        if words[:1] and words[0].startswith("./scripts/"):
+            return True
+        if words[:3] == ["docker", "compose", "exec"] and "-T" not in words:
+            return True
+    return False
 
 
 def _segments(command: str) -> list[list[str]]:
@@ -834,7 +887,7 @@ class Host:
     def run_pty(
         self,
         *args: str,
-        answers: list[tuple[str, str]],
+        answers: Sequence[tuple[str, str | int]],
         stdin_tty: bool = True,
         stdin: str = "",
         env: dict[str, str] | None = None,
@@ -843,7 +896,8 @@ class Host:
         """first-boot.sh with its output (and, unless STDIN_TTY is false, its
         input) on a pseudo-terminal, as an operator runs it. Each answer is
         written once its prompt is on the screen; one to a `(hidden)` prompt,
-        once the terminal's echo is off. Returns the exit code and everything
+        once the terminal's echo is off. An answer that is a number is a
+        signal, sent to the script instead. Returns the exit code and everything
         the terminal showed."""
         self._fresh_logs()
         master, slave = pty.openpty()
@@ -879,9 +933,12 @@ class Host:
                     at = shown.find(prompt.encode(), seen)
                     if at >= 0:
                         seen = at + len(prompt.encode())
-                        if "(hidden)" in prompt:
-                            _wait_echo_off(master)
-                        os.write(master, (reply + "\n").encode())
+                        if isinstance(reply, int):
+                            os.kill(proc.pid, reply)
+                        else:
+                            if "(hidden)" in prompt:
+                                _wait_echo_off(master)
+                            os.write(master, (reply + "\n").encode())
                         answered += 1
             else:
                 proc.kill()
