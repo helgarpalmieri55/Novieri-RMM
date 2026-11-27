@@ -9,8 +9,10 @@ name it dials, the token in a 0600 file and never in an argv.
 """
 
 import ast
+import base64
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -251,43 +253,79 @@ def test_the_deploy_job_builds_the_agent_it_enrols() -> None:
     )
 
 
+CHECK = (
+    '| ./scripts/first-boot-check.sh --tls-cafile "$pebble_root" --connect 127.0.0.1 '
+    "--wait-job 180"
+)
+REFUSED = (
+    "agents --phase refused --hostname ci-agent --container ci-agent "
+    '--pins-file "$agent_data/pins.json"'
+)
+#: The device first-boot-check.sh enrolled, by the id its 11c line names:
+#: a host that ran it before keeps the earlier agent's device, offline, under
+#: the same hostname (coordinator, 2026-11-27).
+DEVICE_ID = (
+    """device_id="$(sed -n 's/^  ok      step 11c: the agent enrolled as device """
+    """\\([0-9a-f-]*\\), .*/\\1/p' "$RUNNER_TEMP/check.log")\""""
+)
+JOB = 'agents --phase job --hostname "$(hostname)" --device-id "$device_id"'
+
+
 def test_the_agent_enrols_after_the_claim_and_before_the_last_checks() -> None:
+    """first-boot-check.sh is the endpoint since 2026-11-27 (design
+    2026-11-27-despliegue-automatizado §5): it starts once the token exists,
+    agent_flow.py runs the job once the script says the agent connected, and
+    the job waits for the script to finish before its own last checks."""
     run = _run(OAUTH_STEP)
     order = [
         run.index("flow --phase open"),
         run.index("docker compose stop api"),
-        run.index('/tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"'),
-        run.index("docker compose up -d --wait --wait-timeout 180 gateway"),
-        run.index("agents --phase token"),
+        run.index('agents --phase token --token-file "$RUNNER_TEMP/enroll-token"'),
+        run.index(CHECK),
+        run.index("grep -q '^  ok      step 11c:' \"$RUNNER_TEMP/check.log\""),
+        run.index(DEVICE_ID),
+        run.index(JOB),
+        run.index('wait "$check"'),
+        run.index("grep -qx 'First boot is complete.' \"$RUNNER_TEMP/check.log\""),
         run.index("docker run -d --name ci-agent"),
-        run.index("agents --phase job --hostname ci-agent"),
-        run.index('test ! -e "$agent_data/enroll-token"'),
+        run.index(REFUSED),
+        run.index("grep -E 'msg=\"job refused\".*job_type=hello.*reason=bad_signature'"),
         run.index('if grep -qi keycloak <<<"$running"'),
     ]
     assert order == sorted(order), order
 
 
 def test_the_agent_dials_the_public_name_and_trusts_only_pebbles_root() -> None:
-    """An endpoint's view: rmm.novieri.com is traefik on the stack's network,
-    both :443 and :8443 go through it, and the CA bundle the agent sees is
-    the root that signed :443 -- no -k, no skip-verify, no other trust."""
+    """An endpoint's view: rmm.novieri.com at 127.0.0.1, where traefik
+    publishes both :443 and :8443, and the CA bundle the agent sees is the root
+    that signed :443 -- no -k, no skip-verify, no other trust. The script turns
+    the two flags into the agent's `--add-host` and its only CA file
+    (`test_first_boot_check_script.py` runs it); the token reaches it on
+    stdin, never in its environment."""
     run = _run(OAUTH_STEP)
-    start = run.index("docker run -d --name ci-agent")
-    command = run[start : run.index("busybox:1.36.1 /usr/local/bin/novieri-agent", start)]
-    assert "--network it-suite_default" in command
-    assert "--add-host rmm.novieri.com:172.19.240.250" in command
-    assert '-v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro"' in command
-    assert "-e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com" in command
+    assert CHECK in run
+    assert '{ cat "$RUNNER_TEMP/enroll-token"; echo; } \\' in run
     assert "ITS_AGENT_ENROLL_TOKEN" not in run, "the token travels in a 0600 file, never in env"
+    script = (REPO / "deploy/scripts/first-boot-check.sh").read_text()
+    start = script.index("  run_args=(-d --name smoke-agent --network host")
+    command = script[start : script.index("busybox:1.36.1 /usr/local/bin/novieri-agent", start)]
+    bundle = "/etc/ssl/certs/ca-certificates.crt"
+    assert f'-v "${{tls_cafile:-{bundle}}}:{bundle}:ro"' in command
+    assert '-e "ITS_AGENT_ENROLL_URL=https://$host"' in command
+    assert '[ -z "$connect" ] || run_args+=(--add-host "$host:$connect")' in command
+    assert "ITS_AGENT_ENROLL_TOKEN" not in script
     assert "--privileged" not in command and "-p " not in command, "the agent listens on nothing"
 
 
-def test_the_gateway_issuer_token_is_masked_and_travels_on_stdin() -> None:
-    run = _run(OAUTH_STEP)
-    assert run.index('echo "::add-mask::$gw_token"') < run.index('<<<"$gw_token"')
-    for line in run.splitlines():
-        if "$gw_token" in line:
-            assert line.strip().startswith('echo "::add-mask::') or '<<<"$gw_token"' in line, line
+def test_the_gateway_issuer_token_is_first_boots_and_travels_on_stdin() -> None:
+    """The gateway's certificate is first-boot.sh's step 6 since 2026-11-27:
+    the gateway-issuer token goes from its 0600 file to issue-gateway-cert.py
+    on stdin, as the runbook's step 6 sends it, and the job holds none."""
+    assert "gw_token" not in _run(OAUTH_STEP)
+    script = (REPO / "deploy/scripts/first-boot.sh").read_text()
+    assert 'if ! sudo cat "$token_file" | docker compose run --rm --no-deps -T \\' in script
+    line = next(x for x in script.splitlines() if "/tmp/issue-gateway-cert.py \"$host\"" in x)
+    assert line.strip() == '--entrypoint python gateway /tmp/issue-gateway-cert.py "$host"; then'
 
 
 def test_what_the_agent_held_goes_however_the_step_ends() -> None:
@@ -295,14 +333,32 @@ def test_what_the_agent_held_goes_however_the_step_ends() -> None:
     # The one place the whole trap is asserted (test_ci_mcp_flow.py holds only
     # its first half): the container goes before the directory it writes to.
     assert (
-        """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; """
-        """docker rm -f ci-agent >/dev/null 2>&1 || true; """
-        """rm -rf "$RUNNER_TEMP/agent-data"' EXIT""" in run
+        """trap 'rm -f "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json" """
+        """"$RUNNER_TEMP/enroll-token" "$RUNNER_TEMP/check.log"; """
+        """docker rm -f smoke-agent ci-agent >/dev/null 2>&1 || true; """
+        """rm -rf /tmp/smoke-agent "$RUNNER_TEMP/agent-data"' EXIT""" in run
     )
     line = next(x.strip() for x in run.splitlines() if "agents --phase job" in x)
     assert line.endswith(
-        "|| { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }"
+        '|| { kill "$check" 2>/dev/null || true; wait "$check" || true; '
+        'cat "$RUNNER_TEMP/check.log"; docker compose logs api gateway traefik; exit 1; }'
     )
+
+
+def test_the_job_goes_to_the_device_first_boot_check_names() -> None:
+    """The id is read out of the script's own 11c line, as the script
+    prints it (its source, rendered), by the job's own sed."""
+    run = _run(OAUTH_STEP)
+    assert DEVICE_ID in run and JOB in run
+    script = (REPO / "deploy/scripts/first-boot-check.sh").read_text()
+    said = next(x for x in script.splitlines() if x.startswith('ok "step 11c: '))
+    uuid = "06b04ea5-2723-7825-8000-0000000000aa"
+    line = "  ok      " + said[len('ok "') : -1].replace("$device_id", uuid)
+    expression = DEVICE_ID.split("sed -n '")[1].split("' ")[0]
+    found = subprocess.run(
+        ["sed", "-n", expression], input=f"  note    x\n{line}\n", capture_output=True, text=True
+    )
+    assert found.stdout == uuid + "\n", (line, found.stdout)
 
 
 def test_the_deploy_job_waits_for_a_healthy_worker() -> None:
@@ -319,5 +375,280 @@ def test_the_deploy_job_waits_for_a_healthy_worker() -> None:
         "docker compose up -d --wait --wait-timeout 180 worker "
         "|| { docker compose logs worker; exit 1; }"
     )
-    assert run.index('test ! -e "$agent_data/enroll-token"') < run.index(line)
+    done = run.index("grep -qx 'First boot is complete.' \"$RUNNER_TEMP/check.log\"")
+    assert done < run.index(line)
     assert run.index(line) < run.index('if grep -qi keycloak <<<"$running"')
+
+
+# --------------------------------------------------------------------------- #
+# The negative half of invariant 1, end to end (coordinator's ruling Q3,
+# plan 2026-11-27, Task 5): an agent made to pin a key the server does not
+# hold refuses the signed hello with bad_signature and runs nothing.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_negative_case_runs_on_its_own_agent_as_an_endpoint_would() -> None:
+    """Its own agent, enrolled with the second token: first-boot-check.sh
+    retired its one at 11f. It dials rmm.novieri.com as traefik's address on
+    the stack's network and trusts Pebble's root alone; the token is in its
+    0600 file, never in its environment; it listens on nothing."""
+    run = _run(OAUTH_STEP)
+    assert (
+        'agents --phase token --token-file "$RUNNER_TEMP/enroll-token" '
+        '--token-file "$agent_data/enroll-token"'
+    ) in run
+    assert 'echo "::add-mask::$(<"$agent_data/enroll-token")"' in run
+    start = run.index("docker run -d --name ci-agent")
+    command = run[start : run.index("busybox:1.36.1 /usr/local/bin/novieri-agent", start)]
+    assert "--network it-suite_default" in command
+    assert "--add-host rmm.novieri.com:172.19.240.250" in command
+    assert '-v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro"' in command
+    assert '-v "$agent_data:/var/lib/novieri-agent"' in command
+    assert "ITS_AGENT_ENROLL_TOKEN" not in command
+    assert "--privileged" not in command and "-p " not in command
+    assert run.index('test ! -e "$agent_data/enroll-token"') < run.index(REFUSED)
+    line = next(x.strip() for x in run.splitlines() if x.strip().startswith(REFUSED))
+    assert line.endswith(
+        "|| { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }"
+    )
+
+
+def test_the_owner_keeps_a_third_recovery_code_for_it() -> None:
+    """One recovery code per sign-in: token, job and refused."""
+    source = (REPO / "deploy/ci/mcp_flow.py").read_text()
+    assert "self.remember_owner(email, password, list(codes)[:3])" in source
+
+
+class _TokenClient(_FakeClient):
+    """Mints a different token each time, and counts the sign-ins."""
+
+    def __init__(self) -> None:
+        self.minted = 0
+        self.logins = 0
+
+    def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
+        if path == "/api/v1/auth/login":
+            self.logins += 1
+        if path == "/api/v1/enrollment-tokens":
+            self.minted += 1
+            body = {"token": f"TOKEN-{self.minted}", "max_uses": 1, "site_id": "s1"}
+            return _Answer(201, body, path)
+        return super().request(method, path, **kwargs)
+
+
+def test_one_sign_in_mints_one_one_use_token_per_file(tmp_path: Path) -> None:
+    client = _TokenClient()
+    owner = {"email": "e", "password": "p", "recovery_codes": ["a", "b", "c"]}
+    flow = agents.AgentFlow(client, owner)
+    first, second = tmp_path / "one", tmp_path / "two"
+    flow.token(str(first), str(second))
+    assert (first.read_text(), second.read_text()) == ("TOKEN-1", "TOKEN-2")
+    assert client.logins == 1 and client.minted == 2
+    for path in (first, second):
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
+
+
+def test_the_distrusted_pin_is_an_ed25519_key_nobody_signs_with() -> None:
+    """RFC 8410's SubjectPublicKeyInfo around 32 bytes: the agent parses it as
+    it parses the real one (x509.ParsePKIXPublicKey, then the Ed25519 type
+    check), and no signature verifies against it. The rest of pins.json stays."""
+    pins = {"ca_bundle_pem": "CA", "job_signing_public_key_pem": "OLD"}
+    new = agents.distrusted(pins, raw=bytes(range(32)))
+    assert new["ca_bundle_pem"] == "CA"
+    pem = new["job_signing_public_key_pem"].splitlines()
+    assert pem[0] == "-----BEGIN PUBLIC KEY-----" and pem[-1] == "-----END PUBLIC KEY-----"
+    der = base64.b64decode("".join(pem[1:-1]))
+    assert der == bytes.fromhex("302a300506032b6570032100") + bytes(range(32))
+    assert agents.distrusted(pins) != agents.distrusted(pins), "a fresh key each time"
+    same = {"job_signing_public_key_pem": new["job_signing_public_key_pem"]}
+    with pytest.raises(agents.Failed):
+        agents.distrusted(same, raw=bytes(range(32)))
+
+
+class _RefusedClient(_FakeClient):
+    """The refused phase's calls: ci-agent online, a hello that ends STATUS
+    with RESULT ("GREETING": the greeting it was sent), and an audit log with
+    its dispatch and its ending. Each job answer carries the job's `params`, as
+    the api's `JobOut` does: the greeting it was sent is in every answer, run
+    or not (the rehearsal of 2026-11-27, Step 7, first green run)."""
+
+    def __init__(self, status: str, result: Any) -> None:
+        self.status, self.result = status, result
+        self.sent: dict[str, Any] = {}
+
+    def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
+        if path == "/api/v1/devices?limit=200":
+            device = {"id": "dev-1", "hostname": "ci-agent", "agent_status": "online"}
+            return _Answer(200, {"items": [device]}, path)
+        if path == "/api/v1/jobs" and method == "POST":
+            self.sent = kwargs["body"]
+            queued = {"id": "job-1", "signed": True, "status": "queued"}
+            return _Answer(201, {**queued, "params": self.sent["params"]}, path)
+        if path == "/api/v1/jobs/job-1":
+            result = self.result
+            if result == "GREETING":
+                result = {"greeting": self.sent["params"]["message"]}
+            body = {
+                "id": "job-1",
+                "signed": True,
+                "status": self.status,
+                "params": self.sent["params"],
+                "result": result,
+            }
+            return _Answer(200, body, path)
+        if path == "/api/v1/audit/verify":
+            return _Answer(200, {"ok": True, "broken_at": None, "count": 9}, path)
+        if path == "/api/v1/audit?limit=200":
+            ending = "jobs.refused" if self.status == "refused" else "jobs.succeeded"
+            trail = [
+                ("enrollment.token_created", "token-1"),
+                ("enrollment.device_enrolled", "dev-1"),
+                ("gateway.connected", "dev-1"),
+                ("jobs.dispatched", "job-1"),
+                (ending, "job-1"),
+            ]
+            items = [
+                {"id": f"06b04ea5-2723-7825-8000-00000000000{n}", "action": a, "target_id": t}
+                for n, (a, t) in enumerate(trail, 1)
+            ]
+            return _Answer(200, {"items": items}, path)
+        return super().request(method, path, **kwargs)
+
+
+class _FakeDocker:
+    """`docker logs` counts one `gateway connected` per start."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.starts = 1
+
+    def __call__(self, *args: str) -> str:
+        self.calls.append(args)
+        if args[0] == "start":
+            self.starts += 1
+        if args[0] == "logs":
+            return 'level=INFO msg="gateway connected"\n' * self.starts
+        return ""
+
+
+THREE = {"email": "e", "password": "p", "recovery_codes": ["a", "b", "c"]}
+
+
+def _refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client: _RefusedClient) -> Any:
+    monkeypatch.setattr(agents.time, "sleep", lambda _s: None)
+    pins = tmp_path / "pins.json"
+    pins.write_text(json.dumps({"ca_bundle_pem": "CA", "job_signing_public_key_pem": "OLD"}))
+    docker = _FakeDocker()
+    flow = agents.AgentFlow(client, THREE, docker=docker)
+    flow.refused("ci-agent", "ci-agent", str(pins), 5.0)
+    return flow, docker, json.loads(pins.read_text())
+
+
+def test_a_hello_refused_with_bad_signature_and_not_run_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, docker, pins = _refused(
+        tmp_path, monkeypatch, _RefusedClient("refused", {"refused": "bad_signature"})
+    )
+    assert flow.reached == set(agents.PHASES["refused"])
+    assert [call[0] for call in docker.calls] == ["logs", "stop", "start", "logs"]
+    assert pins["ca_bundle_pem"] == "CA" and pins["job_signing_public_key_pem"] != "OLD"
+
+
+def test_a_hello_the_agent_ran_fails_the_negative_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The falsifier: an agent that stopped verifying runs it, and answers."""
+    with pytest.raises(agents.Failed, match="the hello it does not trust ended succeeded"):
+        _refused(tmp_path, monkeypatch, _RefusedClient("succeeded", "GREETING"))
+
+
+def test_a_refusal_for_another_reason_fails_the_negative_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(agents.Failed, match="refused, but not for its signature"):
+        _refused(tmp_path, monkeypatch, _RefusedClient("refused", {"refused": "expired"}))
+
+
+def test_the_negative_case_needs_its_own_recovery_code(tmp_path: Path) -> None:
+    owner = {"email": "e", "password": "p", "recovery_codes": ["a", "b"]}
+    flow = agents.AgentFlow(_RefusedClient("refused", {}), owner, docker=_FakeDocker())
+    with pytest.raises(agents.Failed, match="no third recovery code"):
+        flow.refused("ci-agent", "ci-agent", str(tmp_path / "pins.json"), 1.0)
+
+
+# --------------------------------------------------------------------------- #
+# The good hello goes to the device first-boot-check.sh enrolled, by its id
+# (coordinator, 2026-11-27): a host that ran the script before keeps the
+# earlier agent's device under the same hostname, and the first device of a
+# name is not this run's.
+# --------------------------------------------------------------------------- #
+
+
+class _JobClient(_RefusedClient):
+    """Two devices named `vm`: an earlier run's, listed first, and this
+    run's. The hello succeeds with its greeting, and the trail is dev-2's."""
+
+    def __init__(self, earlier_status: str = "offline") -> None:
+        super().__init__("succeeded", "GREETING")
+        self.earlier_status = earlier_status
+
+    def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
+        if path == "/api/v1/devices?limit=200":
+            devices = [
+                {"id": "dev-1", "hostname": "vm", "agent_status": self.earlier_status},
+                {"id": "dev-2", "hostname": "vm", "agent_status": "online"},
+            ]
+            return _Answer(200, {"items": devices}, path)
+        if path == "/api/v1/audit?limit=200":
+            trail = [
+                ("enrollment.token_created", "token-2"),
+                ("enrollment.device_enrolled", "dev-2"),
+                ("gateway.connected", "dev-2"),
+                ("jobs.dispatched", "job-1"),
+                ("jobs.succeeded", "job-1"),
+            ]
+            items = [
+                {"id": f"06b04ea5-2723-7825-8000-00000000000{n}", "action": a, "target_id": t}
+                for n, (a, t) in enumerate(trail, 1)
+            ]
+            return _Answer(200, {"items": items}, path)
+        return super().request(method, path, **kwargs)
+
+
+@pytest.mark.parametrize("earlier_status", ["offline", "online"])
+def test_the_hello_goes_to_the_device_of_the_id_not_the_first_of_its_name(
+    monkeypatch: pytest.MonkeyPatch, earlier_status: str
+) -> None:
+    monkeypatch.setattr(agents.time, "sleep", lambda _s: None)
+    client = _JobClient(earlier_status)
+    flow = agents.AgentFlow(client, THREE)
+    flow.job("vm", "dev-2", 5.0)
+    assert client.sent["device_id"] == "dev-2"
+    assert flow.reached == set(agents.PHASES["job"])
+
+
+def test_a_device_of_another_hostname_is_not_the_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agents.time, "sleep", lambda _s: None)
+    flow = agents.AgentFlow(_JobClient(), THREE)
+    with pytest.raises(agents.Failed, match="no online device other-host dev-2"):
+        flow.device("other-host", 0.0, "dev-2")
+
+
+def test_a_name_two_devices_share_is_no_device_without_an_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agents.time, "sleep", lambda _s: None)
+    flow = agents.AgentFlow(_JobClient("online"), THREE)
+    with pytest.raises(agents.Failed, match="2 devices are named vm"):
+        flow.device("vm", 5.0)
+
+
+def test_the_job_phase_needs_the_device_id(tmp_path: Path) -> None:
+    state = tmp_path / "owner.json"
+    state.write_text(json.dumps(THREE))
+    base = ["--base", "https://rmm.example.com", "--state-file", str(state), "--phase", "job"]
+    with pytest.raises(SystemExit):
+        agents.main([*base, "--hostname", "vm"])
+    with pytest.raises(SystemExit):
+        agents.main([*base, "--hostname", "vm", "--device-id", ""])
