@@ -47,9 +47,12 @@ CI en cada cambio.
    - **pedir tres partes** (entrada oculta), que desellan OpenBao y prueban
      que las copias son buenas. El token raíz lo toma de la memoria del guion:
      no se vuelve a teclear, y se escribe en `.env` como hoy (paso 3.5).
-   - Al final: el desellado automático (`openbao-seal.sh enable`), un reinicio
-     de OpenBao que demuestra que vuelve solo, y el código de instalación del
-     paso 8 impreso en pantalla.
+   - Justo después del paso 3.6, antes de que el paso 4 arranque nada: el
+     desellado automático (`openbao-seal.sh enable`, con esas tres partes) y un
+     reinicio de OpenBao que demuestra que vuelve solo. Desde ahí, un fallo se
+     relanza sin teclear ninguna parte (decisión del coordinador del
+     2026-11-27, pregunta Q6 del plan).
+   - Al final: el código de instalación del paso 8 impreso en pantalla.
 3. **Navegador** (operador): reclamar la instalación con ese código, la
    contraseña, el segundo factor y los diez códigos de recuperación; el token
    de inscripción (11b).
@@ -93,22 +96,23 @@ P1. Termina comprobando las versiones mínimas (Engine 26, Compose 2.24) y
 diciendo que hay que salir y volver a entrar.
 
 **`first-boot.sh`** (la cuenta de operador, desde `deploy/`): pasos 1, 1b, 1c,
-2, 3.1 a 3.6, 4, 4b, 5, 6, 6b y 7 del runbook; el desellado automático; el
-código del paso 8. Se niega si `.env` ya existe y OpenBao está inicializado
+2 y 3.1 a 3.6 del runbook; el desellado automático; los pasos 4, 4b, 5, 6, 6b y
+7; el código del paso 8. Se niega si `.env` ya existe y OpenBao está inicializado
 con otro `.env` (estado mezclado), con la orden para empezar de cero.
 **Al repetirlo después de `bao operator init`** (un fallo a mitad), el token
 raíz ya no está en memoria: si `.env` todavía no tiene los tokens, los pide
 con entrada oculta; y si OpenBao está sellado y aún sin desellado automático,
-pide las tres partes. Nunca vuelve a inicializar un OpenBao ya inicializado.
+pide las tres partes. Desde el paso 4, OpenBao se desella solo, y un fallo se
+relanza sin partes. Nunca vuelve a inicializar un OpenBao ya inicializado.
 
 **`first-boot-check.sh`**: pasos 10 (las comprobaciones de API que no
 necesitan navegador), 11a, 11c a 11f y 12.
 
 ## 4. El desellado automático, siempre
 
-- `first-boot.sh` llama a `openbao-seal.sh enable` con las tres partes que ya
-  tiene, sin volver a pedirlas, y comprueba `Sealed false` tras reiniciar
-  `openbao`.
+- `first-boot.sh` llama a `openbao-seal.sh enable` justo después del paso 3.6,
+  con las tres partes que ya tiene, sin volver a pedirlas, y comprueba `Sealed
+  false` tras reiniciar `openbao`, antes del paso 4.
 - La secuencia «después de un reinicio» del runbook pasa a: `bao status`
   (debe decir `Sealed false` solo); si dice `Sealed true`, el archivo de clave
   falta o está mal, y el runbook dice cómo seguir.

@@ -147,7 +147,22 @@ esac
 # for the name is read as an AAAA, and refused like one. `|| true`: getent
 # exits 2 for a name with no address, which pipefail would turn into this
 # script dying silently here.
-if [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
+#
+# ITS_PREFLIGHT_SKIP_DNS=1 leaves the name unasked, and says so: for the CI's
+# `deploy` job and a rehearsal, where no public DNS holds the name and Pebble's
+# validator asks its own (design 2026-11-27-despliegue-automatizado §5). Never
+# against Let's Encrypt production, and so never on a real host: a name nobody
+# checked spends the 5 certificates a week production allows it, and that CA
+# is the one an unset ITS_ACME_CA_SERVER means (coordinator's ruling Q4,
+# 2026-11-27).
+if [ "${ITS_PREFLIGHT_SKIP_DNS:-0}" = 1 ]; then
+  case "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" in
+    https://acme-v02.api.letsencrypt.org/directory)
+      refuse "ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA (ITS_ACME_CA_SERVER is ${acme_ca:-unset}): a name nobody asked DNS about would spend the 5 certificates a week production allows it. Unset ITS_PREFLIGHT_SKIP_DNS on a real host; a rehearsal sets ITS_ACME_CA_SERVER to staging or Pebble." ;;
+    *)
+      printf '  note    %s was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): the CI or a rehearsal, never a real host\n' "$public_host" ;;
+  esac
+elif [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
   if ! command -v getent >/dev/null 2>&1; then
     printf '  note    %s could not be resolved -- getent is not installed\n' "$public_host"
   else
