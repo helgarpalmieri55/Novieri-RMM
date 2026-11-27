@@ -13,14 +13,18 @@ A fake `docker` plays compose and the agent; every other command but bash's
 builtins passes through a shim that logs its argv.
 """
 
+import fcntl
 import json
 import os
+import pty
 import re
 import secrets
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import termios
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -46,7 +50,8 @@ if argv[:3] == ["compose", "exec", "-T"]:
     elif svc == "postgres":
         if s.get("pg_down"):
             sys.stderr.write('service "postgres" is not running\n')
-            json.dump(s, open(STATE, "w"))
+            json.dump(s, open(STATE + ".tmp", "w"))
+            os.replace(STATE + ".tmp", STATE)
             sys.exit(1)
         sql = cmd[-1]
         if "user_roles" in sql:
@@ -97,7 +102,8 @@ elif argv[0] == "logs":
     s["log_polls"] = s.get("log_polls", 0) + 1
     if s["connects"] and s["log_polls"] >= s.get("connect_after", 1):
         out("time=4 level=INFO msg=\"gateway connected\" url=wss://rmm.novieri.com:8443/agent\n")
-json.dump(s, open(STATE, "w"))
+json.dump(s, open(STATE + ".tmp", "w"))
+os.replace(STATE + ".tmp", STATE)  # a signal may end this process: never leave half a file
 sys.exit(rc)
 '''
 
@@ -167,7 +173,7 @@ class Box:
             "bao_rc": 0,
             "admins": "first@novieri.example|org-admin\n",
             "device": DEVICE,
-            "job": "inventory.collect|succeeded|t",
+            "job": "job-1|inventory.collect|succeeded|t",
             "job_after": 2,
             "polls": 0,
             "chain": CHAIN_OK,
@@ -205,31 +211,40 @@ class Box:
         _exe(self.bin / "docker", FAKE_DOCKER)
         _exe(self.bin / "curl", FAKE_CURL)
 
+    def prepare(self) -> None:
+        self.state_file.write_text(json.dumps(self.state))
+        self.log.write_text("")
+
+    def env(self, **env: str) -> dict[str, str]:
+        return {
+            "PATH": str(self.bin),
+            "ARGV_LOG": str(self.log),
+            "FAKE_STATE": str(self.state_file),
+            "ITS_SMOKE_AGENT_DIR": str(self.agent_data),
+            "ITS_BACKUP_STATE_DIR": str(self.backup_state),
+            "ITS_SYSTEMD_DIR": str(self.units),
+            "ITS_NO_SYSTEMCTL": "1",
+            **env,
+        }
+
     def run(
         self, *args: str, stdin: str | None = None, shell: tuple[str, ...] = (), **env: str
     ) -> subprocess.CompletedProcess[str]:
-        self.state_file.write_text(json.dumps(self.state))
-        self.log.write_text("")
+        self.prepare()
         done = subprocess.run(
             [BASH, *shell, str(self.script), *args],
             input=self.token + "\n" if stdin is None else stdin,
             capture_output=True,
             text=True,
-            env={
-                "PATH": str(self.bin),
-                "ARGV_LOG": str(self.log),
-                "FAKE_STATE": str(self.state_file),
-                "ITS_SMOKE_AGENT_DIR": str(self.agent_data),
-                "ITS_BACKUP_STATE_DIR": str(self.backup_state),
-                "ITS_SYSTEMD_DIR": str(self.units),
-                "ITS_NO_SYSTEMCTL": "1",
-                **env,
-            },
+            env=self.env(**env),
             start_new_session=True,  # its own process group: a signal to it is a terminal's
             timeout=100,
         )
         self.state = json.loads(self.state_file.read_text())
         return done
+
+    def reload(self) -> None:
+        self.state = json.loads(self.state_file.read_text())
 
     def argv(self) -> str:
         return self.log.read_text()
@@ -261,7 +276,7 @@ def test_a_claimed_installation_passes_every_check(tmp_path: Path) -> None:
         "OpenBao answers, unsealed (bao status",
         "step 10", "step 11a", "step 11c", "step 11d", "step 11e", "step 11f", "step 12",
     ]  # fmt: skip
-    assert "        inventory.collect|succeeded|t" in done.stdout
+    assert "        job-1|inventory.collect|succeeded|t" in done.stdout
     assert "NOW, in the console: Devices ->" in done.stdout
     assert done.stdout.rstrip().splitlines()[-4] == "First boot is complete."
     assert box.state["built"] is True
@@ -330,9 +345,10 @@ def test_a_route_that_is_not_refused_stops_it(tmp_path: Path) -> None:
 
 def test_a_refused_job_stops_it(tmp_path: Path) -> None:
     box = Box(tmp_path)
-    box.state["job"] = "inventory.collect|refused|t"
+    box.state["job"] = "job-1|inventory.collect|refused|t"
     done = box.run()
-    assert done.returncode == 1 and "the job ended: inventory.collect|refused|t" in done.stderr
+    assert done.returncode == 1
+    assert "the job ended: job-1|inventory.collect|refused|t" in done.stderr
 
 
 def test_no_job_in_time_says_what_to_press(tmp_path: Path) -> None:
@@ -490,9 +506,9 @@ def test_a_failed_backup_service_shows_its_journal_first(tmp_path: Path) -> None
 
 def test_a_failure_after_11c_retires_the_agent_and_its_key(tmp_path: Path) -> None:
     box = Box(tmp_path)
-    box.state["job"] = "inventory.collect|refused|t"
+    box.state["job"] = "job-1|inventory.collect|refused|t"
     err = _failed(box.run())
-    assert "the job ended: inventory.collect|refused|t" in err
+    assert "the job ended: job-1|inventory.collect|refused|t" in err
     assert "The throwaway agent was retired" in err
     assert "from deploy/: ./scripts/first-boot-check.sh" in err
     _retired(box)
@@ -527,10 +543,10 @@ def test_a_second_signal_during_the_cleanup_loses_neither_message_nor_cleanup(
 ) -> None:
     for signal_name in ("INT", "HUP"):
         box = Box(tmp_path / signal_name)
-        box.state["job"] = "inventory.collect|refused|t"
+        box.state["job"] = "job-1|inventory.collect|refused|t"
         box.state["rm_signal"] = signal_name
         err = _failed(box.run())
-        assert "the job ended: inventory.collect|refused|t" in err
+        assert "the job ended: job-1|inventory.collect|refused|t" in err
         assert "The throwaway agent was retired" in err
         _retired(box)
     # and in the cleanup of a signal: the first one is a Ctrl-C, the second a hangup
@@ -546,10 +562,10 @@ def test_an_agent_that_cannot_be_removed_is_named_with_the_command_to_do_it(
     tmp_path: Path,
 ) -> None:
     box = Box(tmp_path)
-    box.state["job"] = "inventory.collect|refused|t"
+    box.state["job"] = "job-1|inventory.collect|refused|t"
     box.state["rm_fails"] = True
     err = _failed(box.run())
-    assert "the job ended: inventory.collect|refused|t" in err
+    assert "the job ended: job-1|inventory.collect|refused|t" in err
     assert "could NOT be retired" in err
     assert "docker rm -f smoke-agent && rm -rf" in err
     assert "agent: " in err, "its last log lines were taken before the removal was tried"
@@ -557,7 +573,7 @@ def test_an_agent_that_cannot_be_removed_is_named_with_the_command_to_do_it(
 
 def test_a_refusal_shows_the_agents_last_log_lines_before_removing_it(tmp_path: Path) -> None:
     box = Box(tmp_path)
-    box.state["job"] = "inventory.collect|refused|t"
+    box.state["job"] = "job-1|inventory.collect|refused|t"
     err = _failed(box.run())
     assert "        agent: time=3 level=INFO msg=enrolled" in err
     argv = box.argv()
@@ -576,7 +592,7 @@ def test_step_11f_failures_give_the_command_to_go_on(tmp_path: Path) -> None:
 def test_a_refused_row_of_an_earlier_agent_does_not_stop_a_fresh_run(tmp_path: Path) -> None:
     """11d looks only at jobs issued after this device enrolled."""
     box = Box(tmp_path)
-    box.state["old_job"] = "inventory.collect|refused|t"
+    box.state["old_job"] = "job-1|inventory.collect|refused|t"
     done = box.run()
     assert done.returncode == 0, done.stdout + done.stderr
 
@@ -671,3 +687,89 @@ def test_an_openbao_that_does_not_answer_says_how_to_go_on(tmp_path: Path) -> No
     box.state["bao_rc"] = 1
     err = _failed(box.run())
     assert "OpenBao does not answer" in err and "./scripts/first-boot-check.sh" in err
+
+
+def _wait_for(fd: int, marker: bytes) -> bytes:
+    seen = b""
+    while marker not in seen:
+        chunk = os.read(fd, 4096)
+        assert chunk, seen
+        seen += chunk
+    return seen
+
+
+def _hangup_at_11d(box: Box, kind: str) -> int:
+    """Start the script waiting at 11d, then lose its output the way a dropped SSH session
+    does. `kind`: `sigpipe` (no HUP: the reader goes, and the script's next write is a SIGPIPE),
+    `pty` (the controlling terminal's master is closed), `pipe` (the reader of its
+    stdout and stderr has gone, then a HUP) or `closed` (stderr closed, then a HUP)."""
+    box.state["job_after"] = 8 if kind == "sigpipe" else 10**6
+    box.prepare()
+    env = box.env()
+    popen: dict[str, object] = {}
+    master = slave = -1
+    if kind == "pty":
+        master, slave = pty.openpty()
+
+        def own_terminal() -> None:
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+        popen = {"stdout": slave, "stderr": slave, "preexec_fn": own_terminal}
+        reader = master
+    else:
+        reader, writer = os.pipe()
+        popen = {"stdout": writer, "start_new_session": True}
+        if kind in ("pipe", "sigpipe"):
+            popen["stderr"] = writer
+        else:
+            popen["stderr"] = subprocess.DEVNULL
+            popen["preexec_fn"] = lambda: os.close(2)
+    proc = subprocess.Popen(  # noqa: S603
+        [BASH, str(box.script), "--wait-job", "60"], stdin=subprocess.PIPE, env=env, **popen
+    )
+    assert proc.stdin is not None
+    proc.stdin.write((box.token + "\n").encode())
+    proc.stdin.close()
+    if kind != "pty":
+        os.close(writer)
+    _wait_for(reader, b"Waiting up to")
+    os.close(reader)  # the terminal's master, or the only reader of the pipe: gone
+    if kind == "pty":
+        os.close(slave)
+    elif kind != "sigpipe":
+        os.killpg(proc.pid, signal.SIGHUP)
+    try:
+        proc.wait(timeout=30)
+    finally:
+        proc.kill()
+    box.reload()
+    return proc.returncode
+
+
+def test_a_dropped_ssh_session_still_retires_the_agent_on_a_pty(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    assert _hangup_at_11d(box, "pty") == 1
+    _retired(box)
+    assert box.argv().count("docker rm -f smoke-agent") >= 2, "the retirement ran"
+
+
+def test_a_hangup_after_the_reader_of_its_output_has_gone_still_retires_it(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    assert _hangup_at_11d(box, "pipe") == 1
+    _retired(box)
+    assert box.argv().count("docker rm -f smoke-agent") >= 2
+
+
+def test_a_hangup_with_stderr_closed_still_retires_the_agent(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    assert _hangup_at_11d(box, "closed") == 1
+    _retired(box)
+    assert box.argv().count("docker rm -f smoke-agent") >= 2
+
+
+def test_a_write_to_a_pipe_nobody_reads_still_retires_the_agent(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    assert _hangup_at_11d(box, "sigpipe") == 1
+    _retired(box)
+    assert box.argv().count("docker rm -f smoke-agent") >= 2

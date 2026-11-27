@@ -17,8 +17,10 @@
 # Ctrl-C, a dropped SSH session), retires its agent, with its token and key, on
 # the way out, and says how to go on; a re-run enrols, and retires, another
 # throwaway agent, and the earlier one stays in the console as a record,
-# offline. Only a run killed outright (SIGKILL) can leave its agent up, and the
-# next run then finds it and goes on from 11d. Its first two lines say so.
+# offline. Only a run killed outright (SIGKILL, the OOM killer, a power cut), or a
+# Docker that will not remove the container (the script says so, with the
+# command), can leave its agent up; the next run then finds it and goes on from
+# 11d. Its first two lines say so.
 #
 # The token reaches the agent in a 0600 file in its data directory, as the
 # runbook puts it there, and nowhere else: never an argument, never printed.
@@ -49,13 +51,14 @@ note() { printf '  note    %s\n' "$*"; }
 # From the moment the throwaway agent is started (agent_live=1), every way out
 # but success retires it: the container, and its data directory with the token
 # and the key. A die, a command that failed outside die (the EXIT trap), Ctrl-C,
-# a TERM and a HUP (a dropped SSH session) all land here. The cleanup ignores
+# a TERM, a HUP (a dropped SSH session) and a PIPE (nobody reads its output
+# any more) all land here. The cleanup ignores
 # further signals, so a second Ctrl-C cannot cut it short, and clears
 # agent_live only once it has tried everything.
 agent_live=0 failed=0 retire_msg="" rerun_ok=1
 retire_agent() {
   [ "$agent_live" = 1 ] || return 0
-  trap '' INT TERM HUP
+  trap '' INT TERM HUP PIPE
   local bad=0
   # The agent's own account of itself goes before the container does.
   docker logs --tail 20 smoke-agent 2>&1 </dev/null | sed 's/^/        agent: /' >&2 || true
@@ -72,35 +75,38 @@ retire_agent() {
 die() {
   local msg="$1" line
   shift
-  trap '' INT TERM HUP
+  trap '' INT TERM HUP PIPE
   failed=1
   # Said first: nothing the cleanup meets can lose it.
-  printf '\nFAILED  %s\n' "$msg" >&2
-  for line in "$@"; do printf '        %s\n' "$line" >&2; done
+  # A write that fails (a hung-up terminal, a pipe with no reader) must never
+  # keep the cleanup from running: every one of these is allowed to fail.
+  printf '\nFAILED  %s\n' "$msg" >&2 || true
+  for line in "$@"; do printf '        %s\n' "$line" >&2 || true; done
   retire_agent
-  [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2
+  [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2 || true
   exit 1
 }
 on_exit() {
   local rc=$?
-  trap '' INT TERM HUP
+  trap '' INT TERM HUP PIPE
   trap - EXIT
   [ "$rc" != 0 ] || return 0
   [ "$failed" = 0 ] || return 0   # die has said it
   failed=1
   case "$rc" in
-    129|130|143) printf '\nFAILED  %s: interrupted (exit %s)\n' "$step" "$rc" >&2 ;;
-    *) printf '\nFAILED  %s: a command failed (exit %s); what it printed is above\n' "$step" "$rc" >&2 ;;
+    129|130|143) printf '\nFAILED  %s: interrupted (exit %s)\n' "$step" "$rc" >&2 || true ;;
+    *) printf '\nFAILED  %s: a command failed (exit %s); what it printed is above\n' "$step" "$rc" >&2 || true ;;
   esac
-  printf '        %s\n' "It is safe to run again: ./scripts/first-boot-check.sh" >&2
+  printf '        %s\n' "It is safe to run again: ./scripts/first-boot-check.sh" >&2 || true
   retire_agent
-  [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2
+  [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2 || true
   exit 1
 }
 trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+trap 'exit 141' PIPE
 
 tls_cafile="" connect="" wait_job=600
 while [ $# -gt 0 ]; do
