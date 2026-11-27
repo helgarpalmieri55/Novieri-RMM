@@ -302,3 +302,88 @@ def test_an_s3_public_endpoint_on_the_public_host_has_no_note(tmp_path: Path) ->
     run = _run(tmp_path, env, GOOD_HOST)
     assert run.returncode == 0, run.stdout + run.stderr
     assert "ITS_S3_PUBLIC_ENDPOINT" not in run.stdout, run.stdout
+
+
+def test_the_ci_can_leave_the_name_unasked_and_is_told_so(tmp_path: Path) -> None:
+    """ITS_PREFLIGHT_SKIP_DNS=1 (the CI's `deploy` job, design
+    2026-11-27-despliegue-automatizado §5): no public DNS holds the name, and
+    the refusal it would earn is not this run's to fix. Said, not silent; and
+    every other check still runs. Only against a CA that is not Let's Encrypt
+    production: Pebble here, as in CI."""
+    pebble = {**GOOD_ENV, "ITS_ACME_CA_SERVER": "https://pebble:14000/dir"}
+    host = {**GOOD_HOST, "FAKE_V4": "", "FAKE_V6": "2001:db8::7"}
+    run = _run(tmp_path, pebble, {**host, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert run.returncode == 0, run.stdout
+    assert (
+        "note    rmm.novieri.com was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): "
+        "the CI or a rehearsal, never a real host"
+    ) in run.stdout
+    assert "ok      Docker Engine 29.9.3" in run.stdout
+    no_email = {**pebble, "ITS_ACME_EMAIL": ""}
+    refused = _run(tmp_path, no_email, {**host, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert refused.returncode == 1 and "ITS_ACME_EMAIL is empty" in refused.stdout
+    # Without it, the same host is refused: the knob is what made the difference.
+    assert _run(tmp_path, pebble, host).returncode == 1
+
+
+@pytest.mark.parametrize(
+    "ca",
+    [
+        pytest.param("https://acme-v02.api.letsencrypt.org/directory", id="production"),
+        pytest.param(None, id="unset"),
+    ],
+)
+def test_the_dns_is_never_left_unasked_against_lets_encrypt_production(
+    tmp_path: Path, ca: str | None
+) -> None:
+    """Coordinator's ruling Q4 (2026-11-27): a skipped DNS check against
+    production would spend its 5-certificates-a-week limit on a name nobody
+    checked. Refused, with the fix, whatever DNS would have said; an unset
+    ITS_ACME_CA_SERVER is production, as Traefik reads it."""
+    env = {k: v for k, v in GOOD_ENV.items() if k != "ITS_ACME_CA_SERVER"}
+    if ca is not None:
+        env["ITS_ACME_CA_SERVER"] = ca
+    run = _run(tmp_path, env, {**GOOD_HOST, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert run.returncode == 1, run.stdout
+    refusal = "REFUSE  ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA"
+    assert refusal in run.stdout
+    assert "was not asked of DNS" not in run.stdout
+
+
+@pytest.mark.parametrize(
+    "ca",
+    [
+        pytest.param("https://acme-v02.api.letsencrypt.org/directory/", id="trailing-slash"),
+        pytest.param("https://ACME-V02.api.letsencrypt.org/directory", id="upper-case"),
+        pytest.param("https://acme-v02.api.letsencrypt.org:443/directory", id="port-443"),
+        pytest.param("https://Acme-V02.API.LetsEncrypt.org.:443/directory/", id="all-of-them"),
+        pytest.param(" https://acme-v02.api.letsencrypt.org/directory", id="leading-space"),
+    ],
+)
+def test_lets_encrypt_production_is_production_however_it_is_spelled(
+    tmp_path: Path, ca: str
+) -> None:
+    """Review M2 (fix round, 2026-11-27): to Let's Encrypt, the name's case, a
+    trailing slash, a final dot and an explicit :443 are the same production
+    CA, so the name is never left unasked of DNS against any of them; and the
+    CA line says production, not rehearsal."""
+    env = {**GOOD_ENV, "ITS_ACME_CA_SERVER": ca}
+    run = _run(tmp_path, env, {**GOOD_HOST, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert run.returncode == 1, run.stdout
+    refusal = "REFUSE  ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA"
+    assert refusal in run.stdout
+    assert "was not asked of DNS" not in run.stdout
+    plain = _run(tmp_path, env, GOOD_HOST)
+    if ca.startswith("https://"):
+        assert plain.returncode == 0, plain.stdout
+        assert "ok      ACME CA: Let's Encrypt production" in plain.stdout
+    else:
+        assert "is not an https URL" in plain.stdout
+
+
+def test_staging_is_not_production_and_the_name_may_be_left_unasked(tmp_path: Path) -> None:
+    staging = "https://acme-staging-v02.api.letsencrypt.org/directory"
+    env = {**GOOD_ENV, "ITS_ACME_CA_SERVER": staging}
+    run = _run(tmp_path, env, {**GOOD_HOST, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert run.returncode == 0, run.stdout
+    assert "was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1)" in run.stdout
