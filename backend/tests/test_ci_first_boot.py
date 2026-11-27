@@ -4,8 +4,9 @@ operator's scripts (design 2026-11-27-despliegue-automatizado §5).
 The live run is CI's. These hold what the driver may print and type -- each
 secret masked before the line that carries it, the answers on the script's
 stdin -- and that the job runs the scripts the way the runbook's operator
-does, plus the two checks the design adds: OpenBao unsealing itself after a
-restart, and first-boot.sh run again changing nothing.
+does, plus the three checks the design adds: OpenBao unsealing itself after a
+restart, first-boot.sh run again changing nothing, and (7c-bis) a signed hello
+refused by an agent that pins a key the server does not hold.
 """
 
 import ast
@@ -327,3 +328,14 @@ def test_the_teardown_removes_what_the_scripts_wrote_as_root() -> None:
     )
     for path in written:
         assert path in run, path
+
+
+def test_the_drivers_usage_does_not_tell_a_person_to_set_the_bypass() -> None:
+    """Review T5#4: ITS_FIRST_BOOT_ALLOW_NONTTY=1 lets first-boot.sh print the
+    shares with no terminal, and only the driver may set it, for its own child.
+    A usage line that sets it would have a reader export it in their shell."""
+    source = (REPO / "deploy" / "ci" / "first_boot_answers.py").read_text()
+    doc = ast.get_docstring(ast.parse(source)) or ""
+    usage = [line.strip() for line in doc.splitlines() if "ci/first_boot_answers.py" in line]
+    assert usage and all(line.startswith("python3 ci/first_boot_answers.py") for line in usage)
+    assert '"ITS_FIRST_BOOT_ALLOW_NONTTY": "1"' in source

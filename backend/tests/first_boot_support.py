@@ -96,6 +96,14 @@ ALLOWED = {
     "gateway-issuer": ["etc/gateway-issuer.token"],
 }
 
+#: How long `Host.run_pty` lets a run take: 180 s, against about 2 s in practice,
+#: since 60 s was once not enough under a parallel Docker rehearsal (the final
+#: review of 2026-11-27). A passing run ends at its EOF, so this costs it
+#: nothing. A test that uses it marks itself with PTY_TIMEOUT, above it, since
+#: pytest-timeout's 120 s (backend/pyproject.toml) would otherwise end it first.
+PTY_DEADLINE = 180
+PTY_TIMEOUT = PTY_DEADLINE + 60
+
 #: The long-running services `docker compose up -d` starts, and the one-shots.
 LONG = ("api", "backup-replicator", "gateway", "minio", "openbao", "postgres", "redis",
         "traefik", "web", "worker")  # fmt: skip
@@ -450,7 +458,14 @@ if argv[:2] == ["volume", "ls"]:
         sys.stderr.write(s["volume_ls_error"] + "\n")
         rc = 1
     else:
-        out("".join(v + "\n" for v in s["volumes"]))
+        # `volumes` carry Compose's labels; `unlabelled_volumes` are this stack's
+        # by name only, as `docker volume create "it-suite_$v"` made them (the
+        # rehearsal of 2026-11-27); `other_volumes`, another project's or none.
+        # The label filter sees the first alone, as Docker's does.
+        names = list(s["volumes"])
+        if "label=com.docker.compose.project=it-suite" not in argv:
+            names += s.get("unlabelled_volumes", []) + s.get("other_volumes", [])
+        out("".join(v + "\n" for v in names))
 elif argv[:2] == ["image", "inspect"]:
     rc = 0 if all(ref in s["images"] for ref in argv[2:]) else 1
 elif argv[0] == "inspect":
@@ -1161,7 +1176,7 @@ class Host:
         stdin_tty: bool = True,
         stdin: str = "",
         env: dict[str, str] | None = None,
-        timeout: float = 60,
+        timeout: float = PTY_DEADLINE,
     ) -> tuple[int, str]:
         """first-boot.sh with its output (and, unless STDIN_TTY is false, its
         input) on a pseudo-terminal, as an operator runs it. Each answer is

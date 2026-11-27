@@ -344,7 +344,9 @@ also lets in a port this stack does not need. A `FAILED` line says what failed
 and the command to go on with, which names the script by its own absolute
 path, `sudo /opt/it-suite/deploy/scripts/prepare-host.sh`, so it works from
 any folder: run it again once the fix is made, and it picks up where it
-stopped. It ends:
+stopped. Each `apt-get` it runs waits up to five minutes for dpkg's lock
+(`-o DPkg::Lock::Timeout=300`), which cloud-init or unattended-upgrades may
+still hold on a VPS minutes old, rather than stopping at once. It ends:
 
 ```text
 Docker's versions
@@ -367,7 +369,8 @@ Docker have still been run by nobody in this repository, as before 2026-11-27.
 
 ## First boot
 
-Three commands from `/opt/it-suite/deploy`, after the prerequisites, and the
+Two commands from `/opt/it-suite/deploy` -- `first-boot.sh`, then
+`first-boot-check.sh`, after `prepare-host.sh` in the prerequisites -- and the
 moments that need you in between: the secrets only you may see or keep, and
 what is done in the browser. Each script runs the blocks of [What each script
 does, by hand](#appendix-what-each-script-does-by-hand), the appendix, in the
@@ -392,7 +395,12 @@ that clears the screen holding the shares -- and so does every way on after
 the first. **That is deliberate**: pasted with the rest of the report, its
 prompt takes the next pasted line, or waits for the keyboard, and either way
 it is not the word, so nothing of that way runs. Type the word only when you
-mean that way.
+mean that way. **One deletion asks for no word**: removing a gateway-issuer
+token file that no OpenBao on this host knows --
+`sudo rm -f /etc/it-suite/gateway-issuer.token`, then the script again --, the
+one way on of each report that finds such a file (when an earlier first boot's
+key file is found beside it, `DELETE` covers both). It loses nothing that
+cannot be had again: the next run issues a new one (step 3.4).
 
 Start from genuinely empty state: a new VPS, where nothing of an earlier first
 boot is left. `first-boot.sh` refuses `.env`, OpenBao, the volumes and the
@@ -400,8 +408,10 @@ files it keeps under `/etc/it-suite` when they come from two different first
 boots, and says how to go on. Starting over after a failed attempt, rather
 than running the script again, is the way on its refusals give behind
 `DESTROY`: it runs `docker compose down -v` -- a half-initialised Postgres data
-directory or OpenBao barrier hides the step that actually broke --, `rm .env`
-and
+directory or OpenBao barrier hides the step that actually broke --, `rm .env`,
+then removes every volume left whose name starts `it-suite_` (`down -v` skips
+the ones a restore made with `docker volume create` and no Compose labels,
+`docs/07-backup-restore.md` §3 before 2026-11-27), and
 `sudo rm -f /etc/it-suite/gateway-issuer.token /etc/it-suite/openbao-unseal/unseal.key`
 (keep the off-host copy of an earlier key file only as long as you keep
 backups of the vault it unsealed). **A first boot after `down -v` asks Let's
@@ -436,7 +446,8 @@ stops for you four times:
 2. **The five unseal key shares and the root token, shown once** (step 3.2).
    Copy each share to a different custodian and the root token to your
    password manager, all of it **off this VPS**, then type `SAVED`, in
-   capitals. The screen and its scrollback are cleared after it. If anything
+   capitals. The screen and the terminal's own scrollback are cleared after it
+   (a tmux or screen session, and an SSH client's own log, keep theirs). If anything
    stops the script at that prompt -- Ctrl-C, the end of its input --, it says
    first that the screen holds their only copy, then gives the two ways on:
    they are stored, and behind `SAVED` it clears the screen and runs again; or
@@ -467,7 +478,7 @@ Step 8 — the install code
 
   install code  …
 
-  note    open https://rmm.novieri.com/ in a browser you trust and enter it (deploy/README.md, First boot, 2): it is a password until you have
+  note    open https://rmm.novieri.com/ in a browser you trust and enter it (deploy/README.md, First boot, 2): treat it as a password until you have claimed the installation
 
 First boot: every step is done.
   note    Next, in a browser (deploy/README.md, First boot, 2): https://rmm.novieri.com/ with the install code;
@@ -551,14 +562,18 @@ that device in the console -- this VPS's name, and the device id it prints --
 and waits up to ten minutes (`--wait-job` for longer) for that job to come back
 signed and succeeded (11d), its row in four columns, `id|type|status|signed`;
 then it verifies the audit chain (11e), retires the agent (11f) and takes the
-first backup (12). A good run ends:
+first backup (12). Step 12 installs the backup timer and runs the backup with
+`sudo`: `sudo` may ask for your password there. A good run ends:
 
 ```text
 Step 11d — round-trip a signed job
   note    NOW, in the console: Devices -> …, the one that is online (device id …) -> Run job -> Collect inventory.
 …
         …|inventory.collect|succeeded|t
-  ok      step 11d: signed by the server, verified by the agent before it ran, and its result back over :8443
+  ok      step 11d: a job you asked for, signed by the server (its signature is on record), ran on the agent, and its result came back over :8443
+  note    whether the agent checked that signature before it ran the job cannot be seen from this host:
+  note    CI's deploy job proves it on every push (7c-bis: the same agent code refuses a hello signed by a key it does not pin).
+  note    Deploy only a main commit whose deploy job is green.
 …
 Step 12 — the first backup, so that there is a way back
   ok      step 12: the newest backup: …
@@ -570,6 +585,15 @@ First boot is complete.
   note    (recovery keys), the unseal key file, the ten recovery codes, .env and the its-secrets, its-ca
   note    and openbao-data volumes -- GO-LIVE.md §6.
 ```
+
+**What step 11d's `ok` says is what this VPS can see**: a job you asked for,
+with the server's signature on record, ran and came back. That the agent
+checked that signature before it ran anything is invariant 1's half on the
+endpoint, and no script on this VPS can observe it -- an agent that never
+checks would leave the same row. CI's `deploy` job proves it on every push,
+in its step 7c-bis: the same agent code, pinning a key the server does not
+hold, refuses a server-signed `hello` with `bad_signature`. So deploy only a
+`main` commit whose `deploy` job is green.
 
 **Run again after it stopped** -- a failed check, Ctrl-C, a dropped SSH
 session --: if it had the token by then, it retired its agent on the way out,
@@ -595,14 +619,18 @@ script has retired the agent already, after printing its last log lines.
 
 ### 4. Custody: off this VPS, now
 
-- **The five shares and the root token** (step 3.2). With the auto-unseal they
-  are **recovery keys**: they authorize `openbao-seal.sh disable` and `bao
-  operator generate-root`, and they cannot unseal OpenBao.
+- **The five shares and the root token** (step 3.2). With the auto-unseal the
+  shares are **recovery keys**: they authorize `openbao-seal.sh disable`, and,
+  with the root token, `bao operator generate-root`: they are no way back from
+  a lost root token; they cannot unseal OpenBao. The root token's off-host
+  copy is the only way back to root (GO-LIVE.md §4).
 - **The auto-unseal's key file, `/etc/it-suite/openbao-unseal/unseal.key`**, off
   this VPS and **apart from any copy of `openbao-data`**: someone with both
   holds the job-signing key and the CA. If it is lost, OpenBao cannot be
   unsealed at all, by anyone (GO-LIVE.md §4). It is 32 bytes, mode `0400`,
-  owned by the OpenBao user: `sudo install -m 600 -o "$USER" /etc/it-suite/openbao-unseal/unseal.key ~/unseal.key`
+  owned by uid:gid `100:1000`, OpenBao's user in its image (`ls -l` shows
+  whatever names this host has for those numbers, or the numbers):
+  `sudo install -m 600 -o "$(id -un)" /etc/it-suite/openbao-unseal/unseal.key ~/unseal.key`
   puts a copy you can read in your home directory; take it to your computer
   with `scp`, then `shred -u ~/unseal.key` here.
 - **The audit HMAC key** (the `its-secrets` volume), the `its-ca` and
@@ -1962,6 +1990,22 @@ cd /opt/it-suite/deploy
 docker compose exec openbao bao status
 ```
 
+Asked within a minute or so of the boot, it may not connect yet, or say
+`Sealed true` for a moment: OpenBao is still starting, and unseals itself once
+it has. Then wait for it, at most a minute, and ask again:
+
+```sh
+docker compose up -d --wait --wait-timeout 60 openbao
+docker compose exec openbao bao status
+```
+
+The first line returns once OpenBao's health check passes, which is only when
+it is unsealed: about 5 s after a restart, when it was rehearsed (2026-11-27,
+real Docker). If that wait exits non-zero, read [If `bao status` says `Sealed true`](#if-bao-status-says-sealed-true)
+below: with the key file missing it fails at once, with `bind source path does
+not exist`; with a key that does not unseal it, it gives up with
+`application not healthy after 30s`.
+
 `Sealed false`, with `Seal Type static`, and nobody typed a share: then
 
 ```sh
@@ -1980,39 +2024,60 @@ api` if it lasts.
 
 ### If `bao status` says `Sealed true`
 
-Or that the `openbao` service is not running, which is what a missing key file
-does: OpenBao cannot start without it. With the auto-unseal on, a sealed
-OpenBao means its key file is missing, or is not this OpenBao's. **The five
-shares cannot unseal it**: they are recovery keys since the auto-unseal went
-on. Look, alone:
+Or that the `openbao` service is not running. With the auto-unseal on, either
+means OpenBao's key file is missing, damaged, or not this OpenBao's. **The
+five shares cannot unseal it**: they are recovery keys since the auto-unseal
+went on. Look, alone:
 
 ```sh
 sudo ./scripts/openbao-seal.sh status
 docker compose logs --tail 50 openbao
 ```
 
-`the key file is missing`; or it is there, and OpenBao's log says it could not
-unseal with it (a key of another first boot, or a damaged file): put back the
-copy you keep off this VPS. From your computer, copy it to this VPS with
-`scp`, as `unseal.key` in your home directory there (`~/unseal.key`); then, on
-this VPS:
+What each looked like when it was rehearsed (2026-11-27, real Docker):
+
+- **The key file is missing** (`openbao-seal.sh status` says `the key file is
+  missing`): `bao status` says the `openbao` service is not running; its log
+  shows only its previous run, ending `core: vault is sealed`; and `docker
+  compose up -d` fails, with `bind source path does not exist`, rather than
+  blocking as a sealed OpenBao does.
+- **The file is damaged**, not 32 bytes (`openbao-seal.sh status` gives its
+  size): the container keeps restarting, and its log says
+  `Error configuring seal "static": unknown encoding for AES-256 key`.
+- **The key is another first boot's**: `Sealed true`, and the log repeats
+  `failed to unseal core: … message authentication failed`.
+
+In all three, the way back is the block below, with the copy you keep off this
+VPS. From your computer, copy it to this VPS with `scp`, as `unseal.key` in
+your home directory there (`~/unseal.key`); then, on this VPS:
 
 ```sh
 sudo install -D -m 400 ~/unseal.key /etc/it-suite/openbao-unseal/unseal.key && sudo chmod 700 /etc/it-suite/openbao-unseal && shred -u ~/unseal.key
 sudo chown "$(docker compose run --rm --no-deps -T --entrypoint id openbao -u openbao):$(docker compose run --rm --no-deps -T --entrypoint id openbao -g openbao)" /etc/it-suite/openbao-unseal/unseal.key
 docker compose restart openbao
+docker compose up -d --wait --wait-timeout 60 openbao
 docker compose exec openbao bao status
 ```
 
 `Sealed false`: go on with `docker compose up -d` above. (A key file that is
 there and good, beside an OpenBao that is not running, leaves the log to say
-what else stopped it.) ⚠ **UNVERIFIED**: nobody has put a key file back yet --
-CI and `openbao-seal.sh`'s tests turn the auto-unseal on and restart OpenBao,
-and neither takes the file away. **If the key file is lost for good, OpenBao cannot
-be unsealed by anyone**, with the shares or without them, and neither can any
-copy of `openbao-data` taken since the auto-unseal went on: the job-signing
-key, the agent CA and every sealed credential go with it
-(`docs/07-backup-restore.md` §5).
+what else stopped it.) Rehearsed on 2026-11-27 against ca47ada with real
+Docker (not on a VPS, and as root): with the key file removed, replaced by a
+wrong 32-byte key, cut to 16 bytes, and with its directory gone, this block put
+it back and OpenBao came back `Sealed false`, `Seal Type static`. (The wait
+line was measured in the same rehearsal: After a reboot or a restart, above.)
+
+**If the key file is lost for good, OpenBao cannot be unsealed by anyone**,
+with the shares or without them, and neither can any copy of `openbao-data`
+taken since the auto-unseal went on: the job-signing key, the agent CA and
+every sealed credential go with it (`docs/07-backup-restore.md` §5). One copy
+is older than the auto-unseal: the snapshot of `openbao-data` that
+`openbao-seal.sh enable` took just before it, under
+`/var/backups/it-suite/openbao-seal/`, Shamir-sealed, which three shares open.
+**Keep it until the off-host copy of the key file has been compared with this
+host's** -- `sudo sha256sum /etc/it-suite/openbao-unseal/unseal.key` here and
+`sha256sum unseal.key` on your computer (`shasum -a 256 unseal.key` on macOS)
+must print the same hash -- and delete it only then.
 
 A host still on Shamir -- one from before 2026-11-27 that never ran
 `openbao-seal.sh enable`, or one that ran `disable` -- says `Seal Type
@@ -4153,7 +4218,9 @@ Initialized        false
 
 `Initialized false` (and, below these lines, `Sealed true`) is correct. Its
 exit status is 2, not 0: `bao status` exits 2 for any sealed vault, initialised
-or not. (The `bao` CLI defaults to
+or not. By hand, if it cannot connect yet, give it a few seconds and ask again:
+`--wait` is no help here, because OpenBao's health check passes only once it
+is unsealed, and a new one is not. (The `bao` CLI defaults to
 `https://`, but the listener is plaintext inside the compose network only;
 `BAO_ADDR=http://127.0.0.1:8200` is set on the service so these commands work
 as written. Without it every one of them fails with `http: server gave HTTP
@@ -4433,6 +4500,7 @@ the script does it:
 
 ```sh
 docker compose restart openbao
+docker compose up -d --wait --wait-timeout 60 openbao
 docker compose exec openbao bao status
 ```
 
@@ -4442,9 +4510,12 @@ Initialized        true
 Sealed             false
 ```
 
-`Sealed false`, with no share typed. The five shares are **recovery keys**
-from now on: they authorize `openbao-seal.sh disable` and `bao operator
-generate-root`, and cannot unseal.
+`Sealed false`, with no share typed. (The script waits its own way, asking
+`bao status` every 3 s until OpenBao says it is unsealed, up to 90 s: asked
+the instant it restarts, it may not answer yet.) The five shares are **recovery
+keys** from now on: they authorize `openbao-seal.sh disable`, and, with the
+root token, `bao operator generate-root`: they are no way back from a lost
+root token; they cannot unseal OpenBao.
 
 #### Step 4 — Migrations, then table privileges
 
@@ -4791,7 +4862,9 @@ X509v3 Subject Alternative Name:
 
 That is OpenSSL 3.0's format, the one on Ubuntu 24.04; a newer OpenSSL
 prints `issuer=CN=Novieri RMM internal CA`, without the spaces, and step 7
-accepts either.
+accepts either. It compares that name, not the chain: what it tells apart is
+the gateway answering `:8443` from Traefik answering for it, and its `ok`
+says so. Agents check the chain themselves, against the CA they pin.
 
 Two different issuers on the two ports is the correct picture. If `:8443`
 shows a Let's Encrypt issuer, an agent will never connect. The likeliest
@@ -4891,7 +4964,9 @@ Microsoft sign-in is in **Settings → Microsoft sign-in**.
 ### `first-boot-check.sh`: steps 10 to 12
 
 Before step 10 it asks `docker compose exec openbao bao status`, and stops
-unless OpenBao is unsealed.
+unless OpenBao is unsealed; when it does not answer at all, its way on is that
+question again, alone, and [After a reboot or a
+restart](#after-a-reboot-or-a-restart).
 
 #### Step 10 — Confirm you really are an administrator
 
@@ -5052,8 +5127,9 @@ inventory.collect|succeeded|t
 
 That is the platform working: the server signed the job envelope with the
 Ed25519 key that never leaves OpenBao, the agent verified the signature before
-executing anything (there is no unsigned command path), and the result came
-back up the same mTLS connection.
+executing anything (there is no unsigned command path; CI's 7c-bis is the
+proof, and this check cannot see it), and the result came back up the same
+mTLS connection.
 
 ##### 11e — The audit chain
 

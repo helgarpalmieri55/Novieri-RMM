@@ -159,11 +159,16 @@ stack, so the roles come from `.env` (via `init-app-user.sh`) rather than from
 ```sh
 cd deploy
 docker compose down -v            # destroys ALL volumes — you are recovering
+# ...and those a restore made before 2026-11-27 without Compose's labels,
+# which `down -v` skips ("Skipped Volume was not created by Docker Compose").
+docker volume ls -q | sed -n '/^it-suite_/p' | xargs -r docker volume rm
 cp "$BK/env" .env                 # or recreate it; passwords must match the dump era
 
-# 1. Key material first — restore before anything reads it.
+# 1. Key material first — restore before anything reads it. With Compose's
+#    two labels, or every later compose command warns about the volume and
+#    `down -v` leaves it behind (rehearsal of 2026-11-27).
 for v in openbao-data its-ca its-secrets its-gateway-tls minio-data; do
-  docker volume create "it-suite_$v" >/dev/null
+  docker volume create --label com.docker.compose.project=it-suite --label com.docker.compose.volume="$v" "it-suite_$v" >/dev/null
   docker run --rm -v "it-suite_$v:/data" -v "$BK:/backup:ro" alpine \
     tar xzf "/backup/$v.tgz" -C /data
 done
@@ -191,7 +196,9 @@ docker compose run --rm postgres-grants
 #    reboot or a restart"), and it unseals itself -- `bao status` says
 #    Sealed false. A host still on Shamir unseals instead with three shares:
 #    docker compose exec openbao bao operator unseal, three times.
-docker compose up -d openbao
+#    A non-zero exit from the wait: deploy/README.md, "If `bao status` says
+#    `Sealed true`".
+docker compose up -d --wait --wait-timeout 60 openbao
 docker compose exec openbao bao status
 docker compose up -d
 ```

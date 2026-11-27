@@ -402,7 +402,8 @@ def test_the_prerequisites_open_only_ssh_the_console_and_the_gateway() -> None:
     assert sorted(opened) == [
         "ufw allow 22/tcp", "ufw allow 443/tcp", "ufw allow 8443/tcp"
     ]  # fmt: skip
-    assert "apt-get remove -y $(dpkg --get-selections docker.io" in code
+    # Each apt-get waits for dpkg's lock (review N6); the removal is still dpkg's selection.
+    assert "apt-get -o DPkg::Lock::Timeout=300 remove -y $(dpkg --get-selections docker.io" in code
     assert "docker.io" not in code.replace("dpkg --get-selections docker.io", "")
     # GitHub's published Ed25519 host key, before the first ssh to it.
     p6 = [c for block in _sh_blocks(prereq) for c in _commands(block)]
@@ -456,3 +457,233 @@ def test_nothing_copies_a_certificate_into_deploy_certs() -> None:
     # Non-vacuity: the form the old step 7 shipped is seen, and a URL is not.
     assert DEPLOY_CERTS.search("cp /etc/letsencrypt/live/x/fullchain.pem certs/fullchain.pem")
     assert not DEPLOY_CERTS.search("curl https://letsencrypt.org/certs/staging/x.pem")
+
+
+# --------------------------------------------------------------------------- #
+# The final round (review of 2026-11-27, and its real-Docker rehearsal)
+# --------------------------------------------------------------------------- #
+
+#: The wait the rehearsal of 2026-11-27 measured on ca47ada: exit 0 about 5 s
+#: after a restart with a good key; exit 1 at once with the key file missing
+#: (`bind source path does not exist`); `application not healthy after 30s`
+#: with a wrong one.
+WAIT = "docker compose up -d --wait --wait-timeout 60 openbao"
+ASK = "docker compose exec openbao bao status"
+SEALED_TRUE = "### If `bao status` says `Sealed true`\n"
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _restore_section() -> str:
+    return _section(BACKUP_DOC.read_text(), "## 3. Restoring into a clean stack")
+
+
+def _sealed_true() -> str:
+    text = _after_reboot()
+    return text[text.index(SEALED_TRUE) :]
+
+
+def _step_3_1() -> str:
+    text = _appendix()
+    start = text.index("##### 3.1 Start it\n")
+    return text[start : text.index("##### 3.2 ", start)]
+
+
+def test_openbao_is_waited_for_before_it_is_asked_again_after_a_restart() -> None:
+    """Review F2: `bao status` asked the instant OpenBao is (re)started reads a
+    refused connection or a passing `Sealed true`, and the prose then blames the
+    key file in the middle of a recovery. Every block that restarts OpenBao, or
+    starts a restored host's, and then asks it waits first, bounded; the first
+    question after a reboot is still the sequence's first command, alone
+    (CLAUDE.md), and the README re-asks with the wait; and step 3.1 of a new
+    host does not wait, since the health check passes only once it is unsealed."""
+    reboot = _sh_blocks(_after_reboot())
+    assert [c for c in _commands(reboot[0]) if not c.startswith("cd ")] == [ASK]
+    assert [WAIT, ASK] in [_commands(b) for b in reboot], "the re-ask after a reboot waits"
+    waits = 0
+    fresh = _sh_blocks(_step_3_1())  # a new host's OpenBao: never healthy before its unseal
+    for name, text in (("After a reboot", _after_reboot()), ("the appendix", _appendix()),
+                       ("docs/07 §3", _restore_section())):  # fmt: skip
+        for block in _sh_blocks(text):
+            if block in fresh:
+                continue
+            commands = _commands(block)
+            assert "docker compose up -d openbao" not in commands, (name, commands)
+            for i, command in enumerate(commands):
+                if command == WAIT:
+                    waits += 1
+                    assert commands[i + 1 : i + 2] == [ASK], (name, commands)
+                if command == ASK and any("openbao" in c and (" restart " in f" {c} " or
+                                          " up " in f" {c} ") for c in commands[:i]):  # fmt: skip
+                    assert commands[i - 1] == WAIT, (name, commands)
+    assert waits == 4, waits  # the re-ask, the key file put back, the auto-unseal, docs/07
+    assert WAIT not in [c for b in _sh_blocks(_step_3_1()) for c in _commands(b)]
+    assert "`--wait` is no help here" in _flat(_step_3_1())
+    reboot_text = _flat(_after_reboot())
+    link = "[If `bao status` says `Sealed true`](#if-bao-status-says-sealed-true)"
+    assert f"exits non-zero, read {link}" in reboot_text
+    for measured in ("`bind source path does not exist`", "`application not healthy after 30s`"):
+        assert measured in reboot_text, measured
+    assert "A non-zero exit from the wait" in _restore_section()
+
+
+def test_the_walkthrough_names_the_one_deletion_behind_no_word() -> None:
+    """Review F3: the walkthrough said every way on that destroys or undoes asks
+    for a typed word. One does not: deleting a gateway-issuer token file that no
+    OpenBao on this host knows, which the next run reissues. It says so, and the
+    script still has that way on, unguarded, three times."""
+    walk = _flat(_first_boot())
+    assert "**One deletion asks for no word**" in walk
+    assert "`sudo rm -f /etc/it-suite/gateway-issuer.token`" in walk
+    assert "the next run issues a new one (step 3.4)" in walk
+    boot = _code("first-boot.sh")
+    assert boot.count('"sudo rm -f $token_file_q && $rerun"') == 2
+    assert 'removal="sudo rm -f ${found[*]} && $rerun"' in boot
+
+
+#: Measured on OpenBao 2.6.1 (rehearsal of 2026-11-27): with no token,
+#: `bao operator generate-root` is refused `403 permission denied`, the old
+#: unauthenticated endpoint answers 405, and with the root token `-init` asks
+#: for three shares. So the shares are no way back from a lost root token.
+RECOVERY = (
+    "they authorize `openbao-seal.sh disable`, and, with the root token, `bao operator "
+    "generate-root`: they are no way back from a lost root token; they cannot unseal OpenBao"
+)
+
+
+def _notes(script: str) -> str:
+    """What a script's `note` lines print, joined, as a reader reads them."""
+    return _flat(" ".join(re.findall(r'note "(.*)"$', _code(script), re.MULTILINE)))
+
+
+def test_the_shares_are_no_way_back_from_a_lost_root_token() -> None:
+    """Rehearsal of 2026-11-27, on OpenBao 2.6.1: generate-root needs the root
+    token AND three shares. Wherever the shares are called recovery keys, that is
+    what is said, in the runbook and in what the scripts print; GO-LIVE says the
+    root token's off-host copy is the only way back to root, and names the setting
+    that decides it, which config.hcl leaves alone (the operator's decision)."""
+    custody = _flat(_first_boot()).replace("**", "")
+    appendix = _flat(_appendix()).replace("**", "")
+    seal = _flat(_section(GO_LIVE.read_text(), "## 4. OpenBao seal"))
+    for name, text in (("First boot, 4", custody), ("the appendix", appendix),
+                       ("GO-LIVE §4", seal.replace("**", ""))):  # fmt: skip
+        assert RECOVERY in text, name
+    old = "authorize `openbao-seal.sh disable` and `bao operator generate-root`"
+    for path in RUNBOOKS:
+        assert old not in _flat(path.read_text()).replace("**", ""), path.name
+    assert "**The root token's off-host copy is the only way back to root**" in seal
+    assert "`disable_unauthed_generate_root_endpoints`" in seal
+    hcl = (REPO / "deploy" / "openbao" / "config.hcl").read_text()
+    assert "disable_unauthed_generate_root_endpoints" not in hcl
+    printed = RECOVERY.replace("`", "")
+    assert printed in _notes("first-boot.sh"), "first-boot.sh's custody notes"
+    assert "whose off-host copy is the only way back to root" in _notes("first-boot.sh")
+    seal_notes = _notes("openbao-seal.sh")
+    assert "They authorize disable, and, with the root token, bao operator generate-root" in (
+        seal_notes
+    )
+    assert "they are no way back from a lost root token; they cannot unseal OpenBao" in seal_notes
+    for script in ("first-boot.sh", "openbao-seal.sh"):
+        assert "(disable, generate-root)" not in _notes(script), script
+        assert "disable, bao operator generate-root)" not in _notes(script), script
+
+
+def test_the_restore_makes_volumes_that_compose_owns_and_removes() -> None:
+    """Rehearsal of 2026-11-27: `docker volume create "it-suite_$v"` makes volumes
+    with no Compose labels, so every later compose command warns and `down -v`
+    skips them (`Skipped Volume was not created by Docker Compose`); with the two
+    labels, `down -v` removes them. And the restore's own `down -v` leaves none an
+    earlier restore made without them."""
+    commands = [c for b in _sh_blocks(_restore_section()) for c in _commands(b)]
+    assert [c for c in commands if "docker volume create" in c] == [
+        "docker volume create --label com.docker.compose.project=it-suite "
+        '--label com.docker.compose.volume="$v" "it-suite_$v" >/dev/null'
+    ]
+    down = next(i for i, c in enumerate(commands) if c.startswith("docker compose down -v "))
+    assert commands[down + 1] == (
+        "docker volume ls -q | sed -n '/^it-suite_/p' | xargs -r docker volume rm"
+    ), commands[down + 1]
+
+
+def test_the_sealed_true_section_says_what_each_key_file_fault_looked_like() -> None:
+    """Rehearsal of 2026-11-27: the three ways a key file goes wrong, as each
+    showed itself, and the block that put each back, now rehearsed and no longer
+    marked UNVERIFIED; the block as rehearsed, with the wait added (F2)."""
+    sealed = _flat(_sealed_true())
+    for seen in (
+        "`openbao` service is not running",
+        "`core: vault is sealed`",
+        "`bind source path does not exist`",
+        'Error configuring seal "static": unknown encoding for AES-256 key',
+        "message authentication failed",
+        "In all three, the way back is the block below",
+    ):
+        assert seen in sealed, seen
+    assert "UNVERIFIED" not in sealed
+    assert (
+        "Rehearsed on 2026-11-27 against ca47ada with real Docker (not on a VPS, and as "
+        "root): with the key file removed, replaced by a wrong 32-byte key, cut to 16 bytes, "
+        "and with its directory gone, this block put it back and OpenBao came back "
+        "`Sealed false`, `Seal Type static`."
+    ) in sealed
+    block = next(b for b in _sh_blocks(_sealed_true()) if "~/unseal.key" in b)
+    assert _commands(block) == [
+        "sudo install -D -m 400 ~/unseal.key /etc/it-suite/openbao-unseal/unseal.key"
+        " && sudo chmod 700 /etc/it-suite/openbao-unseal && shred -u ~/unseal.key",
+        'sudo chown "$(docker compose run --rm --no-deps -T --entrypoint id openbao -u openbao)'
+        ':$(docker compose run --rm --no-deps -T --entrypoint id openbao -g openbao)"'
+        " /etc/it-suite/openbao-unseal/unseal.key",
+        "docker compose restart openbao",
+        WAIT,
+        ASK,
+    ]
+
+
+def test_the_key_files_copy_works_without_user_and_names_its_owner_by_number() -> None:
+    """Rehearsal of 2026-11-27: `install -o "$USER"` failed where `$USER` was unset
+    (`install: invalid user ''`); `id -un` always answers. The key file is owned by
+    uid:gid 100:1000, OpenBao's user in its image, which `ls -l` names as this host
+    does, if at all."""
+    custody = _flat(_first_boot())
+    copy = (
+        '`sudo install -m 600 -o "$(id -un)" /etc/it-suite/openbao-unseal/unseal.key'
+        " ~/unseal.key`"
+    )
+    assert copy in custody
+    assert '-o "$USER"' not in README.read_text()
+    seal = _flat(_section(GO_LIVE.read_text(), "## 4. OpenBao seal"))
+    for name, text in (("First boot, 4", custody), ("GO-LIVE §4", seal)):
+        assert "uid:gid `100:1000`, OpenBao's user" in text, name
+        assert "`ls -l` shows whatever names this host has for those numbers" in text, name
+
+
+def test_the_shamir_snapshot_is_kept_until_the_key_files_copy_is_checked() -> None:
+    """Review T6#5: while the snapshot openbao-seal.sh took before the auto-unseal
+    exists, three shares still open the first boot's vault; deleting it before the
+    key file's off-host copy is checked can delete the only way back."""
+    lost = _flat(_sealed_true())
+    assert "/var/backups/it-suite/openbao-seal/" in lost
+    assert "`sudo sha256sum /etc/it-suite/openbao-unseal/unseal.key`" in lost
+    seal = _flat(_section(GO_LIVE.read_text(), "## 4. OpenBao seal"))
+    assert "delete it once you are satisfied" not in seal
+    assert "until the off-host copy of the key file has been compared with this host's" in seal
+    for script in ("first-boot.sh", "openbao-seal.sh"):
+        assert "once you are satisfied" not in (SCRIPTS / script).read_text(), script
+
+
+def test_the_walkthrough_says_what_the_final_review_found_it_left_out() -> None:
+    """Review T6#2: First boot is two commands, after prepare-host.sh; T6#4:
+    first-boot-check.sh's step 12 runs sudo, which may ask for a password; N5:
+    the clear after SAVED reaches the terminal's own scrollback, not a tmux or
+    screen session's, nor an SSH client's log; N6: prepare-host.sh waits for
+    apt's lock instead of stopping at once on a VPS minutes old."""
+    walk = _flat(_first_boot())
+    assert "Three commands from `/opt/it-suite/deploy`, after the prerequisites" not in walk
+    assert "Two commands from `/opt/it-suite/deploy`" in walk
+    check = _flat(walk[walk.index("### 3. `first-boot-check.sh`") :])
+    assert "step 12" in check and "`sudo` may ask for your password" in check
+    assert "tmux" in walk and "an SSH client's own log" in walk
+    prereq = _flat(_section(README.read_text(), PREREQUISITES))
+    assert "`-o DPkg::Lock::Timeout=300`" in prereq

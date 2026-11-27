@@ -39,8 +39,10 @@ die() {
   exit 1
 }
 
-# Anything that stops the run outside `die` (apt holding its lock, a mirror that does not
-# answer, curl failing) ends here: FAILED, the step it was in, and the way to continue.
+# Anything that stops the run outside `die` (apt holding its lock past the 300 s each
+# apt-get waits for it, a mirror that does not answer, curl failing) ends here: FAILED,
+# the step it was in, and the way to continue. The wait is for a VPS minutes old, whose
+# cloud-init or unattended-upgrades may still hold dpkg's lock (review N6, 2026-11-27).
 trap 'on_exit $?' EXIT
 on_exit() { [ "$1" = 0 ] || fail_help "$1"; }
 fail_help() {
@@ -132,8 +134,8 @@ if [ "$(dpkg-query -W -f='${Status}' unattended-upgrades 2>/dev/null || true)" =
   skip "P3: unattended-upgrades is installed, on, and active"
 else
   act "apt-get install unattended-upgrades, and its two lines in /etc/apt/apt.conf.d/20auto-upgrades"
-  apt-get update
-  apt-get install -y unattended-upgrades
+  apt-get -o DPkg::Lock::Timeout=300 update
+  apt-get -o DPkg::Lock::Timeout=300 install -y unattended-upgrades
   printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' | tee /etc/apt/apt.conf.d/20auto-upgrades
   [ "$(systemctl is-active unattended-upgrades 2>/dev/null || true)" = active ] \
     || die "unattended-upgrades is not active" "sudo systemctl enable --now unattended-upgrades" "$rerun"
@@ -174,15 +176,15 @@ if [ "$(dpkg-query -W -f='${Status}' docker-ce 2>/dev/null || true)" = "install 
 else
   act "the distribution's conflicting packages out; Docker's apt repository; docker-ce and its plugins"
   # shellcheck disable=SC2046  # one word per package the selection names
-  apt-get remove -y $(dpkg --get-selections docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc 2>/dev/null | cut -f1)
-  apt-get install -y ca-certificates curl git openssl iproute2
+  apt-get -o DPkg::Lock::Timeout=300 remove -y $(dpkg --get-selections docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc 2>/dev/null | cut -f1)
+  apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl git openssl iproute2
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
   chmod a+r /etc/apt/keyrings/docker.asc
   printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
     "${UBUNTU_CODENAME:-$VERSION_CODENAME}" "$(dpkg --print-architecture)" | tee /etc/apt/sources.list.d/docker.sources
-  apt-get update
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  apt-get -o DPkg::Lock::Timeout=300 update
+  apt-get -o DPkg::Lock::Timeout=300 install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 relogin=no
 if in_group "$operator" docker; then

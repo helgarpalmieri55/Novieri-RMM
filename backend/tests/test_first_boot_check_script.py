@@ -40,6 +40,8 @@ STATE = os.environ["FAKE_STATE"]
 s = json.load(open(STATE))
 argv = sys.argv[1:]
 open(os.environ["ARGV_LOG"], "a").write("docker " + " ".join(argv) + "\n")
+with open(os.environ["ARGV_LOG"] + ".environ", "a") as env_log:
+    env_log.write("== docker\n" + "".join("%s=%s\n" % kv for kv in os.environ.items()))
 rc = 0
 def out(text):
     sys.stdout.write(text)
@@ -188,12 +190,18 @@ class Box:
         self.bin = tmp / "bin"
         self.bin.mkdir()
         real_path = os.environ["PATH"]
+        real_env = real_command("env", real_path)
+        assert real_env
         for name in SHIMMED:
             real = real_command(name, real_path)
             assert real, name
+            # Each shim also writes the environment it was given (review N2): a
+            # name the caller exported would carry the token into a child.
             _exe(
                 self.bin / name,
-                f'#!/bin/sh\nprintf \'%s %s\\n\' {name} "$*" >> "$ARGV_LOG"\nexec {real} "$@"\n',
+                f'#!/bin/sh\nprintf \'%s %s\\n\' {name} "$*" >> "$ARGV_LOG"\n'
+                f'{{ printf \'== %s\\n\' {name}; {real_env}; }} >> "$ARGV_LOG.environ"\n'
+                f'exec {real} "$@"\n',
                 python=False,
             )
         # `sleep` signals the script's whole process group, as a terminal's Ctrl-C does.
@@ -218,6 +226,7 @@ class Box:
     def prepare(self) -> None:
         self.state_file.write_text(json.dumps(self.state))
         self.log.write_text("")
+        Path(f"{self.log}.environ").write_text("")
 
     def env(self, **env: str) -> dict[str, str]:
         return {
@@ -252,6 +261,10 @@ class Box:
 
     def argv(self) -> str:
         return self.log.read_text()
+
+    def environ(self) -> str:
+        """The environment every shimmed child, and the fake docker, was given."""
+        return Path(f"{self.log}.environ").read_text()
 
 
 def _ok(out: str) -> list[str]:
@@ -687,10 +700,17 @@ def test_the_console_instruction_names_the_device_id(tmp_path: Path) -> None:
 
 
 def test_an_openbao_that_does_not_answer_says_how_to_go_on(tmp_path: Path) -> None:
+    """Review N1: the way on asks OpenBao first, alone, as the runbook's own rule
+    says (a sealed OpenBao makes `docker compose up -d` block), and names the
+    section that says what to do with its answer."""
     box = Box(tmp_path)
     box.state["bao_rc"] = 1
     err = _failed(box.run())
     assert "OpenBao does not answer" in err and "./scripts/first-boot-check.sh" in err
+    ways = [line[8:] for line in err.splitlines() if line.startswith("        ")]
+    assert ways[0] == "docker compose exec openbao bao status", ways
+    assert "up -d" not in err
+    assert "deploy/README.md, After a reboot or a restart" in ways[1], ways
 
 
 def _wait_for(fd: int, marker: bytes) -> bytes:
@@ -792,3 +812,49 @@ def test_a_closed_stdout_is_reported_as_an_interruption(tmp_path: Path) -> None:
     assert "interrupted (its output was closed) (exit 141)" in err
     assert "a command failed" not in err
     _retired(box)
+
+
+# --------------------------------------------------------------------------- #
+# The final round (review of 2026-11-27: I-11d, N2)
+# --------------------------------------------------------------------------- #
+
+OK_11D = (
+    "  ok      step 11d: a job you asked for, signed by the server (its signature is on "
+    "record), ran on the agent, and its result came back over :8443\n"
+)
+
+
+def test_step_11d_claims_only_what_this_host_can_see(tmp_path: Path) -> None:
+    """Review I-11d: what 11d reads is a row -- a job a person asked for, a
+    signature on record, `succeeded` -- and an agent that never verifies leaves
+    the same row (Task 5's Rojo 3 printed the old line, then "First boot is
+    complete."). So its output claims no verification: it says that the agent's
+    own check cannot be seen from here, that CI's 7c-bis proves it on every push,
+    and to deploy only a main commit whose deploy job is green."""
+    box = Box(tmp_path)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    out = done.stdout
+    said = out[out.index("Step 11d") : out.index("Step 11e")]
+    assert "verified" not in said.lower(), said
+    assert OK_11D in said, said
+    notes = " ".join(line[10:] for line in said.splitlines() if line.startswith("  note    "))
+    assert "cannot be seen from this host" in notes, notes
+    assert "7c-bis" in notes and "a hello signed by a key it does not pin" in notes, notes
+    assert "Deploy only a main commit whose deploy job is green." in notes, notes
+    assert "verified by the agent" not in SCRIPT.read_text()
+
+
+def test_names_a_caller_exports_carry_no_token_into_a_child(tmp_path: Path) -> None:
+    """Review N2: bash hands a child every variable whose name the caller's
+    environment exported, whatever the script later puts in it; `token` holds
+    the enrollment token from `read` to `token=""`, with `install -d` between.
+    first-boot.sh unexports every lowercase name it was given; so does this."""
+    box = Box(tmp_path)
+    done = box.run(token="exported-by-the-caller", row="x", logs="x")
+    assert done.returncode == 0, done.stdout + done.stderr
+    environ = box.environ()
+    assert "== install\n" in environ, "install ran with the token in memory"
+    assert box.token not in environ
+    assert "token=" not in environ and "row=" not in environ
+    assert box.state["token_seen"] == box.token

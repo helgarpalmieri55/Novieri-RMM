@@ -16,13 +16,15 @@ SAVED), and the auto-unseal asks for SEAL when it holds no shares: a run that
 shows one of those went wrong, and the driver closes the script's stdin
 without typing it and fails the run.
 
-    ITS_FIRST_BOOT_ALLOW_NONTTY=1 python3 ci/first_boot_answers.py \\
+    python3 ci/first_boot_answers.py \\
         --require 'First boot: every step is done.' -- --tls-cafile "$PEBBLE_ROOT"
 
-Run from deploy/. The exit status is the script's; or 1 when a --require line
-never appeared, when it printed shares that were not five with a root token,
-when it showed a word to type, or when it was still running after --timeout
-seconds (then it is killed, with every process it started).
+Run from deploy/. It sets ITS_FIRST_BOOT_ALLOW_NONTTY=1 for the script it
+runs, and for nothing else: never export it yourself. The exit status is
+the script's; or 1 when a --require line never appeared, when it printed
+shares that were not five with a root token, when it showed a word to type,
+or when it was still running after --timeout seconds (then it is killed,
+with every process it started).
 """
 
 from __future__ import annotations

@@ -237,8 +237,11 @@ cmd_enable() {
     note "OpenBao restarted and unsealed itself."
     note "Now, before anything else:"
     note "  1. Copy $KEY_FILE OFF this host, stored apart from any openbao-data backup."
-    note "  2. Keep the 5 shares: they are recovery keys now (disable, generate-root), not unseal keys."
-    note "  3. The snapshot $SNAP_DIR is Shamir-sealed; delete it once you are satisfied."
+    note "  2. Keep the 5 shares: they are recovery keys now. They authorize disable, and, with the root token,"
+    note "     bao operator generate-root: they are no way back from a lost root token; they cannot unseal OpenBao."
+    note "     Keep the root token off this host as well: its copy is the only way back to root."
+    note "  3. The snapshot $SNAP_DIR is Shamir-sealed: keep it until the off-host copy of $KEY_FILE"
+    note "     has been compared with this host's (sha256sum, on both); then delete it."
 }
 
 cmd_disable() {

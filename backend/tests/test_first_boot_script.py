@@ -24,19 +24,23 @@ five more reports pasted (r3), the custody report's clear behind SAVED (r4),
 and no token blamed by an OpenBao that does not answer (r5).
 """
 
+import json
 import os
 import re
 import shlex
 import signal
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from tests.first_boot_support import (
+    BASH,
     DESTRUCTIVE_ACT,
     PASTE_STAND_INS,
+    PTY_TIMEOUT,
     SCRIPT,
     Host,
     _segments,
@@ -286,6 +290,7 @@ def test_the_shares_are_printed_to_a_terminal_only(tmp_path: Path) -> None:
     assert host.state["bao"]["init"] is False
 
 
+@pytest.mark.timeout(PTY_TIMEOUT)
 def test_with_its_input_not_a_terminal_it_refuses_before_init(tmp_path: Path) -> None:
     """Review M8: on a terminal with SAVED piped in, nobody need have seen the
     shares before the screen is cleared."""
@@ -298,6 +303,7 @@ def test_with_its_input_not_a_terminal_it_refuses_before_init(tmp_path: Path) ->
     assert host.secrets["shares"][0] not in shown
 
 
+@pytest.mark.timeout(PTY_TIMEOUT)
 def test_under_a_terminal_the_shares_show_once_before_the_clear_and_no_share_echoes(
     tmp_path: Path,
 ) -> None:
@@ -321,6 +327,7 @@ def test_under_a_terminal_the_shares_show_once_before_the_clear_and_no_share_ech
     assert host.leaks() == []
 
 
+@pytest.mark.timeout(PTY_TIMEOUT)
 def test_under_a_terminal_a_rerun_echoes_neither_the_root_token_nor_a_share(
     tmp_path: Path,
 ) -> None:
@@ -861,7 +868,13 @@ SCENARIOS.update({
     ".env has no ITS_PUBLIC_HOST": lambda host: _no_public_host_run(host),
     "OpenBao stops answering a token lookup": lambda host: _lookup_unanswered_run(host, 3),
     **{name: _late(name) for name in LATE_FAILURES},
+    "unlabelled volumes without .env": lambda host: _unlabelled_volumes_run(host),
 })
+
+
+def _unlabelled_volumes_run(host: Host) -> subprocess.CompletedProcess[str]:
+    host.state["unlabelled_volumes"] = ["it-suite_openbao-data"]
+    return host.run(env=ALLOW)
 
 
 def _never_initialised_run(host: Host) -> subprocess.CompletedProcess[str]:
@@ -947,6 +960,7 @@ def test_without_three_shares_at_hand_the_run_stops_before_the_seal(
     assert host.leaks() == []
 
 
+@pytest.mark.timeout(PTY_TIMEOUT)
 def test_under_a_terminal_the_seal_is_named_and_confirmed_before_it_happens(
     tmp_path: Path,
 ) -> None:
@@ -1035,6 +1049,7 @@ def test_the_failed_block_check_fails_what_it_must(block: str, problem: str | No
         assert any(problem in found for found in problems), problems
 
 
+@pytest.mark.timeout(PTY_TIMEOUT)
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP],
                          ids=["INT", "TERM", "HUP"])  # fmt: skip
 def test_stopped_at_saved_it_says_the_shares_on_screen_are_the_only_copy(
@@ -1057,7 +1072,12 @@ def test_stopped_at_saved_it_says_the_shares_on_screen_are_the_only_copy(
     # SAVED is typed: a report pasted whole must not wipe their only copy.
     _assert_saved_clears_behind_a_guard(saved)
     assert _guarded_lines("\n".join(lost), "DESTROY") == [lost[-1]]
-    assert " && docker compose down -v && rm .env && sudo rm -f " in lost[-1]
+    # B4 (2026-11-27): and every volume named for this stack, which `down -v` skips
+    # when a restore made it with no Compose label.
+    assert (
+        " && docker compose down -v && rm .env && docker volume ls -q"
+        " | sed -n '/^it-suite_/p' | xargs -r docker volume rm && sudo rm -f "
+    ) in lost[-1]
     assert failed_block_problems(text, host.deploy) == []
     assert host.state["bao"]["init"] is True
 
@@ -1170,7 +1190,8 @@ def _behind_a_guard(way: list[str]) -> bool:
 @pytest.mark.parametrize(
     "scenario",
     ["--host another than .env's", "a migration half-way", "volumes without .env",
-     "postgres without its roles", "a leftover unseal key", "no SAVED", "an empty audit key"],
+     "postgres without its roles", "a leftover unseal key", "no SAVED", "an empty audit key",
+     "unlabelled volumes without .env"],
 )  # fmt: skip
 def test_a_guarded_way_on_runs_once_its_word_is_typed(tmp_path: Path, scenario: str) -> None:
     """The guards are not a chain that never runs: pasted on its own, a guarded
@@ -1221,7 +1242,8 @@ def test_a_new_host_runs_every_step_to_the_install_code(tmp_path: Path) -> None:
     assert any(r.startswith("issue-gateway-cert.py rmm.novieri.com") for r in ran)
     assert any(r.startswith("sudo ./scripts/openbao-seal.sh enable --key-file ") for r in ran)
     assert f"  install code  {host.secrets['code']}" in out
-    assert out.rstrip().splitlines()[-7] == "First boot: every step is done."
+    # The heading, three notes for what is next and five for custody (B3, 2026-11-27).
+    assert out.rstrip().splitlines()[-9] == "First boot: every step is done."
     env = host.env()
     assert env["COMPOSE_FILE"] == "docker-compose.yml:openbao/auto-unseal.yml"
     assert env["OPENBAO_UNSEAL_KEY_FILE"] == str(host.etc / "openbao-unseal" / "unseal.key")
@@ -1577,7 +1599,8 @@ def test_a_claimed_installation_is_not_sent_to_enter_an_install_code(tmp_path: P
     again = host.run(env=ALLOW)
     assert again.returncode == 0, again.stdout + again.stderr
     closing = again.stdout.split("First boot: every step is done.\n", 1)[1]
-    assert len(lines(closing, "note")) == 6
+    # Two notes for what is next, one for the check, five for custody (B3, 2026-11-27).
+    assert len(lines(closing, "note")) == 8
     assert "install code" not in closing
     assert "the installation is claimed" in closing
 
@@ -1613,7 +1636,12 @@ def test_8443_accepts_the_internal_ca_in_either_openssl_format(
         stdin=_saved_and_three(host), env={**ALLOW, "FAKE_GATEWAY_ISSUER": issuer}
     )
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "ok      step 7: :8443 presents the internal CA's certificate" in done.stdout
+    # Review N3: it compares the issuer's name, not the chain, and says so.
+    assert (
+        "ok      step 7: :8443 presents a certificate for rmm.novieri.com whose issuer is named"
+        " CN=Novieri RMM internal CA: the gateway answers it, not Traefik (the name is"
+        " compared, not the chain)\n"
+    ) in done.stdout
 
 
 @pytest.mark.parametrize(
@@ -1633,3 +1661,130 @@ def test_8443_refuses_an_issuer_that_only_contains_the_name(
     )
     assert done.returncode == 1
     assert "FAILED  :8443 does not present the internal CA's certificate" in done.stderr
+
+
+# --------------------------------------------------------------------------- #
+# The final round (review of 2026-11-27 and its rehearsal: B4, N4, the custody notes)
+# --------------------------------------------------------------------------- #
+
+#: A host's volumes for the recipes below, name -> its Compose project label (None:
+#: none). A restore made the unlabelled ones with `docker volume create "it-suite_$v"`.
+RESTORED_HOST = {
+    "it-suite_postgres-data": "it-suite",
+    "it-suite_openbao-data": None,
+    "it-suite_its-secrets": None,
+    "itms-restore-drill_postgres-data": "itms-restore-drill",
+    "it-suite-old_data": None,
+}
+NOT_THIS_STACKS = {"itms-restore-drill_postgres-data", "it-suite-old_data"}
+
+#: The Docker of RESTORED_HOST, as the rehearsal of 2026-11-27 measured it:
+#: `docker compose down -v` removes the volumes Compose labelled for its
+#: project and skips the others (`Skipped Volume was not created by Docker
+#: Compose`).
+VOLUME_DOCKER = r"""
+import json, os, sys
+state = os.environ["VOLUME_STATE"]
+volumes = json.load(open(state))
+argv = sys.argv[1:]
+label = "label=com.docker.compose.project=it-suite"
+rc = 0
+if argv[:3] == ["compose", "down", "-v"]:
+    for name, project in list(volumes.items()):
+        if project == "it-suite":
+            del volumes[name]
+        elif name.startswith("it-suite_"):
+            sys.stderr.write("Skipped Volume %s was not created by Docker Compose\n" % name)
+elif argv[:2] == ["ps", "-aq"]:
+    pass
+elif argv[:2] == ["volume", "ls"]:
+    names = [n for n, p in volumes.items() if label not in argv or p == "it-suite"]
+    sys.stdout.write("".join(n + "\n" for n in names))
+elif argv[:2] == ["volume", "rm"]:
+    for name in argv[2:]:
+        if volumes.pop(name, "absent") == "absent":
+            sys.stderr.write("Error: No such volume: %s\n" % name)
+            rc = 1
+else:
+    sys.stderr.write("volume docker: not modelled: %s\n" % " ".join(argv))
+    rc = 1
+json.dump(volumes, open(state, "w"))
+sys.exit(rc)
+"""
+
+
+def _run_behind_destroy(host: Host, line: str) -> dict[str, str | None]:
+    """LINE run as the operator runs it, with DESTROY typed, on RESTORED_HOST:
+    docker is VOLUME_DOCKER, sudo runs its command, and first-boot.sh only logs.
+    What volumes are left."""
+    fakes = host.tmp / "volume-host"
+    fakes.mkdir()
+    state = host.tmp / "volume-host.json"
+    state.write_text(json.dumps(RESTORED_HOST))
+    (fakes / "docker").write_text(f"#!{sys.executable}\n" + VOLUME_DOCKER)
+    (fakes / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
+    for fake in ("docker", "sudo"):
+        (fakes / fake).chmod(0o755)
+    rerun = host.deploy / "scripts" / "first-boot.sh"
+    rerun.write_text("#!/bin/sh\necho ran >> ../reran\n")
+    rerun.chmod(0o755)
+    done = subprocess.run(
+        [BASH, "--norc", "--noprofile", "-c", line], input="DESTROY\n", text=True,
+        capture_output=True, cwd=host.deploy, timeout=60,
+        env={"PATH": f"{fakes}:/usr/bin:/bin", "VOLUME_STATE": str(state), "HOME": str(host.home)},
+    )  # fmt: skip
+    assert done.returncode == 0, (line, done.stdout, done.stderr)
+    assert (host.deploy.parent / "reran").read_text() == "ran\n", "it ran first-boot.sh again"
+    return json.loads(state.read_text())
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ["volumes without .env", "unlabelled volumes without .env", "--host another than .env's",
+     "tokens in .env, OpenBao never initialised"],
+)  # fmt: skip
+def test_starting_from_zero_leaves_no_volume_of_this_stack(tmp_path: Path, scenario: str) -> None:
+    """Rehearsal of 2026-11-27 (B4): a restore's `docker volume create` made volumes
+    with no Compose labels, and `docker compose down -v` skips them -- so a start
+    from zero kept `openbao-data` and `its-secrets`, and the next run found no
+    volume by its label and took the host for a new one. Typed DESTROY, each way
+    on that starts from zero leaves no volume named for this stack, labelled or
+    not, and touches no other project's."""
+    host = Host(tmp_path)
+    report = _report(host, scenario)
+    (line,) = _guarded_lines(report, "DESTROY")
+    left = _run_behind_destroy(host, line[8:])
+    assert set(left) == NOT_THIS_STACKS, left
+
+
+def test_unlabelled_volumes_without_an_env_are_a_mixed_state(tmp_path: Path) -> None:
+    """B4: what a start from zero after a restore left before this round -- an
+    `openbao-data` with no Compose label -- is an earlier first boot's, not a new
+    host: found by its name, not only by a label."""
+    host = Host(tmp_path)
+    done = _unlabelled_volumes_run(host)
+    assert done.returncode == 1
+    assert "mixed state" in done.stderr and "it-suite_openbao-data" in done.stderr
+    assert not (host.deploy / ".env").exists()
+    assert "new-env.sh" not in host.argv() and "compose up" not in host.argv()
+    _recipe_removes_the_earlier_boots_files(host, done.stderr)
+
+
+def test_another_projects_volumes_are_not_this_stacks(tmp_path: Path) -> None:
+    """The name is matched whole, `it-suite_` and what follows: a restore drill's
+    volumes, or a project named `it-suite-old`, are not an earlier first boot."""
+    host = Host(tmp_path)
+    host.state["other_volumes"] = sorted(NOT_THIS_STACKS)
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "ok      no .env, no it-suite volume and no file of an earlier first boot" in done.stdout
+
+
+def test_the_install_code_is_to_be_treated_as_a_password_until_the_claim(tmp_path: Path) -> None:
+    """Review N4: the note was cut short ("it is a password until you have")."""
+    host, out = _done_host(tmp_path)
+    assert (
+        "  note    open https://rmm.novieri.com/ in a browser you trust and enter it (deploy/"
+        "README.md, First boot, 2): treat it as a password until you have claimed the"
+        " installation\n"
+    ) in out

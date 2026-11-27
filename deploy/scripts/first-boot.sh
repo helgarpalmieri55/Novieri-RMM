@@ -465,10 +465,15 @@ read_root_token() {
 # Starting from zero is one line behind a typed DESTROY (review I1, round 3):
 # nothing of it runs unless the operator types the word, pasted or not. The
 # removal runs the script again on the same line: sudo may ask for a password.
+# `down -v` removes only the volumes Compose labelled; a restore that made
+# them with `docker volume create` left them unlabelled, and `down -v` skips
+# those (rehearsal of 2026-11-27), so every volume named for this stack goes
+# by its name too.
 earlier_prose="with them go the earlier first boot's gateway-issuer token and auto-unseal key; keep that key's off-host copy only as long as you keep backups of the vault it unsealed, or openbao-seal.sh would reuse it for the new one"
+by_name="docker volume ls -q | sed -n '/^it-suite_/p' | xargs -r docker volume rm"
 start_from_zero=(
   "# to start from zero: the line below asks you to type DESTROY, then DESTROYS this stack's volumes and everything in them, and .env; $earlier_prose"
-  "$(guard DESTROY "DESTROYS the volumes of this stack and everything in them, deletes .env, and deletes the gateway-issuer token and auto-unseal key files of the earlier first boot") && docker compose down -v && rm .env && sudo rm -f $token_file_q $key_file_q && $rerun")
+  "$(guard DESTROY "DESTROYS the volumes of this stack and everything in them, deletes .env, and deletes the gateway-issuer token and auto-unseal key files of the earlier first boot") && docker compose down -v && rm .env && $by_name && sudo rm -f $token_file_q $key_file_q && $rerun")
 # The other way on when shares do not unseal: lost, they are a vault nobody
 # can open, and on a first boot there is nothing in it yet.
 lost_shares=(--or
@@ -482,7 +487,7 @@ lost_shares=(--or
 pending_migration() {
   die "OpenBao is half-way through the seal migration openbao-seal.sh enable started: .env has the auto-unseal overlay, and OpenBao (seal ${bao_type:-unknown}, migration ${bao_migration:-not said}) still waits for three shares to move to its static key. The key file is not the problem." \
     "# to finish the migration: the line below runs three prompts in turn, and each asks for one share (hidden); then it restarts OpenBao, which proves it unseals itself, and runs this again. Paste it on its own; if a share was wrong, paste it again" \
-    "# afterwards, as openbao-seal.sh says when it finishes one itself: copy $key_file OFF this host, stored apart from any openbao-data backup; keep the five shares, which are recovery keys now; and delete its Shamir-sealed snapshot under /var/backups/it-suite/openbao-seal/ once you are satisfied" \
+    "# afterwards, as openbao-seal.sh says when it finishes one itself: copy $key_file OFF this host, stored apart from any openbao-data backup; keep the five shares, which are recovery keys now; and keep its Shamir-sealed snapshot under /var/backups/it-suite/openbao-seal/ until that copy has been compared with this host's (sha256sum, on both), then delete it" \
     "$seal_status_note" \
     "for n in 1 2 3; do docker compose exec openbao bao operator unseal -migrate; done && docker compose restart openbao && $rerun" \
     --or \
@@ -494,17 +499,21 @@ pending_migration() {
 
 check_state_before_anything() {
   say "Before anything: the state this host is in"
-  local volumes error f found=() removal
+  local labelled all volumes error f found=() removal
   if [ -e .env ]; then
     ok ".env exists: this is a run after step 1"
     return 0
   fi
-  if ! volumes="$(docker volume ls -q --filter label=com.docker.compose.project=it-suite 2>/dev/null)"; then
-    error="$(docker volume ls -q --filter label=com.docker.compose.project=it-suite 2>&1 >/dev/null || true)"
+  # This stack's volumes: those Compose labelled for it, and every one named
+  # for it, which a restore's `docker volume create` makes with no label.
+  if ! labelled="$(docker volume ls -q --filter label=com.docker.compose.project=it-suite 2>/dev/null)" \
+     || ! all="$(docker volume ls -q 2>/dev/null)"; then
+    error="$(docker volume ls -q 2>&1 >/dev/null || true)"
     die "docker volume ls failed, so this host's state cannot be read: ${error//$'\n'/ }" \
         "# if it says permission denied, the docker group applies from your next login: log out, log in again, and run:" \
         "$rerun"
   fi
+  volumes="$({ printf '%s\n' "$labelled"; printf '%s\n' "$all" | sed -n '/^it-suite_/p'; } | sed '/^$/d' | sort -u)"
   volumes="${volumes//$'\n'/ }"
   if [ -n "${volumes// /}" ]; then
     die "mixed state: this host has the volumes of an earlier first boot (${volumes% }) but no .env, and a new .env would not open them" \
@@ -512,7 +521,7 @@ check_state_before_anything() {
         "chmod 600 .env" "$rerun" \
         --or \
         "# it is not: start from zero; the line below asks you to type DESTROY, then DESTROYS those volumes, everything in them and the containers that hold them; $earlier_prose" \
-        "$(guard DESTROY "DESTROYS the it-suite containers and volumes and everything in them, and deletes the gateway-issuer token and auto-unseal key files of the earlier first boot") && docker ps -aq --filter label=com.docker.compose.project=it-suite | xargs -r docker rm -f && docker volume ls -q --filter label=com.docker.compose.project=it-suite | xargs -r docker volume rm && sudo rm -f $token_file_q $key_file_q && $rerun"
+        "$(guard DESTROY "DESTROYS the it-suite containers and volumes and everything in them, and deletes the gateway-issuer token and auto-unseal key files of the earlier first boot") && docker ps -aq --filter label=com.docker.compose.project=it-suite | xargs -r docker rm -f && docker volume ls -q --filter label=com.docker.compose.project=it-suite | xargs -r docker volume rm && $by_name && sudo rm -f $token_file_q $key_file_q && $rerun"
   fi
   for f in "$token_file" "$key_file"; do
     if sudo test -e "$f"; then found+=("$(printf '%q' "$f")"); fi
@@ -1072,7 +1081,7 @@ step_7() {
   gateway_issuer="$(printf '%s\n' "$gateway_cert" | sed -n 's/^issuer=//p' | sed 's/ *= */=/g; s/ *, */,/g')"
   [ "$gateway_issuer" = "CN=Novieri RMM internal CA" ] || gateway_cert=""
   case "$gateway_cert" in
-    *"DNS:$host"*) ok "step 7: :8443 presents the internal CA's certificate for $host" ;;
+    *"DNS:$host"*) ok "step 7: :8443 presents a certificate for $host whose issuer is named CN=Novieri RMM internal CA: the gateway answers it, not Traefik (the name is compared, not the chain)" ;;
     *) die ":8443 does not present the internal CA's certificate for $host (above), so no agent would connect" \
            "docker compose ps gateway" "docker compose logs --tail 50 gateway traefik" "$rerun" ;;
   esac
@@ -1091,7 +1100,7 @@ step_8() {
       [ -n "$code" ] || die "the api wrote no install code to /var/lib/its/secrets/setup-code (none, or an empty one)" "docker compose logs api | grep -i 'install code'" "$rerun"
       if [ -t 1 ] || [ "$allow_nontty" = 1 ]; then
         printf '\n  install code  %s\n\n' "$code"
-        note "open https://$host/ in a browser you trust and enter it (deploy/README.md, First boot, 2): it is a password until you have"
+        note "open https://$host/ in a browser you trust and enter it (deploy/README.md, First boot, 2): treat it as a password until you have claimed the installation"
       else
         note "the install code is not printed, the output is not a terminal; read it with: docker compose exec api cat /var/lib/its/secrets/setup-code"
       fi
@@ -1111,9 +1120,11 @@ finish() {
     note "your password, your second factor and its ten recovery codes; then an enrollment token at https://$host/enrollment."
   fi
   note "Then: ./scripts/first-boot-check.sh"
-  note "Custody, off this VPS (GO-LIVE.md §4 and §6): the five shares and the root token, RECOVERY keys now"
-  note "(openbao-seal.sh disable, bao operator generate-root), not unseal keys; the key file $key_file,"
-  note "apart from any copy of openbao-data (lose it and OpenBao cannot be unsealed); .env, its-secrets and its-ca."
+  note "Custody, off this VPS (GO-LIVE.md §4 and §6): the five shares, RECOVERY keys now: they authorize"
+  note "openbao-seal.sh disable, and, with the root token, bao operator generate-root: they are no way back"
+  note "from a lost root token; they cannot unseal OpenBao. The root token, whose off-host copy is the only way"
+  note "back to root. The key file $key_file, apart from any copy of openbao-data (lose it and OpenBao"
+  note "cannot be unsealed). And .env, its-secrets and its-ca."
 }
 
 # ------------------------------------------------------------------ main
