@@ -1593,3 +1593,43 @@ def test_an_openbao_sealed_at_a_lookup_says_it_is_sealed(tmp_path: Path) -> None
     assert "FAILED  OpenBao is sealed, so it could not look up the token in " in done.stderr
     for blame in ("mixed state", "sudo rm -f", "down -v", "did not answer"):
         assert blame not in done.stderr, blame
+
+
+# --------------------------------------------------------------------------- #
+# Step 7's :8443 check reads `openssl x509 -issuer`, whose format changed:
+# OpenSSL 3.0 (Ubuntu 24.04, the VPS) prints `issuer=CN = Novieri RMM internal
+# CA`; the CI runner's (ubuntu-26.04) prints `issuer=CN=Novieri RMM internal CA`
+# (CI run 46068835756, 2026-11-27, where step 7 refused the right certificate).
+
+
+@pytest.mark.parametrize(
+    "issuer", ["CN = Novieri RMM internal CA", "CN=Novieri RMM internal CA"]
+)
+def test_8443_accepts_the_internal_ca_in_either_openssl_format(
+    tmp_path: Path, issuer: str
+) -> None:
+    host = Host(tmp_path)
+    done = host.run(
+        stdin=_saved_and_three(host), env={**ALLOW, "FAKE_GATEWAY_ISSUER": issuer}
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "ok      step 7: :8443 presents the internal CA's certificate" in done.stdout
+
+
+@pytest.mark.parametrize(
+    "issuer",
+    [
+        "CN = Novieri RMM internal CA 2",
+        "CN=Not the Novieri RMM internal CA",
+        "C = US, O = Let's Encrypt, CN = R11",
+    ],
+)
+def test_8443_refuses_an_issuer_that_only_contains_the_name(
+    tmp_path: Path, issuer: str
+) -> None:
+    host = Host(tmp_path)
+    done = host.run(
+        stdin=_saved_and_three(host), env={**ALLOW, "FAKE_GATEWAY_ISSUER": issuer}
+    )
+    assert done.returncode == 1
+    assert "FAILED  :8443 does not present the internal CA's certificate" in done.stderr

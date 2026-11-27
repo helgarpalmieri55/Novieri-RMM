@@ -502,7 +502,9 @@ this machine itself, which never crosses your provider's firewall, and Let's
 Encrypt's validation proves `:443` from the Internet but not `:8443`: no
 script on this VPS can make this check. On a Linux or macOS computer
 elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
-prints `issuer=CN = Novieri RMM internal CA`; on Windows,
+prints `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu
+24.04; newer OpenSSL prints it without the spaces,
+`issuer=CN=Novieri RMM internal CA`, which is the same issuer); on Windows,
 `Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
 Anything else: open `8443/tcp` at the provider's firewall.
 
@@ -4787,6 +4789,10 @@ X509v3 Subject Alternative Name:
     DNS:rmm.novieri.com
 ```
 
+That is OpenSSL 3.0's format, the one on Ubuntu 24.04; a newer OpenSSL
+prints `issuer=CN=Novieri RMM internal CA`, without the spaces, and step 7
+accepts either.
+
 Two different issuers on the two ports is the correct picture. If `:8443`
 shows a Let's Encrypt issuer, an agent will never connect. The likeliest
 cause is an absent or unhealthy gateway: with no TCP router, Traefik answers
@@ -4798,7 +4804,9 @@ first.
 machine from itself and never crosses your provider's firewall, and Let's
 Encrypt's validation proves `:443` from the Internet but not `:8443`. On a
 Linux or macOS computer elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
-prints `issuer=CN = Novieri RMM internal CA`; on Windows,
+prints `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu
+24.04; newer OpenSSL prints it without the spaces,
+`issuer=CN=Novieri RMM internal CA`, which is the same issuer); on Windows,
 `Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
 Anything else: open `8443/tcp` at the provider's firewall.
 

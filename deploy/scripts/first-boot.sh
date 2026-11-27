@@ -1066,8 +1066,13 @@ step_7() {
   gateway_cert="$(openssl s_client -connect "$connect:8443" -servername "$host" </dev/null 2>/dev/null \
                   | openssl x509 -noout -issuer -ext subjectAltName 2>/dev/null || true)"
   printf '%s\n' "$gateway_cert" | sed 's/^/        /'
+  # OpenSSL 3.0 (Ubuntu 24.04) prints `issuer=CN = Novieri RMM internal CA`, newer
+  # ones `issuer=CN=Novieri RMM internal CA`: drop the spaces round `=` and `,`,
+  # then the issuer must be that name exactly, not merely contain it.
+  gateway_issuer="$(printf '%s\n' "$gateway_cert" | sed -n 's/^issuer=//p' | sed 's/ *= */=/g; s/ *, */,/g')"
+  [ "$gateway_issuer" = "CN=Novieri RMM internal CA" ] || gateway_cert=""
   case "$gateway_cert" in
-    *"issuer=CN = Novieri RMM internal CA"*"DNS:$host"*) ok "step 7: :8443 presents the internal CA's certificate for $host" ;;
+    *"DNS:$host"*) ok "step 7: :8443 presents the internal CA's certificate for $host" ;;
     *) die ":8443 does not present the internal CA's certificate for $host (above), so no agent would connect" \
            "docker compose ps gateway" "docker compose logs --tail 50 gateway traefik" "$rerun" ;;
   esac
