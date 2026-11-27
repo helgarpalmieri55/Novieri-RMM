@@ -5,7 +5,9 @@ CI's `deploy` job runs it end to end: a real agent, enrolled over :443,
 connected over :8443, a job a person asked for, the audit chain, the backup.
 What a stub shows that a green run cannot: the refusals (OpenBao sealed, the
 installation not claimed, a route not refused, a job refused), the reuse of an
-agent left running by a run that stopped, and that the enrollment token is
+agent left running by a run that was killed outright, the retirement of the
+agent on every other way out (a refusal, a failed command, Ctrl-C, TERM, HUP,
+a second signal during the cleanup), and that the enrollment token is
 never an argument, never printed, and only ever in the agent's 0600 file.
 A fake `docker` plays compose and the agent; every other command but bash's
 builtins passes through a shim that logs its argv.
@@ -29,7 +31,7 @@ SHIMMED = ("cat", "date", "env", "find", "grep", "hostname", "id", "install", "r
 DEVICE = "0194f3a2-7c1d-7e55-9a0b-3c4d5e6f7a8b"
 
 FAKE_DOCKER = r'''
-import json, os, sys
+import json, os, signal, sys
 STATE = os.environ["FAKE_STATE"]
 s = json.load(open(STATE))
 argv = sys.argv[1:]
@@ -52,7 +54,8 @@ if argv[:3] == ["compose", "exec", "-T"]:
         elif "from jobs" in sql:
             s["polls"] += 1
             assert "target_id = '%s'" % s["device"] in sql, sql
-            scoped = "issued_at >= (select created_at from devices where id = '%s')" % s["device"]
+            scoped = ("issued_at >= date_trunc('second', (select created_at from agents "
+                      "where device_id = '%s'))" % s["device"])
             if scoped not in sql and s.get("old_job"):
                 out(s["old_job"] + "\n")  # an earlier agent's row, which the query must exclude
             else:
@@ -63,7 +66,12 @@ if argv[:3] == ["compose", "exec", "-T"]:
 elif argv[:2] == ["ps", "-q"]:
     out("c0ffee\n" if s["agent_running"] else "")
 elif argv[:3] == ["rm", "-f", "smoke-agent"]:
-    s["agent_running"] = False
+    if s["agent_running"] and s.get("rm_signal"):
+        os.kill(os.getppid(), getattr(signal, "SIG" + s["rm_signal"]))  # a second Ctrl-C
+    if s["agent_running"] and s.get("rm_fails"):
+        rc = 1
+    else:
+        s["agent_running"] = False
 elif argv[0] == "run" and "golang:1.24-bookworm" in argv:
     s["built"] = True
 elif argv[0] == "run" and "busybox:1.36.1" in argv:
@@ -72,6 +80,7 @@ elif argv[0] == "run" and "busybox:1.36.1" in argv:
     s["token_seen"] = open(token_file).read()
     s["token_mode"] = oct(os.stat(token_file).st_mode & 0o777)
     s["agent_args"] = argv
+    s["data_files"] = sorted(os.listdir(data))
     if s.get("run_rc"):
         rc = s["run_rc"]  # the registry refused, say: the token file stays where it was put
     else:
@@ -79,6 +88,8 @@ elif argv[0] == "run" and "busybox:1.36.1" in argv:
             os.remove(token_file)
         s["agent_running"] = True
 elif argv[0] == "logs":
+    s["token_at_logs"] = os.path.exists(
+        os.path.join(os.environ["ITS_SMOKE_AGENT_DIR"], "enroll-token"))
     out("time=1 level=INFO msg=\"novieri-agent starting\" version=dev enrolled=false\n")
     out("time=2 level=INFO msg=enrolling url=https://rmm.novieri.com/enroll/v1\n")
     out("time=3 level=INFO msg=enrolled device_id=%s gateway_url=wss://rmm.novieri.com:8443/agent\n"
@@ -175,9 +186,10 @@ class Box:
                 f'#!/bin/sh\nprintf \'%s %s\\n\' {name} "$*" >> "$ARGV_LOG"\nexec {real} "$@"\n',
                 python=False,
             )
-        # `sleep` can deliver a signal to the script, to play a Ctrl-C in the middle of a wait.
+        # `sleep` signals the script's whole process group, as a terminal's Ctrl-C does.
         _exe(self.bin / "sleep",
-             '#!/bin/sh\n[ -z "$FAKE_SLEEP_SIGNAL" ] || kill -"$FAKE_SLEEP_SIGNAL" $PPID\nexit 0\n',
+             '#!/bin/sh\n[ -z "$FAKE_SLEEP_SIGNAL" ] ||'
+             ' { trap "" INT TERM HUP; kill -s "$FAKE_SLEEP_SIGNAL" -- "-$PPID"; }\nexit 0\n',
              python=False)  # fmt: skip
         _exe(self.bin / "systemctl",
              '#!/bin/sh\nprintf \'systemctl %s\\n\' "$*" >> "$ARGV_LOG"\n'
@@ -213,6 +225,7 @@ class Box:
                 "ITS_NO_SYSTEMCTL": "1",
                 **env,
             },
+            start_new_session=True,  # its own process group: a signal to it is a terminal's
             timeout=100,
         )
         self.state = json.loads(self.state_file.read_text())
@@ -288,6 +301,7 @@ def test_the_ci_dials_an_address_and_trusts_only_the_root_it_gives(tmp_path: Pat
     assert len(curls) == 4
     for line in curls:
         assert f"--cacert {root}" in line and "--resolve rmm.novieri.com:443:127.0.0.1" in line
+        assert "--noproxy *" in line
 
 
 def test_a_sealed_openbao_stops_it_before_anything(tmp_path: Path) -> None:
@@ -433,12 +447,24 @@ def test_a_refused_docker_run_is_reported_and_costs_no_token_on_disk(tmp_path: P
     _retired(box)
 
 
-def test_a_stale_token_file_from_an_earlier_failure_is_not_used(tmp_path: Path) -> None:
+def test_what_an_earlier_failed_run_left_in_the_data_directory_is_cleared(tmp_path: Path) -> None:
+    """The token would be overwritten anyway; an earlier identity in the directory would not."""
     box = Box(tmp_path)
     box.agent_data.mkdir()
     (box.agent_data / "enroll-token").write_text("STALE-TOKEN-OF-A-FAILED-RUN")
+    (box.agent_data / "agent-key.pem").write_text("STALE KEY")
     assert box.run().returncode == 0
     assert box.state["token_seen"] == box.token
+    assert box.state["data_files"] == ["enroll-token"], box.state["data_files"]
+
+
+def test_a_token_left_beside_an_agent_that_is_running_is_removed(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["agent_running"] = True
+    box.agent_data.mkdir()
+    (box.agent_data / "enroll-token").write_text("STALE-TOKEN")
+    assert box.run(stdin="").returncode == 0
+    assert box.state["token_at_logs"] is False
 
 
 def test_a_failed_backup_reaches_its_own_message_on_the_ci_path(tmp_path: Path) -> None:
@@ -484,13 +510,67 @@ def test_a_timeout_in_11d_retires_the_agent_and_says_what_to_do(tmp_path: Path) 
     _retired(box)
 
 
-def test_ctrl_c_and_terminate_retire_the_agent_too(tmp_path: Path) -> None:
-    for signal in ("INT", "TERM"):
-        box = Box(tmp_path / signal)
+def test_ctrl_c_terminate_and_hangup_retire_the_agent_too(tmp_path: Path) -> None:
+    """Delivered to the whole process group, as a terminal and a dropped SSH session do."""
+    for signal_name, code in (("INT", 130), ("TERM", 143), ("HUP", 129)):
+        box = Box(tmp_path / signal_name)
         box.state["job_after"] = 10**6
-        err = _failed(box.run("--wait-job", "30", FAKE_SLEEP_SIGNAL=signal))
+        err = _failed(box.run("--wait-job", "30", FAKE_SLEEP_SIGNAL=signal_name))
+        assert "Step 11d" in err and f"interrupted (exit {code})" in err, err
+        assert "The throwaway agent was retired" in err
+        assert box.state["polls"] <= 2, "it stopped at the signal, not at the timeout"
+        _retired(box)
+
+
+def test_a_second_signal_during_the_cleanup_loses_neither_message_nor_cleanup(
+    tmp_path: Path,
+) -> None:
+    for signal_name in ("INT", "HUP"):
+        box = Box(tmp_path / signal_name)
+        box.state["job"] = "inventory.collect|refused|t"
+        box.state["rm_signal"] = signal_name
+        err = _failed(box.run())
+        assert "the job ended: inventory.collect|refused|t" in err
         assert "The throwaway agent was retired" in err
         _retired(box)
+    # and in the cleanup of a signal: the first one is a Ctrl-C, the second a hangup
+    box = Box(tmp_path / "both")
+    box.state["job_after"] = 10**6
+    box.state["rm_signal"] = "HUP"
+    err = _failed(box.run("--wait-job", "30", FAKE_SLEEP_SIGNAL="INT"))
+    assert "interrupted (exit 130)" in err and "The throwaway agent was retired" in err
+    _retired(box)
+
+
+def test_an_agent_that_cannot_be_removed_is_named_with_the_command_to_do_it(
+    tmp_path: Path,
+) -> None:
+    box = Box(tmp_path)
+    box.state["job"] = "inventory.collect|refused|t"
+    box.state["rm_fails"] = True
+    err = _failed(box.run())
+    assert "the job ended: inventory.collect|refused|t" in err
+    assert "could NOT be retired" in err
+    assert "docker rm -f smoke-agent && rm -rf" in err
+    assert "agent: " in err, "its last log lines were taken before the removal was tried"
+
+
+def test_a_refusal_shows_the_agents_last_log_lines_before_removing_it(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["job"] = "inventory.collect|refused|t"
+    err = _failed(box.run())
+    assert "        agent: time=3 level=INFO msg=enrolled" in err
+    argv = box.argv()
+    assert argv.index("docker logs --tail 20 smoke-agent") < argv.rindex("docker rm -f smoke-agent")
+    assert err.index("the job ended") < err.index("agent: time=3") < err.index("was retired")
+
+
+def test_step_11f_failures_give_the_command_to_go_on(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["rm_fails"] = True
+    err = _failed(box.run())
+    assert "step 11f: could not remove smoke-agent" in err
+    assert "then: ./scripts/first-boot-check.sh" in err
 
 
 def test_a_refused_row_of_an_earlier_agent_does_not_stop_a_fresh_run(tmp_path: Path) -> None:
@@ -503,12 +583,19 @@ def test_a_refused_row_of_an_earlier_agent_does_not_stop_a_fresh_run(tmp_path: P
 
 def test_a_job_that_succeeded_unsigned_fails_at_once_naming_invariant_1(tmp_path: Path) -> None:
     box = Box(tmp_path)
-    box.state["job"] = "inventory.collect|succeeded|f"
+    box.state["job"] = "0194-job-id|inventory.collect|succeeded|f"
     box.state["job_after"] = 1
     err = _failed(box.run("--wait-job", "30"))
     assert "INVARIANT 1 BROKEN" in err and "no server signature" in err
+    assert "0194-job-id" in err, "the job id is the evidence"
+    assert "Do not put this host in service" in err and "do not run this check again" in err
+    assert "Keep the audit log" in err and "raise it" in err
+    assert "A re-run enrols" not in err and "ready (step 11b)" not in err, "it invites no re-run"
     assert "no job a person asked for" not in err
     assert box.state["polls"] == 1, "no waiting"
+    assert "agent: time=3" in err, "the agent's log is kept as evidence"
+    argv = box.argv()
+    assert argv.index("docker logs --tail 20 smoke-agent") < argv.rindex("docker rm -f smoke-agent")
     _retired(box)
 
 
@@ -573,7 +660,7 @@ def test_an_agent_that_kept_its_token_stops_it(tmp_path: Path) -> None:
     _retired(box)
 
 
-def test_the_second_run_names_the_device_to_press_the_button_on(tmp_path: Path) -> None:
+def test_the_console_instruction_names_the_device_id(tmp_path: Path) -> None:
     box = Box(tmp_path)
     done = box.run()
     assert f"the one that is online (device id {DEVICE})" in done.stdout

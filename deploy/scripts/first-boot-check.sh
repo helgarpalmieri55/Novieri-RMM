@@ -13,10 +13,12 @@
 # (11d), verifies the audit chain (11e), retires the agent (11f) and takes the
 # first backup (12). It prints `run` before what it changes, `skip` for what
 # it finds done, `ok` for a check that held. It is safe to run again, after a
-# failure or after a success: a run that stopped finds its agent still up and
-# goes on from 11d; a second whole run enrols, and retires, another throwaway
-# agent, and the first stays in the console as a record, offline. Its first
-# two lines say so.
+# failure or after a success: a run that stops, for any reason (a failed check,
+# Ctrl-C, a dropped SSH session), retires its agent, with its token and key, on
+# the way out, and says how to go on; a re-run enrols, and retires, another
+# throwaway agent, and the earlier one stays in the console as a record,
+# offline. Only a run killed outright (SIGKILL) can leave its agent up, and the
+# next run then finds it and goes on from 11d. Its first two lines say so.
 #
 # The token reaches the agent in a 0600 file in its data directory, as the
 # runbook puts it there, and nowhere else: never an argument, never printed.
@@ -46,19 +48,23 @@ note() { printf '  note    %s\n' "$*"; }
 
 # From the moment the throwaway agent is started (agent_live=1), every way out
 # but success retires it: the container, and its data directory with the token
-# and the key. A die, a command that failed outside die (the EXIT trap), Ctrl-C
-# and a TERM all land here.
-agent_live=0 failed=0 retire_msg=""
+# and the key. A die, a command that failed outside die (the EXIT trap), Ctrl-C,
+# a TERM and a HUP (a dropped SSH session) all land here. The cleanup ignores
+# further signals, so a second Ctrl-C cannot cut it short, and clears
+# agent_live only once it has tried everything.
+agent_live=0 failed=0 retire_msg="" rerun_ok=1
 retire_agent() {
   [ "$agent_live" = 1 ] || return 0
-  agent_live=0
+  trap '' INT TERM HUP
   local bad=0
   # The agent's own account of itself goes before the container does.
   docker logs --tail 20 smoke-agent 2>&1 </dev/null | sed 's/^/        agent: /' >&2 || true
   docker rm -f smoke-agent >/dev/null 2>&1 </dev/null || bad=1
   rm -rf "$agent_data" || bad=1
+  agent_live=0
   if [ "$bad" = 0 ]; then
-    retire_msg="The throwaway agent was retired: smoke-agent is removed, and so are $agent_data, its token and key. Its device stays in the console, offline. A re-run enrols a new one: have a new enrollment token ready (step 11b)."
+    retire_msg="The throwaway agent was retired: smoke-agent is removed, and so are $agent_data, its token and key. Its device stays in the console, offline."
+    [ "$rerun_ok" = 0 ] || retire_msg="$retire_msg A re-run enrols a new one: have a new enrollment token ready (step 11b)."
   else
     retire_msg="The throwaway agent could NOT be retired. Do it now: docker rm -f smoke-agent && rm -rf $agent_data (its device stays in the console, offline)."
   fi
@@ -66,28 +72,35 @@ retire_agent() {
 die() {
   local msg="$1" line
   shift
-  retire_agent
+  trap '' INT TERM HUP
   failed=1
+  # Said first: nothing the cleanup meets can lose it.
   printf '\nFAILED  %s\n' "$msg" >&2
   for line in "$@"; do printf '        %s\n' "$line" >&2; done
+  retire_agent
   [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2
   exit 1
 }
 on_exit() {
   local rc=$?
-  trap - EXIT INT TERM
+  trap '' INT TERM HUP
+  trap - EXIT
   [ "$rc" != 0 ] || return 0
   [ "$failed" = 0 ] || return 0   # die has said it
-  retire_agent
   failed=1
-  printf '\nFAILED  %s: a command failed or the run was interrupted (exit %s); what it printed is above\n' "$step" "$rc" >&2
+  case "$rc" in
+    129|130|143) printf '\nFAILED  %s: interrupted (exit %s)\n' "$step" "$rc" >&2 ;;
+    *) printf '\nFAILED  %s: a command failed (exit %s); what it printed is above\n' "$step" "$rc" >&2 ;;
+  esac
   printf '        %s\n' "It is safe to run again: ./scripts/first-boot-check.sh" >&2
+  retire_agent
   [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2
   exit 1
 }
 trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 tls_cafile="" connect="" wait_job=600
 while [ $# -gt 0 ]; do
@@ -230,17 +243,20 @@ say "Step 11d — round-trip a signed job"
 note "NOW, in the console: Devices -> $(hostname), the one that is online (device id $device_id) -> Run job -> Collect inventory."
 note "Waiting up to $wait_job s for a job a person asked for to reach this device and come back."
 deadline=$(( $(date +%s) + wait_job ))
-# Only jobs issued after this device enrolled: a refused row of an earlier run's
-# agent is not this agent's.
-query="select type, status, signature is not null from jobs where target_type = 'device' and target_id = '$device_id' and issued_at >= (select created_at from devices where id = '$device_id') and requested_by is not null order by issued_at desc limit 1"
+# Only jobs issued after this agent enrolled: a refused row of an earlier run's
+# agent is not this agent's. issued_at is cut to whole seconds, so is the anchor.
+query="select id, type, status, signature is not null from jobs where target_type = 'device' and target_id = '$device_id' and issued_at >= date_trunc('second', (select created_at from agents where device_id = '$device_id')) and requested_by is not null order by issued_at desc limit 1"
 while :; do
   row="$(psql_admin "$query" | tr -d '\r')" || die "step 11d: the database did not answer" "docker compose logs --tail 50 postgres" "then: ./scripts/first-boot-check.sh"
   case "$row" in
     *"|succeeded|t") break ;;
     *"|succeeded|f")
-      die "INVARIANT 1 BROKEN: a job succeeded on the agent with no server signature: $row" \
-          "No unsigned command path may exist (CLAUDE.md, security invariant 1). Do not enrol anything real." \
-          "docker compose logs --tail 100 api" ;;
+      rerun_ok=0
+      die "INVARIANT 1 BROKEN: a job succeeded on the agent with no server signature (id|type|status|signed: $row)" \
+          "No unsigned command path may exist (CLAUDE.md, security invariant 1). This is a security failure, not a flake." \
+          "Do not put this host in service, and do not run this check again." \
+          "Keep the audit log and the api logs as they are, and raise it: docker compose logs --tail 100 api" \
+          "The agent's last log lines follow, taken before it is retired." ;;
     *"|failed|"*|*"|expired|"*|*"|refused|"*|*"|cancelled|"*)
       die "the job ended: $row" \
           "Run it again with a new agent: make a new enrollment token (step 11b), request Run job -> Collect inventory when asked, then from deploy/: ./scripts/first-boot-check.sh" \
@@ -303,8 +319,8 @@ ok "step 11e: every organization's audit chain verifies"
 say "Step 11f — retire the throwaway agent"
 act "docker rm -f smoke-agent; rm -rf $agent_data"
 docker rm -f smoke-agent >/dev/null </dev/null \
-  || die "step 11f: could not remove smoke-agent" "docker rm -f smoke-agent && rm -rf $agent_data"
-rm -rf "$agent_data" || die "step 11f: could not remove $agent_data" "rm -rf $agent_data"
+  || die "step 11f: could not remove smoke-agent" "docker rm -f smoke-agent && rm -rf $agent_data" "then: ./scripts/first-boot-check.sh"
+rm -rf "$agent_data" || die "step 11f: could not remove $agent_data" "rm -rf $agent_data" "then: ./scripts/first-boot-check.sh"
 agent_live=0
 ok "step 11f: the agent and its key are gone; the device stays in the console as a record, offline"
 
