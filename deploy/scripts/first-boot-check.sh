@@ -37,36 +37,75 @@ case "$-" in
 esac
 
 if [ -t 1 ]; then bold=$'\033[1m'; plain=$'\033[0m'; else bold=""; plain=""; fi
-say()  { printf '\n%s%s%s\n' "$bold" "$*" "$plain"; }
+step="starting"
+say()  { step="$*"; printf '\n%s%s%s\n' "$bold" "$*" "$plain"; }
 ok()   { printf '  ok      %s\n' "$*"; }
 skip() { printf '  skip    %s\n' "$*"; }
 act()  { printf '  run     %s\n' "$*"; }
 note() { printf '  note    %s\n' "$*"; }
+
+# From the moment the throwaway agent is started (agent_live=1), every way out
+# but success retires it: the container, and its data directory with the token
+# and the key. A die, a command that failed outside die (the EXIT trap), Ctrl-C
+# and a TERM all land here.
+agent_live=0 failed=0 retire_msg=""
+retire_agent() {
+  [ "$agent_live" = 1 ] || return 0
+  agent_live=0
+  local bad=0
+  # The agent's own account of itself goes before the container does.
+  docker logs --tail 20 smoke-agent 2>&1 </dev/null | sed 's/^/        agent: /' >&2 || true
+  docker rm -f smoke-agent >/dev/null 2>&1 </dev/null || bad=1
+  rm -rf "$agent_data" || bad=1
+  if [ "$bad" = 0 ]; then
+    retire_msg="The throwaway agent was retired: smoke-agent is removed, and so are $agent_data, its token and key. Its device stays in the console, offline. A re-run enrols a new one: have a new enrollment token ready (step 11b)."
+  else
+    retire_msg="The throwaway agent could NOT be retired. Do it now: docker rm -f smoke-agent && rm -rf $agent_data (its device stays in the console, offline)."
+  fi
+}
 die() {
-  printf '\nFAILED  %s\n' "$1" >&2
+  local msg="$1" line
   shift
-  local line
+  retire_agent
+  failed=1
+  printf '\nFAILED  %s\n' "$msg" >&2
   for line in "$@"; do printf '        %s\n' "$line" >&2; done
+  [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2
   exit 1
 }
+on_exit() {
+  local rc=$?
+  trap - EXIT INT TERM
+  [ "$rc" != 0 ] || return 0
+  [ "$failed" = 0 ] || return 0   # die has said it
+  retire_agent
+  failed=1
+  printf '\nFAILED  %s: a command failed or the run was interrupted (exit %s); what it printed is above\n' "$step" "$rc" >&2
+  printf '        %s\n' "It is safe to run again: ./scripts/first-boot-check.sh" >&2
+  [ -z "$retire_msg" ] || printf '        %s\n' "$retire_msg" >&2
+  exit 1
+}
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 tls_cafile="" connect="" wait_job=600
 while [ $# -gt 0 ]; do
   case "$1" in
-    --tls-cafile) [ $# -ge 2 ] || die "--tls-cafile needs a file"; tls_cafile="$2"; shift 2 ;;
-    --connect) [ $# -ge 2 ] || die "--connect needs an address"; connect="$2"; shift 2 ;;
-    --wait-job) [ $# -ge 2 ] || die "--wait-job needs seconds"; wait_job="$2"; shift 2 ;;
+    --tls-cafile) [ $# -ge 2 ] || die "--tls-cafile needs a file" "./scripts/first-boot-check.sh --help"; tls_cafile="$2"; shift 2 ;;
+    --connect) [ $# -ge 2 ] || die "--connect needs an address" "./scripts/first-boot-check.sh --help"; connect="$2"; shift 2 ;;
+    --wait-job) [ $# -ge 2 ] || die "--wait-job needs seconds" "./scripts/first-boot-check.sh --help"; wait_job="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" "./scripts/first-boot-check.sh --help" ;;
   esac
 done
-[[ $wait_job =~ ^[1-9][0-9]*$ ]] || die "--wait-job needs a whole number of seconds"
+[[ $wait_job =~ ^[1-9][0-9]*$ ]] || die "--wait-job needs a whole number of seconds" "./scripts/first-boot-check.sh --help"
 if [ -n "$connect" ]; then
-  [[ $connect =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "--connect needs an IPv4 address, such as 127.0.0.1"
+  [[ $connect =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "--connect needs an IPv4 address, such as 127.0.0.1" "./scripts/first-boot-check.sh --help"
 fi
 # Resolved before the cd below, and absolute because docker mounts it.
 if [ -n "$tls_cafile" ]; then
-  [ -s "$tls_cafile" ] || die "--tls-cafile $tls_cafile is missing or empty"
+  [ -s "$tls_cafile" ] || die "--tls-cafile $tls_cafile is missing or empty" "./scripts/first-boot-check.sh --help"
   tls_cafile="$(readlink -f "$tls_cafile")"
 fi
 
@@ -92,14 +131,15 @@ rc=0
 dc exec -T openbao bao status >/dev/null 2>&1 || rc=$?
 case "$rc" in
   0) ok "OpenBao answers, unsealed (bao status: Sealed false)" ;;
-  2) die "OpenBao is sealed" "deploy/README.md, After a reboot or a restart: sudo ./scripts/openbao-seal.sh status" ;;
-  *) die "OpenBao does not answer" "docker compose up -d && docker compose exec openbao bao status" ;;
+  2) die "OpenBao is sealed" "deploy/README.md, After a reboot or a restart: sudo ./scripts/openbao-seal.sh status" "then: ./scripts/first-boot-check.sh" ;;
+  *) die "OpenBao does not answer" "docker compose up -d && docker compose exec openbao bao status" "then: ./scripts/first-boot-check.sh" ;;
 esac
 
 # ------------------------------------------------------------ step 10
 
 say "Step 10 — an administrator"
-admins="$(psql_admin "select u.email, r.name from users u join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id where u.kind = 'staff'" | tr -d '\r')"
+admins="$(psql_admin "select u.email, r.name from users u join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id where u.kind = 'staff'" | tr -d '\r')" \
+  || die "step 10: the database did not answer" "docker compose ps postgres && docker compose logs --tail 50 postgres" "then: ./scripts/first-boot-check.sh"
 printf '%s\n' "$admins" | sed '/^$/d; s/^/        /'
 case "$admins" in
   *"|org-admin"*) ok "step 10: a staff account holds org-admin" ;;
@@ -138,9 +178,11 @@ read_token() {
 say "Step 11c — a throwaway agent on this VPS"
 if [ -n "$(docker ps -q --filter name='^smoke-agent$' --filter status=running </dev/null)" ]; then
   skip "steps 11b and 11c: the throwaway agent smoke-agent is running, from an earlier run"
+  agent_live=1
+  rm -f "$agent_data/enroll-token"
 else
   docker rm -f smoke-agent >/dev/null 2>&1 </dev/null || true
-  rm -rf "$agent_data"
+  rm -rf "$agent_data"   # a token left by an earlier failed run goes too
   if [ -x "$agent_bin" ] && [ -z "$(find ../agent -path ../agent/dist -prune -o -type f -newer "$agent_bin" -print -quit)" ]; then
     skip "step 11c: agent/dist/novieri-agent is newer than every file of agent/"
   else
@@ -152,6 +194,7 @@ else
   note "step 11b, in the console: https://$host/enrollment -- a token named first endpoint, 24 hours, one use,"
   note "for the site Principal of your own organization's client. It is shown once: paste it here."
   read_token
+  agent_live=1   # from here the token is on disk: every way out retires it
   install -d -m 700 "$agent_data"
   (umask 077 && printf '%s' "$token" > "$agent_data/enroll-token")
   token=""
@@ -172,31 +215,39 @@ logs="$(docker logs smoke-agent 2>&1 </dev/null || true)"
 printf '%s\n' "$logs" | grep -E 'starting|enrolling|enrolled|gateway connected' | sed 's/^/        /' || true
 case "$logs" in
   *"gateway connected"*) ;;
-  *) die "the agent did not connect to the gateway within 60 s" "docker logs smoke-agent" \
-         "a token that was used, or is past its 24 hours, is refused: make a new one, then: docker rm -f smoke-agent && ./scripts/first-boot-check.sh" ;;
+  *) die "the agent did not connect to the gateway within 60 s" "the agent's last log lines are above" \
+         "a token that was used, or is past its 24 hours, is refused: make a new one in the console (step 11b), then: ./scripts/first-boot-check.sh" ;;
 esac
 device_id="$(printf '%s\n' "$logs" | sed -n 's/.*msg=enrolled device_id=\([0-9a-f-]*\).*/\1/p' | tail -1)"
 [[ $device_id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
-  || die "the agent's log names no device it enrolled as" "docker logs smoke-agent"
-[ ! -e "$agent_data/enroll-token" ] || die "the agent kept its enrollment token after enrolling" "docker logs smoke-agent"
+  || die "the agent's log names no device it enrolled as" "the agent's last log lines are above" "make a new enrollment token (step 11b), then: ./scripts/first-boot-check.sh"
+[ ! -e "$agent_data/enroll-token" ] || die "the agent kept its enrollment token after enrolling" "the agent's last log lines are above" "make a new enrollment token (step 11b), then: ./scripts/first-boot-check.sh"
 ok "step 11c: the agent enrolled as device $device_id, connected over :8443, and its token file is gone"
 
 # ----------------------------------------------------------- step 11d
 
 say "Step 11d — round-trip a signed job"
-note "NOW, in the console: Devices -> $(hostname) -> Run job -> Collect inventory."
+note "NOW, in the console: Devices -> $(hostname), the one that is online (device id $device_id) -> Run job -> Collect inventory."
 note "Waiting up to $wait_job s for a job a person asked for to reach this device and come back."
 deadline=$(( $(date +%s) + wait_job ))
-query="select type, status, signature is not null from jobs where target_type = 'device' and target_id = '$device_id' and requested_by is not null order by issued_at desc limit 1"
+# Only jobs issued after this device enrolled: a refused row of an earlier run's
+# agent is not this agent's.
+query="select type, status, signature is not null from jobs where target_type = 'device' and target_id = '$device_id' and issued_at >= (select created_at from devices where id = '$device_id') and requested_by is not null order by issued_at desc limit 1"
 while :; do
-  row="$(psql_admin "$query" | tr -d '\r')"
+  row="$(psql_admin "$query" | tr -d '\r')" || die "step 11d: the database did not answer" "docker compose logs --tail 50 postgres" "then: ./scripts/first-boot-check.sh"
   case "$row" in
     *"|succeeded|t") break ;;
+    *"|succeeded|f")
+      die "INVARIANT 1 BROKEN: a job succeeded on the agent with no server signature: $row" \
+          "No unsigned command path may exist (CLAUDE.md, security invariant 1). Do not enrol anything real." \
+          "docker compose logs --tail 100 api" ;;
     *"|failed|"*|*"|expired|"*|*"|refused|"*|*"|cancelled|"*)
-      die "the job ended: $row" "docker logs smoke-agent" ;;
+      die "the job ended: $row" \
+          "Run it again with a new agent: make a new enrollment token (step 11b), request Run job -> Collect inventory when asked, then from deploy/: ./scripts/first-boot-check.sh" \
+          "(add the same --tls-cafile and --connect options if you used them)" ;;
   esac
   [ "$(date +%s)" -lt "$deadline" ] || die "no job a person asked for reached this device in $wait_job s" \
-    "in the console: Devices -> $(hostname) -> Run job -> Collect inventory; then ./scripts/first-boot-check.sh (the agent stays up)"
+    "make a new enrollment token (step 11b), then from deploy/: ./scripts/first-boot-check.sh, and press Run job -> Collect inventory on the device it names"
   sleep 3
 done
 printf '        %s\n' "$row"
@@ -235,15 +286,15 @@ async def main() -> None:
 
 asyncio.run(main())
 EOF
-)" || die "the audit chain could not be read" "docker compose logs --tail 50 api"
+)" || die "the audit chain could not be read" "docker compose logs --tail 50 api" "then: ./scripts/first-boot-check.sh"
 chain="$(printf '%s\n' "$chain" | tr -d '\r')"
 printf '%s\n' "$chain" | sed 's/^/        /'
 case "$chain" in
   *'"ok": true'*) ;;
-  *) die "no organization's audit chain verifies" "docker compose logs --tail 50 api" ;;
+  *) die "no organization's audit chain verifies" "docker compose logs --tail 50 api" "then: ./scripts/first-boot-check.sh" ;;
 esac
 case "$chain" in
-  *'"ok": false'*) die "an audit chain is broken (above): restoring the database without its-secrets does this" "docs/07-backup-restore.md §4" ;;
+  *'"ok": false'*) die "an audit chain is broken (above): restoring the database without its-secrets does this" "docs/07-backup-restore.md §4" "then: ./scripts/first-boot-check.sh" ;;
 esac
 ok "step 11e: every organization's audit chain verifies"
 
@@ -251,8 +302,10 @@ ok "step 11e: every organization's audit chain verifies"
 
 say "Step 11f — retire the throwaway agent"
 act "docker rm -f smoke-agent; rm -rf $agent_data"
-docker rm -f smoke-agent >/dev/null </dev/null
-rm -rf "$agent_data"
+docker rm -f smoke-agent >/dev/null </dev/null \
+  || die "step 11f: could not remove smoke-agent" "docker rm -f smoke-agent && rm -rf $agent_data"
+rm -rf "$agent_data" || die "step 11f: could not remove $agent_data" "rm -rf $agent_data"
+agent_live=0
 ok "step 11f: the agent and its key are gone; the device stays in the console as a record, offline"
 
 # ------------------------------------------------------------ step 12
@@ -269,16 +322,23 @@ if [ -n "$last" ] && backup_timer_installed; then
 else
   act "install-backup-timer.sh, then a backup now"
   if [ "$no_systemctl" = 1 ]; then
-    sudo env ITS_NO_SYSTEMCTL=1 ITS_SYSTEMD_DIR="$unit_dir" ./scripts/install-backup-timer.sh </dev/null
+    sudo env ITS_NO_SYSTEMCTL=1 ITS_SYSTEMD_DIR="$unit_dir" ./scripts/install-backup-timer.sh </dev/null \
+      || die "step 12: install-backup-timer.sh failed (its output is above)" "sudo ./scripts/install-backup-timer.sh" "then: ./scripts/first-boot-check.sh"
     note "ITS_NO_SYSTEMCTL=1: the backup service's command, run here"
-    sudo ./scripts/scheduled-backup.sh </dev/null
+    sudo ./scripts/scheduled-backup.sh </dev/null \
+      || die "step 12: the first backup failed (its output is above)" "sudo ./scripts/scheduled-backup.sh" "then: ./scripts/first-boot-check.sh"
   else
-    sudo ./scripts/install-backup-timer.sh </dev/null
-    sudo systemctl start its-platform-backup.service
-    sudo journalctl -u its-platform-backup.service --no-pager -n 20
+    sudo ./scripts/install-backup-timer.sh </dev/null \
+      || die "step 12: install-backup-timer.sh failed (its output is above)" "sudo ./scripts/install-backup-timer.sh" "then: ./scripts/first-boot-check.sh"
+    if ! sudo systemctl start its-platform-backup.service; then
+      sudo journalctl -u its-platform-backup.service --no-pager -n 50 || true
+      die "step 12: the backup service failed (its journal is above)" "sudo systemctl status its-platform-backup.service" "then: ./scripts/first-boot-check.sh"
+    fi
+    sudo journalctl -u its-platform-backup.service --no-pager -n 20 || true
   fi
   last="$(sudo cat "$backup_state/last-success" 2>/dev/null || true)"
-  [ -n "$last" ] || die "the first backup did not succeed" "sudo journalctl -u its-platform-backup.service --no-pager -n 50"
+  [ -n "$last" ] || die "the first backup did not succeed: no last-success was written" \
+    "sudo journalctl -u its-platform-backup.service --no-pager -n 50 (on a host without systemd: sudo ./scripts/scheduled-backup.sh)" "then: ./scripts/first-boot-check.sh"
 fi
 ok "step 12: the newest backup: $last"
 note "That backup is on this VPS and goes with it. The off-host copy is recommended before anything"

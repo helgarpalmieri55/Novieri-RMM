@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "deploy" / "scripts" / "first-boot-check.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 SHIMMED = ("cat", "date", "env", "find", "grep", "hostname", "id", "install", "readlink",
-           "rm", "sed", "tail", "tr", "dirname")  # fmt: skip
+           "rm", "sed", "seq", "tail", "tr", "dirname")  # fmt: skip
 DEVICE = "0194f3a2-7c1d-7e55-9a0b-3c4d5e6f7a8b"
 
 FAKE_DOCKER = r'''
@@ -42,13 +42,21 @@ if argv[:3] == ["compose", "exec", "-T"]:
     if svc == "openbao":
         rc = s["bao_rc"]
     elif svc == "postgres":
+        if s.get("pg_down"):
+            sys.stderr.write('service "postgres" is not running\n')
+            json.dump(s, open(STATE, "w"))
+            sys.exit(1)
         sql = cmd[-1]
         if "user_roles" in sql:
             out(s["admins"])
         elif "from jobs" in sql:
             s["polls"] += 1
             assert "target_id = '%s'" % s["device"] in sql, sql
-            out(s["job"] + "\n" if s["polls"] >= s["job_after"] else "")
+            scoped = "issued_at >= (select created_at from devices where id = '%s')" % s["device"]
+            if scoped not in sql and s.get("old_job"):
+                out(s["old_job"] + "\n")  # an earlier agent's row, which the query must exclude
+            else:
+                out(s["job"] + "\n" if s["polls"] >= s["job_after"] else "")
     elif svc == "api":
         sys.stdin.read()
         out(s["chain"])
@@ -63,15 +71,20 @@ elif argv[0] == "run" and "busybox:1.36.1" in argv:
     token_file = os.path.join(data, "enroll-token")
     s["token_seen"] = open(token_file).read()
     s["token_mode"] = oct(os.stat(token_file).st_mode & 0o777)
-    os.remove(token_file)
     s["agent_args"] = argv
-    s["agent_running"] = True
+    if s.get("run_rc"):
+        rc = s["run_rc"]  # the registry refused, say: the token file stays where it was put
+    else:
+        if not s.get("keep_token"):
+            os.remove(token_file)
+        s["agent_running"] = True
 elif argv[0] == "logs":
     out("time=1 level=INFO msg=\"novieri-agent starting\" version=dev enrolled=false\n")
     out("time=2 level=INFO msg=enrolling url=https://rmm.novieri.com/enroll/v1\n")
     out("time=3 level=INFO msg=enrolled device_id=%s gateway_url=wss://rmm.novieri.com:8443/agent\n"
         % s["device"])
-    if s["connects"]:
+    s["log_polls"] = s.get("log_polls", 0) + 1
+    if s["connects"] and s["log_polls"] >= s.get("connect_after", 1):
         out("time=4 level=INFO msg=\"gateway connected\" url=wss://rmm.novieri.com:8443/agent\n")
 json.dump(s, open(STATE, "w"))
 sys.exit(rc)
@@ -89,7 +102,10 @@ FAKE_BACKUP = r'''
 import os, sys
 name = os.path.basename(sys.argv[0])
 open(os.environ["ARGV_LOG"], "a").write(name + " " + " ".join(sys.argv[1:]) + "\n")
-if name == "scheduled-backup.sh":
+if name == "scheduled-backup.sh" and os.environ.get("FAKE_BACKUP_MODE") == "fails":
+    sys.stderr.write("backup: pg_dump failed\n")
+    sys.exit(3)
+if name == "scheduled-backup.sh" and os.environ.get("FAKE_BACKUP_MODE") != "silent":
     state = os.environ["ITS_BACKUP_STATE_DIR"]
     os.makedirs(state, exist_ok=True)
     open(os.path.join(state, "last-success"), "w").write("2026-11-27T10:00:00Z\n")
@@ -159,19 +175,31 @@ class Box:
                 f'#!/bin/sh\nprintf \'%s %s\\n\' {name} "$*" >> "$ARGV_LOG"\nexec {real} "$@"\n',
                 python=False,
             )
-        _exe(self.bin / "sleep", "#!/bin/sh\nexit 0\n", python=False)
+        # `sleep` can deliver a signal to the script, to play a Ctrl-C in the middle of a wait.
+        _exe(self.bin / "sleep",
+             '#!/bin/sh\n[ -z "$FAKE_SLEEP_SIGNAL" ] || kill -"$FAKE_SLEEP_SIGNAL" $PPID\nexit 0\n',
+             python=False)  # fmt: skip
+        _exe(self.bin / "systemctl",
+             '#!/bin/sh\nprintf \'systemctl %s\\n\' "$*" >> "$ARGV_LOG"\n'
+             '[ "$1" != start ] || exit "${FAKE_SYSTEMCTL_START_RC:-0}"\n'
+             '[ "$1" != is-enabled ] || echo disabled\n',
+             python=False)  # fmt: skip
+        _exe(self.bin / "journalctl",
+             '#!/bin/sh\nprintf \'journalctl %s\\n\' "$*" >> "$ARGV_LOG"\n'
+             'echo "journal: backup failed"\n',
+             python=False)  # fmt: skip
         _exe(self.bin / "sudo", '#!/bin/sh\nprintf \'sudo %s\\n\' "$*" >> "$ARGV_LOG"\nexec "$@"\n',
              python=False)  # fmt: skip
         _exe(self.bin / "docker", FAKE_DOCKER)
         _exe(self.bin / "curl", FAKE_CURL)
 
     def run(
-        self, *args: str, stdin: str | None = None, **env: str
+        self, *args: str, stdin: str | None = None, shell: tuple[str, ...] = (), **env: str
     ) -> subprocess.CompletedProcess[str]:
         self.state_file.write_text(json.dumps(self.state))
         self.log.write_text("")
         done = subprocess.run(
-            [BASH, str(self.script), *args],
+            [BASH, *shell, str(self.script), *args],
             input=self.token + "\n" if stdin is None else stdin,
             capture_output=True,
             text=True,
@@ -215,6 +243,7 @@ def test_a_claimed_installation_passes_every_check(tmp_path: Path) -> None:
     box = Box(tmp_path)
     done = box.run()
     assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stderr == "", "a command with no shim, or a failure that was swallowed"
     assert _ok(done.stdout) == [
         "OpenBao answers, unsealed (bao status",
         "step 10", "step 11a", "step 11c", "step 11d", "step 11e", "step 11f", "step 12",
@@ -370,3 +399,188 @@ def test_a_binary_newer_than_its_sources_is_not_built_again(tmp_path: Path) -> N
     assert done.returncode == 0, done.stdout + done.stderr
     assert "skip    step 11c: agent/dist/novieri-agent is newer than every file" in done.stdout
     assert box.state["built"] is False
+
+
+def _failed(done: subprocess.CompletedProcess[str]) -> str:
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr.count("FAILED") == 1, "a failure is reported once"
+    return done.stderr
+
+
+def _retired(box: Box) -> None:
+    """Whatever stopped it, no throwaway agent, token or key is left behind."""
+    assert "docker rm -f smoke-agent" in box.argv()
+    assert box.state["agent_running"] is False and not box.agent_data.exists()
+
+
+def test_a_database_that_does_not_answer_says_so_and_how_to_go_on(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["pg_down"] = True
+    err = _failed(box.run())
+    assert "step 10: the database did not answer" in err
+    assert "./scripts/first-boot-check.sh" in err
+
+
+def test_a_refused_docker_run_is_reported_and_costs_no_token_on_disk(tmp_path: Path) -> None:
+    """Exit 125, from Docker Hub's 429 say: not a bare exit with the pasted token left in /tmp."""
+    box = Box(tmp_path)
+    box.state["run_rc"] = 125
+    err = _failed(box.run())
+    assert "Step 11c" in err and "exit 125" in err
+    assert "It is safe to run again: ./scripts/first-boot-check.sh" in err
+    assert not box.agent_data.exists(), "the token file went with the agent's directory"
+    assert box.token not in box.argv() + err
+    _retired(box)
+
+
+def test_a_stale_token_file_from_an_earlier_failure_is_not_used(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.agent_data.mkdir()
+    (box.agent_data / "enroll-token").write_text("STALE-TOKEN-OF-A-FAILED-RUN")
+    assert box.run().returncode == 0
+    assert box.state["token_seen"] == box.token
+
+
+def test_a_failed_backup_reaches_its_own_message_on_the_ci_path(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    err = _failed(box.run(FAKE_BACKUP_MODE="fails"))
+    assert "step 12: the first backup failed" in err and "backup: pg_dump failed" in err
+
+
+def test_a_backup_that_leaves_no_trace_says_so(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    err = _failed(box.run(FAKE_BACKUP_MODE="silent"))
+    assert "the first backup did not succeed" in err
+
+
+def test_a_failed_backup_service_shows_its_journal_first(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    done = box.run(ITS_NO_SYSTEMCTL="0", FAKE_SYSTEMCTL_START_RC="1")
+    err = _failed(done)
+    assert "step 12: the backup service failed (its journal is above)" in err
+    assert "journalctl -u its-platform-backup.service --no-pager -n 50" in box.argv()
+    assert "journal: backup failed" in done.stdout
+
+
+def test_a_failure_after_11c_retires_the_agent_and_its_key(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["job"] = "inventory.collect|refused|t"
+    err = _failed(box.run())
+    assert "the job ended: inventory.collect|refused|t" in err
+    assert "The throwaway agent was retired" in err
+    assert "from deploy/: ./scripts/first-boot-check.sh" in err
+    _retired(box)
+    box = Box(tmp_path / "again")
+    box.state["chain"] = CHAIN_OK + 'other {"ok": false, "count": 3, "broken_at": "x"}\n'
+    _failed(box.run())
+    _retired(box)
+
+
+def test_a_timeout_in_11d_retires_the_agent_and_says_what_to_do(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["job_after"] = 10**6
+    err = _failed(box.run("--wait-job", "1"))
+    assert "make a new enrollment token (step 11b)" in err
+    _retired(box)
+
+
+def test_ctrl_c_and_terminate_retire_the_agent_too(tmp_path: Path) -> None:
+    for signal in ("INT", "TERM"):
+        box = Box(tmp_path / signal)
+        box.state["job_after"] = 10**6
+        err = _failed(box.run("--wait-job", "30", FAKE_SLEEP_SIGNAL=signal))
+        assert "The throwaway agent was retired" in err
+        _retired(box)
+
+
+def test_a_refused_row_of_an_earlier_agent_does_not_stop_a_fresh_run(tmp_path: Path) -> None:
+    """11d looks only at jobs issued after this device enrolled."""
+    box = Box(tmp_path)
+    box.state["old_job"] = "inventory.collect|refused|t"
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_a_job_that_succeeded_unsigned_fails_at_once_naming_invariant_1(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["job"] = "inventory.collect|succeeded|f"
+    box.state["job_after"] = 1
+    err = _failed(box.run("--wait-job", "30"))
+    assert "INVARIANT 1 BROKEN" in err and "no server signature" in err
+    assert "no job a person asked for" not in err
+    assert box.state["polls"] == 1, "no waiting"
+    _retired(box)
+
+
+def test_the_wait_for_the_gateway_polls_until_the_agent_connects(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["connect_after"] = 4
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.argv().count("docker logs smoke-agent") >= 4
+
+
+def test_an_agent_that_never_connects_is_polled_for_its_whole_wait(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["connects"] = False
+    assert box.run().returncode == 1
+    assert box.argv().count("docker logs smoke-agent") >= 30
+    _retired(box)
+
+
+def test_xtrace_is_refused_before_the_token_is_read(tmp_path: Path) -> None:
+    for kind in ("-x", "SHELLOPTS"):
+        box = Box(tmp_path / ("a" if kind == "-x" else "b"))
+        if kind == "-x":
+            done = box.run(shell=("-x",))
+        else:
+            done = box.run(SHELLOPTS="xtrace")
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert "refusing to run under xtrace" in done.stderr
+        assert box.token not in done.stdout + done.stderr + box.argv()
+        assert "busybox" not in box.argv() and "docker" not in box.argv()
+
+
+def test_a_token_with_no_final_newline_or_with_a_crlf_and_spaces_is_taken(tmp_path: Path) -> None:
+    box = Box(tmp_path / "a")
+    assert box.run(stdin=box.token).returncode == 0
+    assert box.state["token_seen"] == box.token
+    box = Box(tmp_path / "b")
+    assert box.run(stdin=f"  {box.token} \r\n").returncode == 0
+    assert box.state["token_seen"] == box.token
+
+
+def test_no_token_on_the_input_stops_it_with_the_command_to_go_on(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    err = _failed(box.run(stdin=""))
+    assert "the input ended before the enrollment token" in err
+
+
+def test_an_empty_chain_is_not_a_verified_one(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["chain"] = ""
+    err = _failed(box.run())
+    assert "no organization's audit chain verifies" in err
+    _retired(box)
+
+
+def test_an_agent_that_kept_its_token_stops_it(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["keep_token"] = True
+    err = _failed(box.run())
+    assert "the agent kept its enrollment token after enrolling" in err
+    assert not box.agent_data.exists()
+    _retired(box)
+
+
+def test_the_second_run_names_the_device_to_press_the_button_on(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    done = box.run()
+    assert f"the one that is online (device id {DEVICE})" in done.stdout
+
+
+def test_an_openbao_that_does_not_answer_says_how_to_go_on(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    box.state["bao_rc"] = 1
+    err = _failed(box.run())
+    assert "OpenBao does not answer" in err and "./scripts/first-boot-check.sh" in err
