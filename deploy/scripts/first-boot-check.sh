@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+#
+# Prove that the first boot worked: deploy/README.md, First boot, 3 -- steps
+# 10, 11a, 11c to 11f and 12 of its appendix (design
+# 2026-11-27-despliegue-automatizado §2, §3).
+#
+#   ./scripts/first-boot-check.sh
+#
+# Run it after first-boot.sh and the browser: the installation claimed (step
+# 8), your second factor enrolled (step 9), an enrollment token in hand (step
+# 11b). It asks for that token (hidden), starts a throwaway agent on this VPS
+# (11c), says when to press Run job -> Collect inventory and waits for the job
+# (11d), verifies the audit chain (11e), retires the agent (11f) and takes the
+# first backup (12). It prints `run` before what it changes, `skip` for what
+# it finds done, `ok` for a check that held. It is safe to run again, after a
+# failure or after a success: a run that stopped finds its agent still up and
+# goes on from 11d; a second whole run enrols, and retires, another throwaway
+# agent, and the first stays in the console as a record, offline. Its first
+# two lines say so.
+#
+# The token reaches the agent in a 0600 file in its data directory, as the
+# runbook puts it there, and nowhere else: never an argument, never printed.
+#
+# Options: --tls-cafile PEM (the root :443 chains to, for the curls and the
+# agent: Let's Encrypt staging's on a rehearsal, Pebble's in CI); --connect
+# ADDRESS (dial ITS_PUBLIC_HOST at this address instead of asking DNS: the
+# CI); --wait-job SECONDS (default 600, step 11d). Environment, for the CI and
+# a rehearsal: ITS_NO_SYSTEMCTL=1 (step 12 runs the backup service's command
+# itself) and ITS_SYSTEMD_DIR; for its tests: ITS_SMOKE_AGENT_DIR (the agent's
+# data directory, /tmp/smoke-agent) and ITS_BACKUP_STATE_DIR
+# (scheduled-backup.sh's own).
+set -euo pipefail
+
+case "$-" in
+  *x*) printf 'first-boot-check.sh: refusing to run under xtrace (bash -x): it would print the token\n' >&2
+       exit 1 ;;
+esac
+
+if [ -t 1 ]; then bold=$'\033[1m'; plain=$'\033[0m'; else bold=""; plain=""; fi
+say()  { printf '\n%s%s%s\n' "$bold" "$*" "$plain"; }
+ok()   { printf '  ok      %s\n' "$*"; }
+skip() { printf '  skip    %s\n' "$*"; }
+act()  { printf '  run     %s\n' "$*"; }
+note() { printf '  note    %s\n' "$*"; }
+die() {
+  printf '\nFAILED  %s\n' "$1" >&2
+  shift
+  local line
+  for line in "$@"; do printf '        %s\n' "$line" >&2; done
+  exit 1
+}
+
+tls_cafile="" connect="" wait_job=600
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tls-cafile) [ $# -ge 2 ] || die "--tls-cafile needs a file"; tls_cafile="$2"; shift 2 ;;
+    --connect) [ $# -ge 2 ] || die "--connect needs an address"; connect="$2"; shift 2 ;;
+    --wait-job) [ $# -ge 2 ] || die "--wait-job needs seconds"; wait_job="$2"; shift 2 ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument: $1" "./scripts/first-boot-check.sh --help" ;;
+  esac
+done
+[[ $wait_job =~ ^[1-9][0-9]*$ ]] || die "--wait-job needs a whole number of seconds"
+if [ -n "$connect" ]; then
+  [[ $connect =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "--connect needs an IPv4 address, such as 127.0.0.1"
+fi
+# Resolved before the cd below, and absolute because docker mounts it.
+if [ -n "$tls_cafile" ]; then
+  [ -s "$tls_cafile" ] || die "--tls-cafile $tls_cafile is missing or empty"
+  tls_cafile="$(readlink -f "$tls_cafile")"
+fi
+
+cd "$(dirname "$(readlink -f "$0")")/.."   # deploy/
+note "this enrols a throwaway agent on this VPS (step 11c) and retires it, with its key (11f)."
+note "It is safe to run again: a second run enrols and retires another; the first stays in the console, offline."
+unit_dir="${ITS_SYSTEMD_DIR:-/etc/systemd/system}"
+no_systemctl="${ITS_NO_SYSTEMCTL:-0}"
+backup_state="${ITS_BACKUP_STATE_DIR:-/var/lib/it-suite/backup}"   # scheduled-backup.sh's
+agent_data="${ITS_SMOKE_AGENT_DIR:-/tmp/smoke-agent}"
+agent_bin="$PWD/../agent/dist/novieri-agent"
+[ -f .env ] || die ".env is missing: this runs after first-boot.sh" "./scripts/first-boot.sh"
+host="$(sed -n 's/^ITS_PUBLIC_HOST=//p' .env | tail -1)"
+[ -n "$host" ] || die ".env has no ITS_PUBLIC_HOST" "./scripts/first-boot.sh"
+
+dc() { docker compose "$@" </dev/null; }
+psql_admin() { dc exec -T postgres psql -X -U its_admin -d itsuite -tAc "$1"; }
+
+# ------------------------------------------------------------ OpenBao
+
+say "OpenBao"
+rc=0
+dc exec -T openbao bao status >/dev/null 2>&1 || rc=$?
+case "$rc" in
+  0) ok "OpenBao answers, unsealed (bao status: Sealed false)" ;;
+  2) die "OpenBao is sealed" "deploy/README.md, After a reboot or a restart: sudo ./scripts/openbao-seal.sh status" ;;
+  *) die "OpenBao does not answer" "docker compose up -d && docker compose exec openbao bao status" ;;
+esac
+
+# ------------------------------------------------------------ step 10
+
+say "Step 10 — an administrator"
+admins="$(psql_admin "select u.email, r.name from users u join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id where u.kind = 'staff'" | tr -d '\r')"
+printf '%s\n' "$admins" | sed '/^$/d; s/^/        /'
+case "$admins" in
+  *"|org-admin"*) ok "step 10: a staff account holds org-admin" ;;
+  *) die "no staff account holds org-admin: the installation is not claimed, or the claim did not complete" \
+         "in a browser: https://$host/ with the install code (docker compose exec api cat /var/lib/its/secrets/setup-code)," \
+         "then sign in and enrol your second factor (deploy/README.md, First boot, 2); then: ./scripts/first-boot-check.sh" ;;
+esac
+
+# ----------------------------------------------------------- step 11a
+
+say "Step 11a — authorization is enforced server-side"
+curl_args=(-s -o /dev/null -w '%{http_code}')
+[ -z "$tls_cafile" ] || curl_args+=(--cacert "$tls_cafile")
+[ -z "$connect" ] || curl_args+=(--noproxy '*' --resolve "$host:443:$connect")
+refused=""
+for path in /api/v1/devices /api/v1/jobs /api/v1/audit/verify /api/v1/enrollment-tokens; do
+  code="$(curl "${curl_args[@]}" "https://$host$path" </dev/null || true)"
+  printf '  %-28s %s\n' "$path" "$code"
+  [ "$code" = 401 ] || refused="$refused $path=$code"
+done
+[ -z "$refused" ] || die "unauthenticated, these did not answer 401:$refused" \
+  "a 404 on all four means Traefik is not routing (deploy/README.md, What was broken, defect 7): docker compose logs --tail 50 traefik"
+ok "step 11a: all four answer 401 to a request with no session"
+
+# ------------------------------------------------------ steps 11b, 11c
+
+read_token() {
+  token=""
+  IFS= read -r -s -p "Enrollment token from step 11b (hidden): " token || [ -n "$token" ] \
+    || die "the input ended before the enrollment token" "./scripts/first-boot-check.sh, and paste it at the prompt"
+  if [ -t 0 ]; then echo; fi
+  token="${token//[[:space:]]/}"
+  [ -n "$token" ] || die "the enrollment token was empty" "./scripts/first-boot-check.sh, and paste it at the prompt"
+}
+
+say "Step 11c — a throwaway agent on this VPS"
+if [ -n "$(docker ps -q --filter name='^smoke-agent$' --filter status=running </dev/null)" ]; then
+  skip "steps 11b and 11c: the throwaway agent smoke-agent is running, from an earlier run"
+else
+  docker rm -f smoke-agent >/dev/null 2>&1 </dev/null || true
+  rm -rf "$agent_data"
+  if [ -x "$agent_bin" ] && [ -z "$(find ../agent -path ../agent/dist -prune -o -type f -newer "$agent_bin" -print -quit)" ]; then
+    skip "step 11c: agent/dist/novieri-agent is newer than every file of agent/"
+  else
+    act "go build, in golang:1.24-bookworm, as $(id -un)"
+    docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/../agent:/src" -w /src -e CGO_ENABLED=0 \
+      -e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod golang:1.24-bookworm \
+      go build -trimpath -o dist/novieri-agent ./cmd/agent </dev/null
+  fi
+  note "step 11b, in the console: https://$host/enrollment -- a token named first endpoint, 24 hours, one use,"
+  note "for the site Principal of your own organization's client. It is shown once: paste it here."
+  read_token
+  install -d -m 700 "$agent_data"
+  (umask 077 && printf '%s' "$token" > "$agent_data/enroll-token")
+  token=""
+  act "the agent, in busybox:1.36.1 on this host's network: it dials https://$host"
+  run_args=(-d --name smoke-agent --network host --user "$(id -u):$(id -g)"
+    -v "$agent_bin:/usr/local/bin/novieri-agent:ro"
+    -v "${tls_cafile:-/etc/ssl/certs/ca-certificates.crt}:/etc/ssl/certs/ca-certificates.crt:ro"
+    -v "$agent_data:/var/lib/novieri-agent"
+    -e "ITS_AGENT_ENROLL_URL=https://$host" -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent)
+  [ -z "$connect" ] || run_args+=(--add-host "$host:$connect")
+  docker run "${run_args[@]}" busybox:1.36.1 /usr/local/bin/novieri-agent </dev/null >/dev/null
+fi
+for _ in $(seq 1 30); do
+  docker logs smoke-agent 2>&1 </dev/null | grep -c 'gateway connected' >/dev/null && break
+  sleep 2
+done
+logs="$(docker logs smoke-agent 2>&1 </dev/null || true)"
+printf '%s\n' "$logs" | grep -E 'starting|enrolling|enrolled|gateway connected' | sed 's/^/        /' || true
+case "$logs" in
+  *"gateway connected"*) ;;
+  *) die "the agent did not connect to the gateway within 60 s" "docker logs smoke-agent" \
+         "a token that was used, or is past its 24 hours, is refused: make a new one, then: docker rm -f smoke-agent && ./scripts/first-boot-check.sh" ;;
+esac
+device_id="$(printf '%s\n' "$logs" | sed -n 's/.*msg=enrolled device_id=\([0-9a-f-]*\).*/\1/p' | tail -1)"
+[[ $device_id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+  || die "the agent's log names no device it enrolled as" "docker logs smoke-agent"
+[ ! -e "$agent_data/enroll-token" ] || die "the agent kept its enrollment token after enrolling" "docker logs smoke-agent"
+ok "step 11c: the agent enrolled as device $device_id, connected over :8443, and its token file is gone"
+
+# ----------------------------------------------------------- step 11d
+
+say "Step 11d — round-trip a signed job"
+note "NOW, in the console: Devices -> $(hostname) -> Run job -> Collect inventory."
+note "Waiting up to $wait_job s for a job a person asked for to reach this device and come back."
+deadline=$(( $(date +%s) + wait_job ))
+query="select type, status, signature is not null from jobs where target_type = 'device' and target_id = '$device_id' and requested_by is not null order by issued_at desc limit 1"
+while :; do
+  row="$(psql_admin "$query" | tr -d '\r')"
+  case "$row" in
+    *"|succeeded|t") break ;;
+    *"|failed|"*|*"|expired|"*|*"|refused|"*|*"|cancelled|"*)
+      die "the job ended: $row" "docker logs smoke-agent" ;;
+  esac
+  [ "$(date +%s)" -lt "$deadline" ] || die "no job a person asked for reached this device in $wait_job s" \
+    "in the console: Devices -> $(hostname) -> Run job -> Collect inventory; then ./scripts/first-boot-check.sh (the agent stays up)"
+  sleep 3
+done
+printf '        %s\n' "$row"
+ok "step 11d: signed by the server, verified by the agent before it ran, and its result back over :8443"
+
+# ----------------------------------------------------------- step 11e
+
+say "Step 11e — the audit chain"
+# Not through dc(): its </dev/null would take the place of this here-document.
+chain="$(docker compose exec -T api python - <<'EOF'
+import asyncio
+import json
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from app.core.audit import audit_service, load_audit_hmac_key
+from app.core.config import get_settings
+from app.models import Organization
+
+
+async def main() -> None:
+    settings = get_settings()
+    audit_service.set_hmac_key(load_audit_hmac_key(settings))
+    engine = create_async_engine(settings.database_admin_url)
+    try:
+        async with AsyncSession(engine) as session:
+            orgs = (await session.execute(select(Organization.id, Organization.slug))).all()
+            for org_id, slug in orgs:
+                r = await audit_service.verify(session, org_id)
+                broken = str(r.broken_at) if r.broken_at else None
+                print(slug, json.dumps({"ok": r.ok, "count": r.count, "broken_at": broken}))
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(main())
+EOF
+)" || die "the audit chain could not be read" "docker compose logs --tail 50 api"
+chain="$(printf '%s\n' "$chain" | tr -d '\r')"
+printf '%s\n' "$chain" | sed 's/^/        /'
+case "$chain" in
+  *'"ok": true'*) ;;
+  *) die "no organization's audit chain verifies" "docker compose logs --tail 50 api" ;;
+esac
+case "$chain" in
+  *'"ok": false'*) die "an audit chain is broken (above): restoring the database without its-secrets does this" "docs/07-backup-restore.md §4" ;;
+esac
+ok "step 11e: every organization's audit chain verifies"
+
+# ----------------------------------------------------------- step 11f
+
+say "Step 11f — retire the throwaway agent"
+act "docker rm -f smoke-agent; rm -rf $agent_data"
+docker rm -f smoke-agent >/dev/null </dev/null
+rm -rf "$agent_data"
+ok "step 11f: the agent and its key are gone; the device stays in the console as a record, offline"
+
+# ------------------------------------------------------------ step 12
+
+backup_timer_installed() {
+  if [ "$no_systemctl" = 1 ]; then [ -e "$unit_dir/its-platform-backup.timer" ]
+  else [ "$(systemctl is-enabled its-platform-backup.timer 2>/dev/null || true)" = enabled ]; fi
+}
+
+say "Step 12 — the first backup, so that there is a way back"
+last="$(sudo cat "$backup_state/last-success" 2>/dev/null || true)"
+if [ -n "$last" ] && backup_timer_installed; then
+  skip "step 12: the nightly backup timer is installed, and a backup exists"
+else
+  act "install-backup-timer.sh, then a backup now"
+  if [ "$no_systemctl" = 1 ]; then
+    sudo env ITS_NO_SYSTEMCTL=1 ITS_SYSTEMD_DIR="$unit_dir" ./scripts/install-backup-timer.sh </dev/null
+    note "ITS_NO_SYSTEMCTL=1: the backup service's command, run here"
+    sudo ./scripts/scheduled-backup.sh </dev/null
+  else
+    sudo ./scripts/install-backup-timer.sh </dev/null
+    sudo systemctl start its-platform-backup.service
+    sudo journalctl -u its-platform-backup.service --no-pager -n 20
+  fi
+  last="$(sudo cat "$backup_state/last-success" 2>/dev/null || true)"
+  [ -n "$last" ] || die "the first backup did not succeed" "sudo journalctl -u its-platform-backup.service --no-pager -n 50"
+fi
+ok "step 12: the newest backup: $last"
+note "That backup is on this VPS and goes with it. The off-host copy is recommended before anything"
+note "real is enrolled: deploy/README.md, The off-host copy, step by step."
+
+say "First boot is complete."
+note "Custody, off this VPS, now (deploy/README.md, First boot, 4): the five shares and the root token"
+note "(recovery keys), the unseal key file, the ten recovery codes, .env and the its-secrets, its-ca"
+note "and openbao-data volumes -- GO-LIVE.md §6."
