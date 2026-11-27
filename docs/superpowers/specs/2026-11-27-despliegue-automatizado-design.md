@@ -140,10 +140,13 @@ necesitan navegador), 11a, 11c a 11f y 12.
   `ITS_FIRST_BOOT_ALLOW_NONTTY=1` (solo la CI: permite imprimir partes y token
   sin terminal, al registro efímero del trabajo). Conserva **todas** sus
   comprobaciones de hoy (certificado por ACME, 503, agente compilado inscrito
-  por el 443 y conectado por el 8443 con un `hello` firmado, rojo con la firma
-  mala, cadena de auditoría, privilegios de `app_user`, copia y restauración) y
-  añade: OpenBao se desella solo tras `docker compose restart openbao`; y
-  `first-boot.sh` lanzado por segunda vez sale bien sin cambiar nada.
+  por el 443 y conectado por el 8443 con un `hello` firmado, cadena de
+  auditoría, privilegios de `app_user`, copia y restauración) y añade: OpenBao
+  se desella solo tras `docker compose restart openbao`; `first-boot.sh`
+  lanzado por segunda vez sale bien sin cambiar nada; y el rojo con la firma
+  mala, hasta hoy un ensayo: el agente compilado, con una clave de firma fijada
+  que el servidor no tiene, rechaza un `hello` firmado con `bad_signature` y no
+  lo ejecuta (decisión del coordinador del 2026-11-27, pregunta Q3 del plan).
 - Pruebas de backend para lo que no llega a la CI de extremo a extremo: la
   negativa sin terminal, la negativa por estado mezclado, la ausencia de
   `set -x` y de secretos en la línea de órdenes (`ps`), los mensajes de salto.
@@ -171,7 +174,7 @@ necesitan navegador), 11a, 11c a 11f y 12.
 1. Un primer arranque de un VPS nuevo son `prepare-host.sh`,
    `first-boot.sh` y `first-boot-check.sh`, más los momentos humanos de §2.
 2. El trabajo `deploy` de la CI usa esos dos guiones y pasa, con todas sus
-   comprobaciones de hoy más las dos nuevas.
+   comprobaciones de hoy más las tres nuevas.
 3. Ningún secreto en registros, archivos temporales, línea de órdenes ni
    historial; solo donde ya iban.
 4. Lanzar cualquier guion dos veces no rompe nada.
