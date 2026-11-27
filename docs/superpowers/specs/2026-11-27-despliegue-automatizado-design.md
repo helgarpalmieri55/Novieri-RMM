@@ -85,12 +85,13 @@ los que ya hay (`new-env.sh`, `openbao-seal.sh`, `preflight.sh`): mensajes
   de `bao operator init`, salvo en la CI (§5), que lo pide explícitamente.
 - **Errores.** Cada `die` dice qué falló y la orden para seguir.
 
-**`prepare-host.sh`** (como `root` o con `sudo`): P2 cortafuegos, P3
-actualizaciones, P4 reloj (activa NTP si hace falta), P5 Docker CE del
+**`prepare-host.sh`** (con `sudo`, desde la cuenta de operador): P2 cortafuegos,
+P3 actualizaciones, P4 reloj (activa NTP si hace falta), P5 Docker CE del
 repositorio de Docker, y el grupo `docker` para la cuenta que lo llama
-(`SUDO_USER`). Con `--create-user <nombre>` y lanzado como `root`, hace también
-P1. Termina comprobando las versiones mínimas (Engine 26, Compose 2.24) y
-diciendo que hay que salir y volver a entrar.
+(`SUDO_USER`). No crea ninguna cuenta: P1 se hace a mano (§2, paso 0), y
+lanzado como `root` sin `sudo` se niega y lo dice (decisión del coordinador del
+2026-11-27, pregunta Q5 del plan). Termina comprobando las versiones mínimas
+(Engine 26, Compose 2.24) y diciendo que hay que salir y volver a entrar.
 
 **`first-boot.sh`** (la cuenta de operador, desde `deploy/`): pasos 1, 1b, 1c,
 2, 3.1 a 3.6, 4, 4b, 5, 6, 6b y 7 del runbook; el desellado automático; el
