@@ -29,6 +29,7 @@ and `Host.run_pty` runs the script under a pseudo-terminal.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import pty
@@ -38,6 +39,7 @@ import select
 import shlex
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import termios
@@ -164,7 +166,7 @@ def run_once(name):
     if name == "migrate" and service["exit"] == 0:
         s["pg"]["alembic"] = s["newest"]
     if name == "postgres-grants" and service["exit"] == 0:
-        s["pg"]["narrow"] = "t"
+        s["pg"]["narrow"] = s["pg"].get("narrow_after_grants", "t")
 
 
 def bao_json():
@@ -177,6 +179,12 @@ def bao_json():
 def bao(args, token):
     b = s["bao"]
     if args[:2] == ["token", "lookup"]:
+        # An OpenBao that stops answering at the Nth lookup (review r5).
+        s["lookups"] = s.get("lookups", 0) + 1
+        if s.get("stop_at_lookup") == s["lookups"]:
+            svc("openbao")["state"] = "exited"
+            sys.stderr.write("Error looking up token: connection refused\n")
+            return 2
         if not b["init"] or b["sealed"]:
             sys.stderr.write("Vault is sealed\n")
             return 2
@@ -203,7 +211,8 @@ def bao(args, token):
     if args[:2] == ["token", "create"]:
         policy = next(a.split("=", 1)[1] for a in args if a.startswith("-policy="))
         value = s["issue"][policy]
-        b["tokens"][value] = policy
+        if policy not in s.get("forget", []):
+            b["tokens"][value] = policy
         out(value + "\n")
         return 0
     if args[:2] == ["operator", "seal"]:
@@ -242,6 +251,8 @@ def compose(args):
             for name in s["oneshots"]:
                 if svc(name)["state"] != "exited" or svc(name)["exit"] != 0:
                     run_once(name)
+            for name in s.get("crash", []):
+                svc(name).update(state="exited", exit=1)
             return 0
         for name in names:
             (run_once if name in s["oneshots"] else run_long)(name)
@@ -320,6 +331,9 @@ def compose(args):
             return 0
         if name == "api" and cmd[0] == "python":
             if "setup/status" in cmd[-1]:
+                if s["setup"]["needed"] is None:
+                    sys.stderr.write("urllib.error.URLError: connection refused\n")
+                    return 1
                 out(("True" if s["setup"]["needed"] else "False") + "\n")
             else:
                 out("30 30\n")
@@ -630,6 +644,9 @@ def failed_block_problems(stderr: str, deploy: Path) -> list[str]:
         else:
             problems.append(f"neither a command nor prose as a comment: {line!r}")
     groups = [g for g in groups if g]
+    if not groups:
+        # Design §3: each die says what failed AND the command to go on with.
+        problems.append("no way on: nothing after the FAILED line says how to go on")
     if groups and groups[0][0].startswith("  # run ONE of the following"):
         if len(groups[0]) != 1:
             problems.append("the `run ONE of the following` line is not a block of its own")
@@ -740,7 +757,7 @@ def _segments(command: str) -> list[list[str]]:
 
 
 def paste_into_a_shell(
-    host: Host, text: str, *, bracketed: bool, answers: Sequence[str] = (), timeout: float = 15
+    host: Host, text: str, *, bracketed: bool, answers: Sequence[str] = (), timeout: float = 30
 ) -> list[str]:
     """TEXT pasted whole into an interactive bash 5 on a pseudo-terminal, from
     HOST's deploy/, as an operator copying a FAILED report would (review I1,
@@ -748,8 +765,14 @@ def paste_into_a_shell(
     anything is a stand-in that logs and does nothing: PASTE_STAND_INS, and
     first-boot.sh itself. BRACKETED: one bracketed paste, bash's default since
     5.1, so a `read` in it waits for the keyboard; each of ANSWERS is typed in
-    turn whenever the shell goes quiet. Without it, the lines after a `read`
-    are what it reads. Returns the stand-ins' log, one act a line."""
+    turn whenever the shell waits for one. Without it, the lines after a `read`
+    are what it reads. Returns the stand-ins' log, one act a line.
+
+    It proves what it tested (review r1, r2 of round 3): the shell read every
+    byte of the paste; each step waits until the shell waits for the keyboard,
+    not for a silence; and the end is a fixed point -- Ctrl-C, then a sentinel
+    line, which runs only after everything typed before it, and which must
+    run."""
     fakes = host.tmp / "paste-stand-ins"
     fakes.mkdir(exist_ok=True)
     log = host.tmp / "paste.log"
@@ -759,42 +782,96 @@ def paste_into_a_shell(
     _exe(host.deploy / "scripts" / "first-boot.sh",
          f"#!/bin/sh\nprintf 'first-boot.sh %s\\n' \"$*\" >> {log}\n", python=False)  # fmt: skip
     master, slave = pty.openpty()
+    # Wide enough that readline wraps no pasted line.
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 1000, 0, 0))
     shell = subprocess.Popen(
         [BASH, "--norc", "--noprofile", "-i"],
         stdin=slave, stdout=slave, stderr=slave, cwd=host.deploy, start_new_session=True,
         env={"PATH": f"{fakes}:/usr/bin:/bin", "TERM": "xterm", "HOME": str(host.home),
              "PS1": "$ ", "INPUTRC": "/dev/null"},
     )  # fmt: skip
-    os.close(slave)
+    os.set_blocking(master, False)
+    shown = bytearray()
+    sentinel = f"pasted-and-done-{secrets.token_hex(8)}"
 
-    def quiet(limit: float) -> None:
-        """Read until nothing more comes for 0.4 s, or LIMIT runs out."""
-        end, last = time.monotonic() + limit, time.monotonic()
-        while time.monotonic() < end and time.monotonic() - last < 0.4:
-            ready, _, _ = select.select([master], [], [], 0.05)
-            if ready:
+    def drain(wait: float) -> None:
+        ready, _, _ = select.select([master], [], [], wait)
+        while ready:
+            try:
+                chunk = os.read(master, 65536)
+            except (BlockingIOError, OSError):
+                return
+            if not chunk:
+                return
+            shown.extend(chunk)
+            ready, _, _ = select.select([master], [], [], 0)
+
+    def feed(data: bytes) -> None:
+        """DATA typed in, a piece at a time, reading the screen meanwhile: a
+        shell that echoes into a full buffer would stop reading."""
+        view = memoryview(data)
+        while view:
+            _, writable, _ = select.select([], [master], [], 0.05)
+            if writable:
                 try:
-                    if os.read(master, 65536):
-                        last = time.monotonic()
-                except OSError:
-                    return
+                    view = view[os.write(master, view[:256]) :]
+                except BlockingIOError:
+                    pass
+            drain(0)
+
+    def waiting() -> bool:
+        """The shell is asleep with no child, and nothing typed is left
+        unread: it waits for the keyboard -- at its prompt, inside an open
+        string, or at a `read`."""
+        pending = struct.unpack("i", fcntl.ioctl(slave, termios.FIONREAD, b"\0\0\0\0"))[0]
+        proc = Path(f"/proc/{shell.pid}")
+        state = (proc / "stat").read_text().rsplit(")", 1)[1].split()[0]
+        children = (proc / "task" / str(shell.pid) / "children").read_text().split()
+        return pending == 0 and state == "S" and not children
+
+    def settle(deadline: float, what: str) -> None:
+        """Until the shell waits for the keyboard (three looks in a row), not
+        until it has been quiet for a while (review r2)."""
+        streak = 0
+        while streak < 3:
+            assert time.monotonic() < deadline, (what, shown.decode(errors="replace")[-2000:])
+            drain(0.02)
+            streak = streak + 1 if waiting() else 0
+
+    def read_count() -> int:
+        """What the shell has read so far, in bytes (Linux's rchar)."""
+        io = (Path(f"/proc/{shell.pid}") / "io").read_text()
+        return int(re.search(r"^rchar: (\d+)$", io, re.M).group(1))  # type: ignore[union-attr]
 
     deadline = time.monotonic() + timeout
     try:
-        quiet(2)
+        settle(deadline, "the shell never showed its first prompt")
+        before = read_count()
         pasted = text.replace("\n", "\r").encode()
-        os.write(master, (b"\x1b[200~" + pasted + b"\x1b[201~\r") if bracketed else pasted + b"\r")
-        quiet(max(0.5, deadline - time.monotonic()))
+        feed((b"\x1b[200~" + pasted + b"\x1b[201~\r") if bracketed else pasted + b"\r")
+        settle(deadline, "the paste never finished")
+        # Review r1: the paste was delivered -- the shell read all of it.
+        assert read_count() - before >= len(pasted), "the shell did not read the paste"
         for answer in answers:
-            os.write(master, answer.encode() + b"\r")
-            quiet(max(0.5, deadline - time.monotonic()))
-        os.write(master, b"exit\r")
-        quiet(1)
+            feed(answer.encode() + b"\r")
+            settle(deadline, f"the answer {answer!r} never finished")
+        # A fixed end (review r2): Ctrl-C ends an open string or a `read` left
+        # waiting, and the line after it runs only once all of the above did.
+        feed(b"\x03")
+        settle(deadline, "Ctrl-C never came back to the prompt")
+        feed(f"printf '%s\\n' {sentinel} >> {shlex.quote(str(log))}\r".encode())
+        while sentinel not in log.read_text():
+            screen = shown.decode(errors="replace")[-2000:]
+            assert time.monotonic() < deadline, ("the line after the paste never ran", screen)
+            drain(0.02)
     finally:
         shell.kill()
         shell.wait()
         os.close(master)
-    return log.read_text().splitlines()
+        os.close(slave)
+    acts = log.read_text().splitlines()
+    assert acts[-1] == sentinel, acts
+    return acts[:-1]
 
 
 class Host:
@@ -865,7 +942,9 @@ class Host:
                 f'exec {real} "$@"\n',
                 python=False,
             )
-        _exe(self.bin / "sleep", "#!/bin/sh\nexit 0\n", python=False)
+        # No wait, but logged: a test adds up how long a step would have waited.
+        _exe(self.bin / "sleep", "#!/bin/sh\nprintf 'sleep %s\\n' \"$*\" >> \"$ARGV_LOG\"\n",
+             python=False)  # fmt: skip
         _fake(self.bin / "docker", FAKE_DOCKER)
         _exe(
             self.bin / "sudo",

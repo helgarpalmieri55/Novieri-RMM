@@ -16,6 +16,12 @@ gets them, and a seal migration left half-way is named, with the way out;
 the hidden prompts and the clear are checked on a real pseudo-terminal; and
 every FAILED block (checked by `Host.run` on every run) is one block whose
 command lines can be pasted.
+
+Task 3 (plan 2026-11-27) adds steps 4 to 8 and their failures, each one in
+SCENARIOS and so pasted whole; and, from Task 2's last review, a paste test
+that proves the paste reached the shell and ends at a fixed point (r1, r2),
+five more reports pasted (r3), the custody report's clear behind SAVED (r4),
+and no token blamed by an OpenBao that does not answer (r5).
 """
 
 import os
@@ -805,6 +811,42 @@ SCENARIOS: dict[str, Callable[[Host], subprocess.CompletedProcess[str]]] = {
     "stopped before the seal": lambda host: _not_sealed_run(host),
 }
 
+#: What makes a first run fail in steps 4 to 8 (Task 3), and what its FAILED
+#: line says; `_late_failure` sets each up.
+LATE_FAILURES = {
+    "no revision file in the checkout": "no revision file in ../backend/migrations/versions",
+    "migrate exits 1": "migrate exited 1",
+    "the schema short of the newest revision": "after migrate the schema is at 0247, not 0248",
+    "postgres-grants exits 1": "postgres-grants exited 1",
+    "app_user not narrowed": "after postgres-grants, app_user is not narrowed",
+    "the gateway's certificate not issued": "the gateway's certificate was not issued",
+    "a service that stops": "a service stopped: worker(exited 1)",
+    "a service that keeps restarting": "after 300 s, still waiting on:",
+    "the :443 certificate refused": "the certificate on :443 is not one a browser accepts",
+    "acme.json not 600": "Traefik's acme.json is mode 644, not 600",
+    ":8443 not the internal CA's": ":8443 does not present the internal CA's certificate",
+    "the api does not answer setup/status": "the api did not answer /api/v1/setup/status",
+    "the api wrote no install code": "the api wrote no install code",
+}
+
+
+def _late(name: str) -> Callable[[Host], subprocess.CompletedProcess[str]]:
+    return lambda host: _late_failure(host, name)
+
+
+# Review r3 (round 3): the five reports that guard or delete and were not
+# pasted yet, two of them with an apostrophe in their FAILED line; r5's; and
+# every FAILED of steps 4 to 8.
+SCENARIOS.update({
+    "OPENBAO_TOKEN of another OpenBao": lambda host: _another_root_run(host),
+    "ITS_OPENBAO_TOKEN of another first boot": lambda host: _stale_its_app_run(host),
+    "a token file this OpenBao does not know": lambda host: _unknown_token_file_run(host),
+    "step 3.5 finds tokens it does not know": lambda host: _forgotten_its_app_run(host),
+    ".env has no ITS_PUBLIC_HOST": lambda host: _no_public_host_run(host),
+    "OpenBao stops answering a token lookup": lambda host: _lookup_unanswered_run(host, 3),
+    **{name: _late(name) for name in LATE_FAILURES},
+})
+
 
 def _never_initialised_run(host: Host) -> subprocess.CompletedProcess[str]:
     host.write_env(IT_SUITE_VERSION=host.tag, ITS_OPENBAO_TOKEN="s.old", OPENBAO_TOKEN="s.oldroot")
@@ -926,6 +968,8 @@ _GO = "read -r -p 'Type GO to go on: ' answer && [ \"$answer\" = GO ]"
     [
         pytest.param("  # fine prose\n        cd {d}\n        ./scripts/first-boot.sh", None,
                      id="a-good-block"),
+        pytest.param("", "no way on", id="no-way-on"),
+        pytest.param("  # only prose", "a way on with no command", id="prose-alone"),
         pytest.param("  fix it, then:\n        cd {d}\n        ./scripts/first-boot.sh",
                      "neither a command nor prose", id="prose-without-#"),
         pytest.param("        cd {d}\n        ./scripts/first-boot.sh\n\n"
@@ -982,8 +1026,9 @@ def test_stopped_at_saved_it_says_the_shares_on_screen_are_the_only_copy(
     header, saved, lost = _ways(text)
     assert header[0].startswith("  # run ONE of the following")
     # Review n3 (round 3): the way on that keeps going clears the screen and
-    # its scrollback first, where the shares still are.
-    assert saved[-1] == "        printf '\\033[H\\033[2J\\033[3J' && ./scripts/first-boot.sh"
+    # its scrollback first, where the shares still are -- and (r4) only once
+    # SAVED is typed: a report pasted whole must not wipe their only copy.
+    _assert_saved_clears_behind_a_guard(saved)
     assert _guarded_lines("\n".join(lost), "DESTROY") == [lost[-1]]
     assert " && docker compose down -v && rm .env && sudo rm -f " in lost[-1]
     assert failed_block_problems(text, host.deploy) == []
@@ -1007,6 +1052,14 @@ def test_a_leftover_unseal_key_alone_is_refused_on_a_new_host(tmp_path: Path) ->
 # --------------------------------------------------------------------------- #
 
 
+def _assert_saved_clears_behind_a_guard(way: list[str]) -> None:
+    """Review r4 (round 3): the clear of the custody report's first way on,
+    the only copy of the shares, runs behind a typed SAVED."""
+    assert _guarded_lines("\n".join(way), "SAVED") == [way[-1]], way
+    assert way[-1].endswith(" && printf '\\033[H\\033[2J\\033[3J' && ./scripts/first-boot.sh")
+    assert "only once they are stored off this VPS" in way[-1], way[-1]
+
+
 def test_end_of_input_at_saved_says_the_shares_on_screen_are_the_only_copy(
     tmp_path: Path,
 ) -> None:
@@ -1020,7 +1073,7 @@ def test_end_of_input_at_saved_says_the_shares_on_screen_are_the_only_copy(
     ) in done.stderr
     assert "FAILED  the input ended before SAVED: OpenBao is initialised already" in done.stderr
     header, saved, lost = _ways(done.stderr)
-    assert saved[-1] == "        printf '\\033[H\\033[2J\\033[3J' && ./scripts/first-boot.sh"
+    _assert_saved_clears_behind_a_guard(saved)
     assert _guarded_lines("\n".join(lost), "DESTROY") == [lost[-1]]
     assert host.state["bao"]["init"] is True
 
@@ -1068,6 +1121,23 @@ def test_a_whole_report_pasted_runs_one_way_on_at_most(
     assert sum(act.startswith("first-boot.sh") for act in acts) <= 1, acts
     assert [act for act in acts if DESTRUCTIVE_ACT.match(act)] == [], acts
     assert any(set(acts) <= _acts_of(way) for way in ways), (acts, ways)
+    # Review r1 (round 3): not green for nothing. The paste helper proves the
+    # shell read the paste and ran the line after it; and where the FAILED line
+    # leaves no quote open, the first way on, if no guard holds it, ran whole.
+    if _quotes_closed(report.splitlines()[0]) and not _behind_a_guard(ways[0]):
+        assert _acts_of(ways[0]) <= set(acts), (acts, ways[0])
+
+
+def _quotes_closed(line: str) -> bool:
+    try:
+        shlex.split(line)
+    except ValueError:
+        return False
+    return True
+
+
+def _behind_a_guard(way: list[str]) -> bool:
+    return any(line.startswith("        read -r -p '") for line in way)
 
 
 @pytest.mark.parametrize(
@@ -1077,15 +1147,332 @@ def test_a_whole_report_pasted_runs_one_way_on_at_most(
 )  # fmt: skip
 def test_a_guarded_way_on_runs_once_its_word_is_typed(tmp_path: Path, scenario: str) -> None:
     """The guards are not a chain that never runs: pasted on its own, a guarded
-    way on does nothing on any other answer, and does all of it on its word."""
+    way on does nothing on any other answer, and does all of it on its word.
+    Every guarded way of the report: the custody one has two (review r4)."""
     host = Host(tmp_path)
     report = _report(host, scenario)
-    (way,) = [w for w in _ways(report) if any(x.startswith("        read -r -p '") for x in w)]
-    word = re.search(r'\[ "\$answer" = ([A-Z]+) \]', way[-1])
-    assert word, way[-1]
-    block = "\n".join(way) + "\n"
-    assert paste_into_a_shell(host, block, bracketed=True, answers=[word.group(1).lower()]) == []
-    acts = [a.rstrip() for a in paste_into_a_shell(host, block, bracketed=True,
-                                                   answers=[word.group(1)])]  # fmt: skip
-    assert any(DESTRUCTIVE_ACT.match(act) for act in acts), acts
-    assert acts[-1].startswith("first-boot.sh") and set(acts) <= _acts_of(way), acts
+    guarded = [w for w in _ways(report) if _behind_a_guard(w)]
+    assert guarded, report
+    for way in guarded:
+        word = re.search(r'\[ "\$answer" = ([A-Z]+) \]', way[-1])
+        assert word, way[-1]
+        block = "\n".join(way) + "\n"
+        lower = paste_into_a_shell(host, block, bracketed=True, answers=[word.group(1).lower()])
+        assert lower == [], (word.group(1), lower)
+        acts = [a.rstrip() for a in paste_into_a_shell(host, block, bracketed=True,
+                                                       answers=[word.group(1)])]  # fmt: skip
+        assert acts and acts[-1].startswith("first-boot.sh"), acts
+        assert set(acts) == _acts_of(way), (acts, way)
+
+
+# --------------------------------------------------------------------------- #
+# Steps 4 to 8, the auto-unseal and its restart (plan 2026-11-27, Task 3)
+# --------------------------------------------------------------------------- #
+
+README = Path(__file__).resolve().parents[2] / "deploy" / "README.md"
+
+
+def _done_host(tmp_path: Path) -> tuple[Host, str]:
+    """A host after one whole, successful run."""
+    host = Host(tmp_path)
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return host, done.stdout
+
+
+def test_a_new_host_runs_every_step_to_the_install_code(tmp_path: Path) -> None:
+    host, out = _done_host(tmp_path)
+    ran = lines(out, "run")
+    for expected in (
+        "docker compose up migrate",
+        "docker compose up postgres-grants",
+        "32 random bytes into /var/lib/its/secrets/audit-hmac.key, mode 600",
+        "docker compose up -d: it started or recreated what was not up",
+        "docker compose restart openbao",
+    ):
+        assert expected in ran, (expected, ran)
+    assert any(r.startswith("issue-gateway-cert.py rmm.novieri.com") for r in ran)
+    assert any(r.startswith("sudo ./scripts/openbao-seal.sh enable --key-file ") for r in ran)
+    assert f"  install code  {host.secrets['code']}" in out
+    assert out.rstrip().splitlines()[-7] == "First boot: every step is done."
+    env = host.env()
+    assert env["COMPOSE_FILE"] == "docker-compose.yml:openbao/auto-unseal.yml"
+    assert env["OPENBAO_UNSEAL_KEY_FILE"] == str(host.etc / "openbao-unseal" / "unseal.key")
+    assert host.state["seal_stdin"] == 3, "openbao-seal.sh got the three shares of step 3.3"
+    assert host.state["bao"]["type"] == "static" and host.state["bao"]["sealed"] is False
+    assert host.state["files"] == {"audit": True, "gateway": True}
+    assert "ok      OpenBao restarted and came back unsealed by itself" in out
+
+
+def test_a_second_run_skips_every_step_and_changes_nothing(tmp_path: Path) -> None:
+    host, _ = _done_host(tmp_path)
+    before = (host.state["services"], host.state["bao"], host.state["files"], host.env())
+    again = host.run()
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert lines(again.stdout, "run") == []
+    skipped = [s.split(":")[0] for s in lines(again.stdout, "skip")]
+    assert skipped == [
+        "step 1", "step 1b", "step 2", "step 3.1", "step 3.2", "step 3.3", "step 3.4",
+        "step 3.6", "auto-unseal", RESTART_SKIP,
+        "step 4", "step 4b", "step 5", "step 6", "step 6b", "step 7",
+    ]  # fmt: skip
+    assert (host.state["services"], host.state["bao"], host.state["files"], host.env()) == before
+    argv = host.argv()
+    for changing in ("compose restart", "openbao-seal.sh", "operator init", "set -C", "tee "):
+        assert changing not in argv, changing
+
+
+def test_without_a_terminal_the_install_code_is_not_printed(tmp_path: Path) -> None:
+    host, _ = _done_host(tmp_path)
+    again = host.run()
+    assert host.secrets["code"] not in again.stdout + again.stderr
+    assert "docker compose exec api cat /var/lib/its/secrets/setup-code" in again.stdout
+
+
+def test_a_claimed_installation_skips_step_8(tmp_path: Path) -> None:
+    host, _ = _done_host(tmp_path)
+    host.state["setup"]["needed"] = False
+    again = host.run(env=ALLOW)
+    assert "skip    step 8: the installation is claimed" in again.stdout
+    assert host.secrets["code"] not in again.stdout
+
+
+def test_the_audit_key_is_never_replaced(tmp_path: Path) -> None:
+    host = Host(tmp_path)
+    host.state["files"]["audit"] = True
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "skip    step 5: the audit HMAC key exists, and it is never replaced" in done.stdout
+    assert "set -C" not in host.argv()
+
+
+def test_the_gateway_certificate_reads_its_token_from_the_file_on_stdin(tmp_path: Path) -> None:
+    host, _ = _done_host(tmp_path)
+    argv = host.argv().splitlines()
+    cat = argv.index(f"sudo cat {host.etc}/gateway-issuer.token")
+    issue = "/tmp/issue-gateway-cert.py rmm.novieri.com"
+    run = next(i for i, line in enumerate(argv) if issue in line)
+    assert run > cat
+    assert argv[run].startswith("docker compose run --rm --no-deps -T -v ")
+
+
+def _heredoc(text: str, opener: str) -> str:
+    start = text.index(opener) + len(opener) + 1
+    return text[start : text.index("\nEOF\n", start)] + "\n"
+
+
+def test_step_6b_writes_the_units_the_runbook_writes(tmp_path: Path) -> None:
+    host, _ = _done_host(tmp_path)
+    readme = README.read_text()
+    for unit in ("its-gateway-cert.service", "its-gateway-cert.timer"):
+        expected = _heredoc(readme, f"sudo tee /etc/systemd/system/{unit} >/dev/null <<'EOF'")
+        expected = expected.replace("/opt/it-suite/deploy", str(host.deploy))
+        expected = expected.replace("/etc/it-suite/", f"{host.etc}/")
+        assert (host.units / unit).read_text() == expected, unit
+
+
+def test_with_systemd_the_timer_is_enabled(tmp_path: Path) -> None:
+    host = Host(tmp_path)
+    done = host.run(stdin=_saved_and_three(host), env={**ALLOW, "ITS_NO_SYSTEMCTL": "0"})
+    assert done.returncode == 0, done.stdout + done.stderr
+    argv = host.argv()
+    reload = argv.index("sudo systemctl daemon-reload")
+    assert reload < argv.index("sudo systemctl enable --now its-gateway-cert.timer")
+    assert "sudo systemctl list-timers its-gateway-cert.timer --no-pager" in argv
+
+
+def test_a_failed_one_shot_stops_the_run(tmp_path: Path) -> None:
+    host = Host(tmp_path)
+    host.state["oneshot_exit"] = {"migrate": 1}
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 1
+    assert "migrate exited 1" in done.stderr and "docker compose logs migrate" in done.stderr
+
+
+def test_a_service_that_keeps_restarting_stops_step_7(tmp_path: Path) -> None:
+    """Row 15 of "What was broken": a worker restarting for ever is up for a
+    moment at a time. Up in every sample is not enough; its restarts must
+    stand still."""
+    host = Host(tmp_path)
+    host.state["restart_step"] = 1
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 1
+    assert "after 300 s, still waiting on:" in done.stderr and "(restarted)" in done.stderr
+
+
+def test_the_tls_cafile_reaches_the_certificate_check(tmp_path: Path) -> None:
+    host = Host(tmp_path)
+    root = tmp_path / "root.pem"
+    root.write_text("-----BEGIN CERTIFICATE-----\n")
+    done = host.run("--tls-cafile", "root.pem", stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"check-public-tls.sh --cafile {root}" in host.argv()
+
+
+def test_the_auto_unseal_comes_before_step_4(tmp_path: Path) -> None:
+    """Coordinator's ruling Q6 (2026-11-27): right behind step 3.6, so the
+    stack step 7 starts is already static-sealed."""
+    host, _ = _done_host(tmp_path)
+    argv = host.argv().splitlines()
+    seal = next(i for i, line in enumerate(argv) if line.startswith("openbao-seal.sh enable"))
+    restart = argv.index("docker compose restart openbao")
+    migrate = argv.index("docker compose up migrate")
+    assert seal < restart < migrate < argv.index("docker compose up -d")
+
+
+def test_a_failed_step_7_runs_again_with_no_share(tmp_path: Path) -> None:
+    """The point of ruling Q6: step 7 is where a real VPS fails (the A record,
+    the provider's firewall), and by then OpenBao unseals itself. Run again
+    with nothing on stdin, it asks for no share and finishes."""
+    host = Host(tmp_path)
+    refused_tls = {**ALLOW, "FAKE_RC_CHECK_PUBLIC_TLS": "1"}
+    first = host.run(stdin=_saved_and_three(host), env=refused_tls)
+    assert first.returncode == 1
+    assert "the certificate on :443 is not one a browser accepts" in first.stderr
+    assert host.state["bao"]["type"] == "static"
+    again = host.run(stdin="")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "skip    auto-unseal: on, and OpenBao is unsealed with its static key" in again.stdout
+    assert "openbao-seal.sh" not in host.argv()
+
+
+# --------------------------------------------------------------------------- #
+# Task 3, beyond its brief: Task 2's last review (r1 to r5), and what the
+# brief's code needed to say what it does
+# --------------------------------------------------------------------------- #
+
+
+def _another_root_run(host: Host) -> subprocess.CompletedProcess[str]:
+    """Mixed state (c): OPENBAO_TOKEN in .env is not this OpenBao's root token."""
+    host.write_env(IT_SUITE_VERSION=host.tag, ITS_OPENBAO_TOKEN="s.old", OPENBAO_TOKEN="s.oldroot")
+    host.state["images"] = [f"itsuite/backend:{host.tag}", f"itsuite/web:{host.tag}"]
+    host.state["bao"].update(init=True, sealed=False)
+    host.state["services"]["openbao"] = {
+        "state": "running", "health": "healthy", "exit": 0, "restarts": 0, "id": "c-openbao"
+    }  # fmt: skip
+    return host.run(env=ALLOW)
+
+
+def _stale_its_app_run(host: Host) -> subprocess.CompletedProcess[str]:
+    _after_init(host)
+    host.write_env(IT_SUITE_VERSION=host.tag, ITS_OPENBAO_TOKEN="s.its-app-of-another-boot")
+    shares = host.secrets["shares"]
+    return host.run(stdin="".join(s + "\n" for s in (*shares[:3], host.secrets["root"])))
+
+
+def _unknown_token_file_run(host: Host) -> subprocess.CompletedProcess[str]:
+    _done(host)
+    (host.etc / "gateway-issuer.token").write_text("s.another-openbaos\n")
+    return host.run()
+
+
+def _forgotten_its_app_run(host: Host) -> subprocess.CompletedProcess[str]:
+    """Step 3.5's own check: the its-app token just written to .env is not one
+    this OpenBao knows (a fault only a stand-in OpenBao can make)."""
+    host.state["forget"] = ["its-app"]
+    return host.run(stdin=_saved_and_three(host), env=ALLOW)
+
+
+def _no_public_host_run(host: Host) -> subprocess.CompletedProcess[str]:
+    host.write_env(IT_SUITE_VERSION=host.tag, ITS_PUBLIC_HOST="")
+    return host.run(env=ALLOW)
+
+
+def _lookup_unanswered_run(host: Host, lookup: int) -> subprocess.CompletedProcess[str]:
+    """A done host run again, with OpenBao gone at its LOOKUP-th token lookup:
+    1, OPENBAO_TOKEN (step 3.3); 2, ITS_OPENBAO_TOKEN; 3, the token file (3.4)."""
+    _done(host)
+    host.state.update(lookups=0, stop_at_lookup=lookup)
+    return host.run()
+
+
+def _late_failure(host: Host, name: str) -> subprocess.CompletedProcess[str]:
+    """A first run that fails in steps 4 to 8 as NAME (LATE_FAILURES) says."""
+    env, s = dict(ALLOW), host.state
+    if name == "no revision file in the checkout":
+        for revision in (host.repo / "backend" / "migrations" / "versions").glob("[0-9]*.py"):
+            revision.unlink()
+    elif name == "migrate exits 1":
+        s["oneshot_exit"] = {"migrate": 1}
+    elif name == "the schema short of the newest revision":
+        s["newest"] = "0247"
+    elif name == "postgres-grants exits 1":
+        s["oneshot_exit"] = {"postgres-grants": 1}
+    elif name == "app_user not narrowed":
+        s["pg"]["narrow_after_grants"] = "f"
+    elif name == "the gateway's certificate not issued":
+        env["FAKE_DOCKER_FAIL"] = "issue-gateway-cert.py rmm.novieri.com"
+    elif name == "a service that stops":
+        s["crash"] = ["worker"]
+    elif name == "a service that keeps restarting":
+        s["restart_step"] = 1
+    elif name == "the :443 certificate refused":
+        env["FAKE_RC_CHECK_PUBLIC_TLS"] = "1"
+    elif name == "acme.json not 600":
+        s["acme_mode"] = "644"
+    elif name == ":8443 not the internal CA's":
+        env["FAKE_GATEWAY_HOST"] = "other.example.org"
+    elif name == "the api does not answer setup/status":
+        s["setup"]["needed"] = None
+    elif name == "the api wrote no install code":
+        s["setup"]["code"] = ""
+    else:
+        raise AssertionError(name)
+    return host.run(stdin=_saved_and_three(host), env=env)
+
+
+@pytest.mark.parametrize("name", sorted(LATE_FAILURES))
+def test_each_failure_of_steps_4_to_8_says_what_failed(tmp_path: Path, name: str) -> None:
+    """Each FAILED of steps 4 to 8 is reached, says what failed, and (Host.run
+    checks it) can be pasted; SCENARIOS pastes each one whole. No secret
+    leaves on the way."""
+    host = Host(tmp_path)
+    done = _late_failure(host, name)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert f"FAILED  {LATE_FAILURES[name]}" in done.stderr
+    assert host.leaks() == []
+    assert host.secrets["code"] not in done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("lookup", [1, 2, 3], ids=["OPENBAO_TOKEN", "ITS_OPENBAO_TOKEN", "file"])
+def test_an_openbao_that_stops_answering_a_lookup_is_not_an_unknown_token(
+    tmp_path: Path, lookup: int
+) -> None:
+    """Review r5 (round 3): a token lookup that fails because OpenBao does not
+    answer is no proof the token is another OpenBao's. Told it is, the operator
+    would start from zero, or delete a gateway-issuer token file whose token
+    stays valid for ten years with no copy anywhere."""
+    host = Host(tmp_path)
+    done = _lookup_unanswered_run(host, lookup)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "FAILED  OpenBao did not answer when " in done.stderr
+    for blame in ("mixed state", "sudo rm -f", "down -v", "another first boot", "does not know"):
+        assert blame not in done.stderr, blame
+    assert (host.etc / "gateway-issuer.token").read_text() == host.secrets["gateway-issuer"] + "\n"
+    assert host.env()["ITS_OPENBAO_TOKEN"] == host.secrets["its-app"]
+
+
+def test_step_7_waits_300_s_at_most(tmp_path: Path) -> None:
+    """The brief's loop counted 5 s a round, but a round that saw a restart
+    also slept 15: a service restarting for ever held the run 20 minutes, and
+    its FAILED said 300 s. The fake `sleep` waits for nothing and is logged."""
+    host = Host(tmp_path)
+    host.state["restart_step"] = 1
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert "after 300 s, still waiting on:" in done.stderr
+    argv = host.argv().splitlines()
+    after = argv[argv.index("docker compose up -d") :]
+    slept = sum(int(line.split()[1]) for line in after if line.startswith("sleep "))
+    assert 280 <= slept <= 300, slept
+
+
+def test_step_7_says_only_what_it_checked_before_it_waits(tmp_path: Path) -> None:
+    """Its `skip` comes before the wait: what it knows then is that `docker
+    compose up -d` made no container and replaced none (review M7 of Task 2:
+    a line says what was checked, and no more). Up and healthy is the wait's
+    to say, and the wait says it by not failing."""
+    host, _ = _done_host(tmp_path)
+    again = host.run()
+    assert again.returncode == 0, again.stdout + again.stderr
+    (seven,) = [s for s in lines(again.stdout, "skip") if s.startswith("step 7:")]
+    assert seven == "step 7: docker compose up -d created no container and recreated none"

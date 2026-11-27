@@ -137,9 +137,11 @@ at_saved=no
 custody_lost() {
   printf '\n' >&2   # off the prompt's line
   warn "the five shares and the root token on this screen are their only copy: copy them off this VPS before anything clears it"
+  # Even the way that keeps going waits for a typed SAVED (review r4): pasted
+  # with the rest of this report, it would clear their only copy.
   die "$1: OpenBao is initialised already, and the five shares and the root token on this screen are their only copy" \
-      "# they are stored off this VPS: the line below clears this screen and its scrollback, where the shares still are, and runs it again, which asks for the root token and three shares" \
-      "printf '\033[H\033[2J\033[3J' && $rerun" \
+      "# they are stored off this VPS: the line below asks you to type SAVED, then clears this screen and its scrollback, where the shares still are, and runs it again, which asks for the root token and three shares" \
+      "$(guard SAVED "clears this screen and its scrollback, where the five shares and the root token still are, and runs first-boot.sh again: only once they are stored off this VPS") && printf '\033[H\033[2J\033[3J' && $rerun" \
       --or \
       "# they are not, and cannot be any more: three lost shares are a vault nobody can open, and on a first boot nothing is in it yet, so this host starts from zero" \
       "${start_from_zero[@]}"
@@ -186,6 +188,8 @@ rerun="./scripts/first-boot.sh$rerun_new$rerun_kept"
 
 cd "$(dirname "$(readlink -f "$0")")/.."   # deploy/
 etc_dir="${ITS_ETC_DIR:-/etc/it-suite}"
+unit_dir="${ITS_SYSTEMD_DIR:-/etc/systemd/system}"
+no_systemctl="${ITS_NO_SYSTEMCTL:-0}"
 allow_nontty="${ITS_FIRST_BOOT_ALLOW_NONTTY:-0}"
 token_file="$etc_dir/gateway-issuer.token"
 key_file="$etc_dir/openbao-unseal/unseal.key"
@@ -293,6 +297,17 @@ token_policies() {
 # token_has POLICY: the token on stdin is this OpenBao's, and has POLICY.
 token_has() { local p; p="$(token_policies)" || return 1; [[ ",$p," == *",\"$1\","* ]]; }
 is_root_token() { local p; p="$(printf '%s\n' "$1" | token_policies)" || return 1; [ "$p" = '"root"' ]; }
+# lookup_failed WHAT: after a lookup of WHAT that failed, before the token is
+# blamed (review r5): only an OpenBao that answers, unsealed, has judged it.
+# One that does not answer is no proof the token is another's, and on that
+# word the operator would start from zero, or delete a token file whose token
+# stays valid for ten years with no copy. As for shares (review M5).
+lookup_failed() {
+  bao_state
+  [ "$bao_up" = yes ] && [ "$bao_sealed" = false ] && return 0
+  die "OpenBao did not answer when it was asked about $1 (answering $bao_up, sealed ${bao_sealed:-unknown}), so that token is not judged, and nothing is to be deleted" \
+      "docker compose ps openbao" "docker compose logs --tail 50 openbao" "$rerun"
+}
 
 is_one_of() {
   local want="$1" have
@@ -437,8 +452,8 @@ read_root_token() {
     || die "the input ended before the root token" "# run again, and paste it at the prompt:" "$rerun"
   if [ -t 0 ]; then echo; fi
   t="${t//[[:space:]]/}"
-  is_root_token "$t" || die "that is not this OpenBao's root token" \
-    "# run again, and paste the root token step 3.2 printed:" "$rerun"
+  is_root_token "$t" || { lookup_failed "the root token typed"; die "that is not this OpenBao's root token" \
+    "# run again, and paste the root token step 3.2 printed:" "$rerun"; }
   root="$t"
 }
 
@@ -655,7 +670,8 @@ step_3_3() {
   fi
   if env_token_set OPENBAO_TOKEN; then
     root_in_env="$(env_get OPENBAO_TOKEN)"
-    is_root_token "$root_in_env" || die "mixed state: OPENBAO_TOKEN in .env is not this OpenBao's root token: .env and OpenBao come from two first boots" "${start_from_zero[@]}"
+    is_root_token "$root_in_env" || { lookup_failed "OPENBAO_TOKEN in .env"
+      die "mixed state: OPENBAO_TOKEN in .env is not this OpenBao's root token: .env and OpenBao come from two first boots" "${start_from_zero[@]}"; }
     [ -n "$root" ] || root="$root_in_env"
   fi
 }
@@ -666,14 +682,14 @@ step_3_4() {
   # A token found counts only once this OpenBao knows it (review I1): each
   # reaches `bao token lookup` on stdin.
   if env_token_set ITS_OPENBAO_TOKEN; then
-    env_get ITS_OPENBAO_TOKEN | token_has its-app \
-      || die "mixed state: ITS_OPENBAO_TOKEN in .env is not an its-app token of this OpenBao: .env and OpenBao come from two first boots" "${start_from_zero[@]}"
+    env_get ITS_OPENBAO_TOKEN | token_has its-app || { lookup_failed "ITS_OPENBAO_TOKEN in .env"
+      die "mixed state: ITS_OPENBAO_TOKEN in .env is not an its-app token of this OpenBao: .env and OpenBao come from two first boots" "${start_from_zero[@]}"; }
     need_app=no
   fi
   if sudo test -s "$token_file"; then
-    sudo cat "$token_file" | token_has gateway-issuer \
-      || die "mixed state: $token_file holds a token this OpenBao does not know, or not a gateway-issuer one: it is from another first boot" \
-             "# this OpenBao issues a new one once the file is gone" "sudo rm -f $token_file_q && $rerun"
+    sudo cat "$token_file" | token_has gateway-issuer || { lookup_failed "the token in $token_file"
+      die "mixed state: $token_file holds a token this OpenBao does not know, or not a gateway-issuer one: it is from another first boot" \
+          "# this OpenBao issues a new one once the file is gone" "sudo rm -f $token_file_q && $rerun"; }
     need_gw=no
   fi
   if [ "$need_app" = no ] && [ "$need_gw" = no ] && env_token_set OPENBAO_TOKEN; then
@@ -700,8 +716,8 @@ step_3_4() {
       || die "$token_file could not be made (above)" "$rerun"
     printf '%s\n' "$gw" | sudo tee "$token_file" >/dev/null || die "$token_file could not be written (above)" "$rerun"
     gw=""
-    sudo cat "$token_file" | token_has gateway-issuer \
-      || die "$token_file does not hold the gateway-issuer token just issued" "sudo rm -f $token_file_q && $rerun"
+    sudo cat "$token_file" | token_has gateway-issuer || { lookup_failed "the token just written to $token_file"
+      die "$token_file does not hold the gateway-issuer token just issued" "sudo rm -f $token_file_q && $rerun"; }
     [ "$(sudo stat -c %a "$token_file")" = 600 ] || die "$token_file is not mode 600" "sudo chmod 600 $token_file_q && $rerun"
     ok "step 3.4: $token_file (mode 600, written with sudo) holds this OpenBao's gateway-issuer token"
   fi
@@ -719,6 +735,7 @@ step_3_4() {
   # Two different values, as the ok line says, follow from these two checks:
   # a root token's policies are exactly "root", and that is not its-app.
   if ! { env_get ITS_OPENBAO_TOKEN | token_has its-app && is_root_token "$(env_get OPENBAO_TOKEN)"; }; then
+    lookup_failed "ITS_OPENBAO_TOKEN and OPENBAO_TOKEN in .env"
     die "ITS_OPENBAO_TOKEN and OPENBAO_TOKEN in .env are not this OpenBao's its-app and root tokens, two different values" "${start_from_zero[@]}"
   fi
   ok "step 3.5: ITS_OPENBAO_TOKEN (its-app) and OPENBAO_TOKEN (root) are in .env, two different values"
@@ -806,6 +823,256 @@ restart_proof() {
   ok "OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed"
 }
 
+step_4() {
+  say "Step 4 — migrations"
+  local newest current code
+  newest="$(find ../backend/migrations/versions -maxdepth 1 -name '[0-9][0-9][0-9][0-9]_*.py' -printf '%f\n' | cut -c1-4 | sort | tail -1)"
+  [ -n "$newest" ] || die "no revision file in ../backend/migrations/versions: this is not a checkout of the repository" \
+    "# deploy/ has to be the one in a whole checkout of the repository (deploy/README.md, P6), with backend/ beside it; from there, run it again:" \
+    "$rerun"
+  current="$(psql_admin 'select version_num from alembic_version' 2>/dev/null | tr -d '[:space:]' || true)"
+  if [ "$current" = "$newest" ]; then
+    skip "step 4: the schema is at $newest, this checkout's newest revision"
+    return 0
+  fi
+  act "docker compose up migrate"
+  dc up migrate
+  code="$(oneshot_exit migrate)"
+  [ "$code" = 0 ] || die "migrate exited $code" "docker compose logs migrate" "$rerun"
+  current="$(psql_admin 'select version_num from alembic_version' | tr -d '[:space:]')"
+  [ "$current" = "$newest" ] || die "after migrate the schema is at ${current:-nothing}, not $newest" "docker compose logs migrate" "$rerun"
+  ok "step 4: the schema is at $current"
+}
+
+step_4b() {
+  say "Step 4b — app_user's table privileges"
+  local narrow code query
+  query="select has_table_privilege('app_user', 'devices', 'SELECT') and not has_table_privilege('app_user', 'audit_events', 'UPDATE')"
+  narrow="$(psql_admin "$query" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [ "$narrow" = t ]; then
+    skip "step 4b: app_user reads devices and cannot rewrite audit_events"
+    return 0
+  fi
+  act "docker compose up postgres-grants"
+  dc up postgres-grants
+  code="$(oneshot_exit postgres-grants)"
+  [ "$code" = 0 ] || die "postgres-grants exited $code" "docker compose logs postgres-grants" "$rerun"
+  narrow="$(psql_admin "$query" | tr -d '[:space:]')"
+  [ "$narrow" = t ] || die "after postgres-grants, app_user is not narrowed as postgres/grant-app-privileges.sql says" "docker compose logs postgres-grants" "$rerun"
+  ok "step 4b: app_user reads devices and cannot rewrite audit_events"
+}
+
+step_5() {
+  say "Step 5 — the audit HMAC key"
+  if dc run --rm --no-deps --entrypoint sh api -c 'test -s /var/lib/its/secrets/audit-hmac.key' >/dev/null 2>&1; then
+    skip "step 5: the audit HMAC key exists, and it is never replaced"
+  else
+    act "32 random bytes into /var/lib/its/secrets/audit-hmac.key, mode 600"
+    # `set -C`: the shell refuses to write over a key that is already there.
+    dc run --rm --no-deps --entrypoint sh api -c \
+      'set -C && head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && chmod 600 /var/lib/its/secrets/audit-hmac.key'
+  fi
+  dc run --rm --no-deps --entrypoint sh api -c 'ls -l /var/lib/its/secrets/audit-hmac.key'
+}
+
+step_6() {
+  say "Step 6 — the gateway's certificate, and the client CA"
+  if dc run --rm --no-deps --entrypoint sh gateway -c \
+       'test -s /var/lib/its/tls/gateway.crt && test -s /var/lib/its/tls/gateway.key && test -s /var/lib/its/ca/root.crt' >/dev/null 2>&1; then
+    skip "step 6: the gateway's certificate and the client CA exist (step 6b's timer renews them)"
+    return 0
+  fi
+  act "issue-gateway-cert.py $host, the gateway-issuer token on its stdin from $token_file"
+  if ! sudo cat "$token_file" | docker compose run --rm --no-deps -T \
+         -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
+         --entrypoint python gateway /tmp/issue-gateway-cert.py "$host"; then
+    die "the gateway's certificate was not issued (above)" "docker compose logs --tail 50 openbao" "$rerun"
+  fi
+}
+
+# Step 6b's two units, exactly as deploy/README.md's appendix writes them.
+gateway_cert_service() {
+  # shellcheck disable=SC2016,SC1003  # $PWD and the backslashes are the unit's
+  printf '%s\n' \
+    '[Unit]' \
+    'Description=Renew the it-suite gateway server certificate' \
+    '[Service]' \
+    'Type=oneshot' \
+    "WorkingDirectory=$deploy_dir" \
+    '# The token arrives on STDIN from a 0600 file, never as an argument. `-T` is' \
+    '# what keeps stdin available to redirect.' \
+    "ExecStart=/bin/bash -lc 'docker compose run --rm --no-deps -T \\" \
+    '  -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \' \
+    "  --entrypoint python gateway /tmp/issue-gateway-cert.py $host \\" \
+    "  < $token_file \\" \
+    "  && docker compose restart gateway'"
+}
+gateway_cert_timer() {
+  printf '%s\n' \
+    '[Unit]' \
+    'Description=Monthly it-suite gateway certificate renewal' \
+    '[Timer]' \
+    'OnCalendar=monthly' \
+    'Persistent=true' \
+    '[Install]' \
+    'WantedBy=timers.target'
+}
+
+timer_enabled() {
+  [ "$no_systemctl" = 1 ] || [ "$(systemctl is-enabled its-gateway-cert.timer 2>/dev/null || true)" = enabled ]
+}
+
+step_6b() {
+  say "Step 6b — renew the gateway's certificate every month"
+  local service="$unit_dir/its-gateway-cert.service" timer="$unit_dir/its-gateway-cert.timer"
+  local enabled=", and the timer is enabled"
+  [ "$no_systemctl" != 1 ] || enabled=" (ITS_NO_SYSTEMCTL=1: systemd not asked)"
+  if [ "$(cat "$service" 2>/dev/null || true)" = "$(gateway_cert_service)" ] \
+     && [ "$(cat "$timer" 2>/dev/null || true)" = "$(gateway_cert_timer)" ] && timer_enabled; then
+    skip "step 6b: its-gateway-cert.service and .timer are as the runbook writes them$enabled"
+    return 0
+  fi
+  act "its-gateway-cert.service and its-gateway-cert.timer in $unit_dir"
+  sudo install -d -m 755 "$unit_dir"
+  gateway_cert_service | sudo tee "$service" >/dev/null
+  gateway_cert_timer | sudo tee "$timer" >/dev/null
+  if [ "$no_systemctl" = 1 ]; then
+    note "ITS_NO_SYSTEMCTL=1: units written, systemd not touched"
+  else
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now its-gateway-cert.timer
+    sudo systemctl list-timers its-gateway-cert.timer --no-pager
+  fi
+}
+
+oneshots=" migrate postgres-grants openbao-init "
+
+# stack_state sets stack (ok | wait | fail), stack_text and stack_names.
+stack_state() {
+  local svc state health code
+  stack=ok stack_text="" stack_names=""
+  while IFS='|' read -r svc state health code; do
+    [ -n "$svc" ] || continue
+    case "$state" in
+      exited)
+        if [[ "$oneshots" == *" $svc "* ]] && [ "$code" = 0 ]; then continue; fi
+        stack="fail" stack_text="$stack_text $svc(exited $code)" stack_names="$stack_names $svc" ;;
+      running)
+        case "$health" in ''|healthy) continue ;; esac
+        [ "$stack" = fail ] || stack="wait"
+        stack_text="$stack_text $svc($health)" stack_names="$stack_names $svc" ;;
+      *)
+        [ "$stack" = fail ] || stack="wait"
+        stack_text="$stack_text $svc($state)" stack_names="$stack_names $svc" ;;
+    esac
+  done < <(dc ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}')
+  return 0
+}
+
+restart_counts() {
+  local ids
+  mapfile -t ids < <(dc ps -aq | sort)
+  [ "${#ids[@]}" = 0 ] || docker inspect -f '{{.Name}} {{.RestartCount}}' "${ids[@]}"
+}
+
+# Every service up -- healthy where it has a health check -- and the three
+# one-shots exited 0; and still so 15 s later, with no restart in between: a
+# service that restarts for ever is up for a moment at a time (row 15 of
+# "What was broken"). Those 15 s count towards the 300.
+wait_stack() {
+  local i before after name
+  for ((i = 0; i < 300; i += 5)); do
+    stack_state
+    if [ "$stack" = fail ]; then
+      die "a service stopped:$stack_text" "docker compose logs --tail 50$stack_names" "$rerun"
+    fi
+    if [ "$stack" = ok ]; then
+      before="$(restart_counts)"
+      sleep 15
+      i=$((i + 15))
+      stack_state
+      after="$(restart_counts)"
+      if [ "$stack" = ok ] && [ "$before" = "$after" ]; then return 0; fi
+      if [ "$stack" = ok ]; then
+        stack_text="" stack_names=""
+        while read -r name _; do
+          name="${name#/it-suite-}" && name="${name%-1}"
+          stack_text="$stack_text $name(restarted)" stack_names="$stack_names $name"
+        done < <(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") | sed -n 's/^> //p')
+      fi
+    fi
+    sleep 5
+  done
+  die "after 300 s, still waiting on:$stack_text" "docker compose ps -a" "docker compose logs --tail 50$stack_names" "$rerun"
+}
+
+step_7() {
+  say "Step 7 — start everything; Traefik obtains the certificate for :443"
+  local before after mode connect gateway_cert limits tls_args=()
+  before="$(dc ps -aq | sort)"
+  dc up -d
+  after="$(dc ps -aq | sort)"
+  if [ -n "$before" ] && [ "$before" = "$after" ]; then
+    skip "step 7: docker compose up -d created no container and recreated none"
+  else
+    act "docker compose up -d: it started or recreated what was not up"
+  fi
+  wait_stack
+  dc ps -a --format 'table {{.Service}}\t{{.Status}}'
+  [ -z "$tls_cafile" ] || tls_args=(--cafile "$tls_cafile")
+  ./scripts/check-public-tls.sh "${tls_args[@]}" </dev/null \
+    || die "the certificate on :443 is not one a browser accepts (above)" \
+           "# the usual causes: the A record of $host is not this machine's, :443 is closed at the provider's firewall, or an AAAA record names another machine; why Let's Encrypt did not issue it is in Traefik's log:" \
+           "docker compose logs traefik | grep -i acme" \
+           "# fix the cause, then restart Traefik, which asks for the certificate again, and run this again; OpenBao unseals itself, so it asks for no share:" \
+           "docker compose restart traefik && $rerun"
+  mode="$(dc exec -T traefik stat -c %a /etc/traefik/acme/acme.json 2>/dev/null | tr -d '[:space:]' || true)"
+  [ "$mode" = 600 ] || die "Traefik's acme.json is mode ${mode:-missing}, not 600" "docker compose logs traefik | grep -i acme" "$rerun"
+  ok "step 7: Traefik's certificate store, acme.json, is mode 600"
+  connect="$(env_get ITMS_BIND_IP)"
+  case "$connect" in ''|0.0.0.0) connect=127.0.0.1 ;; esac
+  gateway_cert="$(openssl s_client -connect "$connect:8443" -servername "$host" </dev/null 2>/dev/null \
+                  | openssl x509 -noout -issuer -ext subjectAltName 2>/dev/null || true)"
+  printf '%s\n' "$gateway_cert" | sed 's/^/        /'
+  case "$gateway_cert" in
+    *"issuer=CN = Novieri RMM internal CA"*"DNS:$host"*) ok "step 7: :8443 presents the internal CA's certificate for $host" ;;
+    *) die ":8443 does not present the internal CA's certificate for $host (above), so no agent would connect" \
+           "docker compose ps gateway" "docker compose logs --tail 50 gateway traefik" "$rerun" ;;
+  esac
+  limits="$(dc exec -T api python -c "from app.core.config import get_settings; s = get_settings(); print(s.auth_login_ip_limit, s.auth_factor_ip_limit)" | tr -d '\r')"
+  note "step 7: the per-address sign-in limits the api started with: $limits"
+}
+
+step_8() {
+  say "Step 8 — the install code"
+  local needed code
+  needed="$(dc exec -T api python -c "import json, urllib.request; print(json.load(urllib.request.urlopen('http://localhost:8000/api/v1/setup/status', timeout=10))['needed'])" 2>/dev/null | tr -d '[:space:]' || true)"
+  case "$needed" in
+    False) skip "step 8: the installation is claimed" ;;
+    True)
+      code="$(dc exec -T api cat /var/lib/its/secrets/setup-code | tr -d '[:space:]')"
+      [ -n "$code" ] || die "the api wrote no install code" "docker compose logs api | grep -i 'install code'" "$rerun"
+      if [ -t 1 ] || [ "$allow_nontty" = 1 ]; then
+        printf '\n  install code  %s\n\n' "$code"
+        note "open https://$host/ in a browser you trust and enter it (deploy/README.md, First boot, 2): it is a password until you have"
+      else
+        note "the install code is not printed, the output is not a terminal; read it with: docker compose exec api cat /var/lib/its/secrets/setup-code"
+      fi
+      code="" ;;
+    *) die "the api did not answer /api/v1/setup/status" "docker compose logs --tail 50 api" "$rerun" ;;
+  esac
+}
+
+finish() {
+  say "First boot: every step is done."
+  note "Next, in a browser (deploy/README.md, First boot, 2): https://$host/ with the install code;"
+  note "your password, your second factor and its ten recovery codes; then an enrollment token at https://$host/enrollment."
+  note "Then: ./scripts/first-boot-check.sh"
+  note "Custody, off this VPS (GO-LIVE.md §4 and §6): the five shares and the root token, RECOVERY keys now"
+  note "(openbao-seal.sh disable, bao operator generate-root), not unseal keys; the key file $key_file,"
+  note "apart from any copy of openbao-data (lose it and OpenBao cannot be unsealed); .env, its-secrets and its-ca."
+}
+
 # ------------------------------------------------------------------ main
 
 check_state_before_anything
@@ -820,4 +1087,11 @@ step_3_4
 step_3_6
 auto_unseal
 restart_proof
-say "Steps 1 to 3.6 and the auto-unseal: done."
+step_4
+step_4b
+step_5
+step_6
+step_6b
+step_7
+step_8
+finish
