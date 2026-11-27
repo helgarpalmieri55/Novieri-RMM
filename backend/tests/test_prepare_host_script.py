@@ -45,7 +45,8 @@ case "$1" in
   status)
     [ -e "$STUB_STATE/ufw-on" ] || { echo "Status: inactive"; exit 0; }
     printf 'Status: active\nLogging: on (low)\n'
-    printf 'Default: deny (incoming), allow (outgoing), disabled (routed)\n\n'
+    printf 'Default: %s, allow (outgoing), disabled (routed)\n\n' \
+      "${FAKE_UFW_DEFAULT:-deny (incoming)}"
     printf 'To                         Action      From\n'
     printf '%s\n' '--                         ------      ----'
     while read -r rule; do printf '%-26s ALLOW IN    Anywhere\n' "$rule"
@@ -55,6 +56,7 @@ esac
     "apt-get": r"""#!/bin/sh
 echo "apt-get $*" >> "$STUB_LOG"
 case "$*" in
+  "update") [ -z "$FAKE_APT_UPDATE_RC" ] || exit "$FAKE_APT_UPDATE_RC" ;;
   *"install -y unattended-upgrades"*) touch "$STUB_STATE/pkg-unattended-upgrades" ;;
   *"install -y docker-ce "*) touch "$STUB_STATE/pkg-docker-ce" ;;
 esac
@@ -84,7 +86,8 @@ cat "$STUB_STATE/tee-$(basename "$1")"
 echo "systemctl $*" >> "$STUB_LOG"
 case "$*" in
   "is-active unattended-upgrades")
-    [ -e "$STUB_STATE/pkg-unattended-upgrades" ] && echo active || echo inactive ;;
+    if [ -e "$STUB_STATE/pkg-unattended-upgrades" ] || [ -e "$STUB_STATE/svc-active" ]
+    then echo active; else echo inactive; fi ;;
 esac
 """,
     "timedatectl": r"""#!/bin/sh
@@ -92,6 +95,7 @@ echo "timedatectl $*" >> "$STUB_LOG"
 case "$*" in
   "show -p NTP --value") [ -e "$STUB_STATE/ntp-on" ] && echo yes || echo no ;;
   "show -p NTPSynchronized --value")
+    if [ -e "$STUB_STATE/sync-pending" ]; then rm "$STUB_STATE/sync-pending"; echo no; exit 0; fi
     [ -e "$STUB_STATE/ntp-on" ] && [ -z "$FAKE_NEVER_SYNC" ] && echo yes || echo no ;;
   "set-ntp true") touch "$STUB_STATE/ntp-on" ;;
   status) [ -e "$STUB_STATE/ntp-on" ] && s=yes n=active || s=no n=inactive
@@ -219,13 +223,18 @@ def test_a_second_run_changes_nothing_and_says_so(tmp_path: Path) -> None:
                if line.startswith("  skip    ")]  # fmt: skip
     assert skipped == ["skip    P2", "skip    P3", "skip    P4", "skip    P5", "skip    P5"]
     assert "log out, and log in again" not in again.stdout
+    assert "if you have not logged out and back in as rmmadmin" in again.stdout
 
 
 def test_ntp_already_on_is_not_set_again(tmp_path: Path) -> None:
+    """NTP on but not yet synchronised: P4 waits for the clock, it does not set NTP."""
     box = Box(tmp_path)
     (box.state / "ntp-on").touch()
-    assert box.run().returncode == 0
+    (box.state / "sync-pending").touch()
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
     assert "timedatectl set-ntp true" not in box.changes()
+    assert "ok      P4: NTP is on and the clock is synchronised" in done.stdout
 
 
 def test_a_clock_that_never_synchronises_stops_the_run(tmp_path: Path) -> None:
@@ -240,7 +249,8 @@ def test_it_refuses_to_run_as_anyone_but_root(tmp_path: Path) -> None:
     box = Box(tmp_path)
     done = box.run(FAKE_UID="1000")
     assert done.returncode == 1
-    assert "it runs as root" in done.stderr and "sudo ./scripts/prepare-host.sh" in done.stderr
+    assert "it runs as root" in done.stderr
+    assert f"sudo {box.script}" in done.stderr
     assert box.changes() == []
 
 
@@ -251,6 +261,15 @@ def test_without_sudo_user_it_asks_for_the_operator(tmp_path: Path) -> None:
     done = box.run(SUDO_USER="")
     assert done.returncode == 1
     assert "by hand: deploy/README.md, P1" in done.stderr
+    assert f"sudo {box.script}" in done.stderr
+    assert done.stderr.count("FAILED") == 1
+    assert box.changes() == []
+
+
+def test_sudo_user_root_is_refused_like_no_operator(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    done = box.run(SUDO_USER="root")
+    assert done.returncode == 1 and "which account is the operator?" in done.stderr
     assert box.changes() == []
 
 
@@ -293,3 +312,72 @@ def test_an_extra_open_port_is_warned_about(tmp_path: Path) -> None:
     (box.state / "ufw-rules").write_text("80/tcp\n")
     done = box.run()
     assert "ufw also lets in: 80/tcp" in done.stderr
+    assert done.stderr.count("lets in") == 1
+
+
+def test_the_v4_and_v6_lines_of_one_port_count_once(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    (box.state / "ufw-rules").write_text("80/tcp\n80/tcp (v6)\n")
+    done = box.run()
+    assert "ufw also lets in: 80/tcp. This stack" in done.stderr
+
+
+def test_a_failure_outside_die_still_says_what_failed_and_how_to_continue(
+    tmp_path: Path,
+) -> None:
+    """A held dpkg lock makes `apt-get update` exit 100: still FAILED, the step, a re-run."""
+    box = Box(tmp_path)
+    done = box.run(FAKE_APT_UPDATE_RC="100")
+    assert done.returncode == 1
+    assert done.stderr.count("FAILED") == 1
+    assert 'FAILED  "P3 — security updates" did not finish (exit 100' in done.stderr
+    assert f"        sudo {box.script}" in done.stderr
+
+
+def test_a_refusal_reports_once_not_twice(tmp_path: Path) -> None:
+    done = Box(tmp_path).run(FAKE_UID="1000")
+    assert done.stderr.count("FAILED") == 1 and "did not finish" not in done.stderr
+
+
+def test_a_firewall_that_does_not_deny_incoming_stops_with_the_fix(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    done = box.run(FAKE_UFW_DEFAULT="allow (incoming)")
+    assert done.returncode == 1
+    assert "ufw is not what P2 needs" in done.stderr
+    assert "sudo ufw default deny incoming" in done.stderr
+    assert f"then: sudo {box.script}" in done.stderr
+
+
+def test_compose_is_compared_as_numbers_not_as_text(tmp_path: Path) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    ok = Box(tmp_path / "a")
+    done = ok.run(FAKE_COMPOSE="v2.100.0")
+    assert done.returncode == 0, done.stdout + done.stderr
+    bad = Box(tmp_path / "b")
+    done = bad.run(FAKE_COMPOSE="v2.3.0")
+    assert done.returncode == 1
+    assert "Docker Compose is 2.3.0, and it must be 2.24 or newer" in done.stderr
+
+
+def test_engine_25_99_99_is_too_old(tmp_path: Path) -> None:
+    done = Box(tmp_path).run(FAKE_ENGINE="25.99.99")
+    assert done.returncode == 1
+    assert "Docker Engine is 25.99.99, and it must be 26 or newer" in done.stderr
+
+
+def test_p3_is_not_skipped_when_the_package_is_missing(tmp_path: Path) -> None:
+    """The service answers and the config is there, but dpkg says no package."""
+    box = Box(tmp_path)
+    (box.state / "svc-active").touch()
+    (box.state / "tee-20auto-upgrades").write_text(
+        'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n'
+    )
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "apt-get install -y unattended-upgrades" in box.changes()
+
+
+def test_the_os_release_switch_says_it_was_used(tmp_path: Path) -> None:
+    done = Box(tmp_path).run()
+    assert "ITS_OS_RELEASE is set" in done.stdout

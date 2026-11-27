@@ -23,7 +23,8 @@
 set -euo pipefail
 
 if [ -t 1 ]; then bold=$'\033[1m'; plain=$'\033[0m'; else bold=""; plain=""; fi
-say()  { printf '\n%s%s%s\n' "$bold" "$*" "$plain"; }
+step="starting up"
+say()  { step="$*"; printf '\n%s%s%s\n' "$bold" "$*" "$plain"; }
 ok()   { printf '  ok      %s\n' "$*"; }
 skip() { printf '  skip    %s\n' "$*"; }
 act()  { printf '  run     %s\n' "$*"; }
@@ -34,32 +35,50 @@ die() {
   shift
   local line
   for line in "$@"; do printf '        %s\n' "$line" >&2; done
+  trap - EXIT   # this is the report: the exit trap below must not print a second one
   exit 1
 }
+
+# Anything that stops the run outside `die` (apt holding its lock, a mirror that does not
+# answer, curl failing) ends here: FAILED, the step it was in, and the way to continue.
+trap 'on_exit $?' EXIT
+on_exit() { [ "$1" = 0 ] || fail_help "$1"; }
+fail_help() {
+  trap - EXIT
+  printf '\nFAILED  "%s" did not finish (exit %s; the command'"'"'s own message is above)\n' "$step" "$1" >&2
+  printf '        %s\n' "$rerun" >&2
+  printf '        it skips what is done, and continues from here\n' >&2
+  exit 1
+}
+
+# Every command printed below works from any folder: the script's own absolute path.
+self="$(readlink -f "$0")"
+rerun="sudo $self"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
-    *) die "unknown argument: $1" "./scripts/prepare-host.sh --help" ;;
+    *) die "unknown argument: $1" "$self --help" ;;
   esac
 done
 
-deploy_dir="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+deploy_dir="$(cd "$(dirname "$self")/.." && pwd)"
 os_release="${ITS_OS_RELEASE:-/etc/os-release}"
 # Debconf asks nothing in the middle of a run; every answer is the package's default.
 export DEBIAN_FRONTEND=noninteractive
 
 [ "$(id -u)" = 0 ] || die "this changes the firewall, the packages and the groups: it runs as root" \
-  "sudo ./scripts/prepare-host.sh"
+  "$rerun"
 operator="${SUDO_USER:-}"
 if [ -z "$operator" ] || [ "$operator" = root ]; then
   die "which account is the operator? Run this with sudo from that account" \
-      "sudo ./scripts/prepare-host.sh" \
+      "$rerun" \
       "a VPS with only root makes the account first, by hand: deploy/README.md, P1"
 fi
 ID="" VERSION_ID="" UBUNTU_CODENAME="" VERSION_CODENAME=""
 # shellcheck disable=SC1090  # the system's own description of itself
 . "$os_release"
+[ -z "${ITS_OS_RELEASE:-}" ] || note "ITS_OS_RELEASE is set: the Ubuntu check read $os_release instead of /etc/os-release (tests only)"
 [ "$ID" = ubuntu ] || die "this is not Ubuntu ($os_release says ID=$ID): P5 installs Docker from its Ubuntu repository" \
   "deploy/README.md, Prerequisites: Ubuntu Server 24.04 LTS"
 [ "$VERSION_ID" = 24.04 ] || warn "Ubuntu $VERSION_ID, not 24.04: the runbook was written and rehearsed for 24.04"
@@ -94,10 +113,12 @@ else
   printf '%s\n' "$status"
   firewall_done "$status" || die "ufw is not what P2 needs (above)" \
     "it needs Status: active, Default: deny (incoming), and ALLOW IN for 22/tcp, 443/tcp and 8443/tcp" \
-    "sudo ufw status verbose"
+    "sudo ufw status verbose" \
+    "if the default is not deny: sudo ufw default deny incoming" \
+    "then: $rerun"
   ok "P2: ufw is on, denies what comes in, and allows 22/tcp, 443/tcp and 8443/tcp"
 fi
-extra="$(grep -E 'ALLOW IN' <<<"$status" | grep -vE '^(22|443|8443)/tcp ' | awk '{print $1}' | tr '\n' ' ' || true)"
+extra="$(grep -E 'ALLOW IN' <<<"$status" | grep -vE '^(22|443|8443)/tcp ' | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
 [ -z "$extra" ] || warn "ufw also lets in: ${extra% }. This stack needs 22, 443 and 8443 and nothing else."
 
 # --------------------------------------------------------------- P3
@@ -115,7 +136,7 @@ else
   apt-get install -y unattended-upgrades
   printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' | tee /etc/apt/apt.conf.d/20auto-upgrades
   [ "$(systemctl is-active unattended-upgrades 2>/dev/null || true)" = active ] \
-    || die "unattended-upgrades is not active" "sudo systemctl enable --now unattended-upgrades" "sudo ./scripts/prepare-host.sh"
+    || die "unattended-upgrades is not active" "sudo systemctl enable --now unattended-upgrades" "$rerun"
   ok "P3: unattended-upgrades is active"
 fi
 
@@ -137,7 +158,7 @@ else
   [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" = yes ] \
     || die "the clock is not synchronised after 120 s: certificates, second-factor codes and the audit log depend on it" \
            "timedatectl status" \
-           "check that the provider lets this VPS out to NTP (UDP 123), then: sudo ./scripts/prepare-host.sh"
+           "check that the provider lets this VPS out to NTP (UDP 123), then: $rerun"
   ok "P4: NTP is on and the clock is synchronised"
 fi
 timedatectl status | grep -E 'System clock synchronized|NTP service'
@@ -171,7 +192,7 @@ else
   usermod -aG docker "$operator"
   relogin=yes
 fi
-note "the docker group grants root-level privileges (Docker's post-installation notes): $operator alone is in it"
+note "the docker group grants root-level privileges (Docker's post-installation notes): see who is in it with: getent group docker"
 
 # ------------------------------------------------------------- versions
 
@@ -179,14 +200,16 @@ say "Docker's versions"
 engine="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
 composev="$(docker compose version --short 2>/dev/null | sed 's/^v//' || true)"
 at_least "$engine" 26 || die "Docker Engine is ${engine:-not answering}, and it must be 26 or newer: traefik:v3.6's Docker provider refuses an older one" \
-  "sudo systemctl status docker --no-pager" "sudo ./scripts/prepare-host.sh"
+  "sudo systemctl status docker --no-pager" "$rerun"
 ok "Docker Engine $engine (26 or newer)"
 at_least "$composev" 2.24 || die "Docker Compose is ${composev:-not answering}, and it must be 2.24 or newer: .env's \${...} references inside env_file need it" \
-  "sudo apt-get install -y docker-compose-plugin" "sudo ./scripts/prepare-host.sh"
+  "sudo apt-get install -y docker-compose-plugin" "$rerun"
 ok "Docker Compose $composev (2.24 or newer)"
 
 say "The host is ready for the first boot"
 if [ "$relogin" = yes ]; then
   note "log out, and log in again as $operator: the docker group applies to a new login only"
+else
+  note "if you have not logged out and back in as $operator since it joined the docker group, do that first: the group applies to a new login only"
 fi
 note "then, as $operator: cd $deploy_dir && ./scripts/first-boot.sh"
