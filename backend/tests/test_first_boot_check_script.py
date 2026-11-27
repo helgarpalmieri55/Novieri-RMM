@@ -63,6 +63,10 @@ if argv[:3] == ["compose", "exec", "-T"]:
                       "where device_id = '%s'))" % s["device"])
             if scoped not in sql and s.get("old_job"):
                 out(s["old_job"] + "\n")  # an earlier agent's row, which the query must exclude
+            elif os.environ.get("FAKE_JOB_GATE") and not os.path.exists(
+                os.environ["FAKE_JOB_GATE"]
+            ):
+                out("")  # the test has not yet closed the reader
             else:
                 out(s["job"] + "\n" if s["polls"] >= s["job_after"] else "")
     elif svc == "api":
@@ -703,9 +707,12 @@ def _hangup_at_11d(box: Box, kind: str) -> int:
     does. `kind`: `sigpipe` (no HUP: the reader goes, and the script's next write is a SIGPIPE),
     `pty` (the controlling terminal's master is closed), `pipe` (the reader of its
     stdout and stderr has gone, then a HUP) or `closed` (stderr closed, then a HUP)."""
-    box.state["job_after"] = 8 if kind == "sigpipe" else 10**6
+    box.state["job_after"] = 1 if kind.startswith("sigpipe") else 10**6
+    gate = box.tmp / "job-gate"
     box.prepare()
-    env = box.env()
+    # For `sigpipe` the job appears only once the reader has gone: its row is the write that
+    # meets the broken pipe, with no timing to win.
+    env = box.env(FAKE_JOB_GATE=str(gate)) if kind.startswith("sigpipe") else box.env()
     popen: dict[str, object] = {}
     master = slave = -1
     if kind == "pty":
@@ -720,7 +727,9 @@ def _hangup_at_11d(box: Box, kind: str) -> int:
     else:
         reader, writer = os.pipe()
         popen = {"stdout": writer, "start_new_session": True}
-        if kind in ("pipe", "sigpipe"):
+        if kind == "sigpipe-stdout":  # only stdout is the broken pipe: stderr can still say so
+            popen["stderr"] = (box.tmp / "stderr.txt").open("w")
+        elif kind in ("pipe", "sigpipe"):
             popen["stderr"] = writer
         else:
             popen["stderr"] = subprocess.DEVNULL
@@ -735,9 +744,10 @@ def _hangup_at_11d(box: Box, kind: str) -> int:
         os.close(writer)
     _wait_for(reader, b"Waiting up to")
     os.close(reader)  # the terminal's master, or the only reader of the pipe: gone
+    gate.write_text("")
     if kind == "pty":
         os.close(slave)
-    elif kind != "sigpipe":
+    elif not kind.startswith("sigpipe"):
         os.killpg(proc.pid, signal.SIGHUP)
     try:
         proc.wait(timeout=30)
@@ -773,3 +783,12 @@ def test_a_write_to_a_pipe_nobody_reads_still_retires_the_agent(tmp_path: Path) 
     assert _hangup_at_11d(box, "sigpipe") == 1
     _retired(box)
     assert box.argv().count("docker rm -f smoke-agent") >= 2
+
+
+def test_a_closed_stdout_is_reported_as_an_interruption(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    assert _hangup_at_11d(box, "sigpipe-stdout") == 1
+    err = (tmp_path / "stderr.txt").read_text()
+    assert "interrupted (its output was closed) (exit 141)" in err
+    assert "a command failed" not in err
+    _retired(box)

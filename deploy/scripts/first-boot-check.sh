@@ -95,6 +95,7 @@ on_exit() {
   failed=1
   case "$rc" in
     129|130|143) printf '\nFAILED  %s: interrupted (exit %s)\n' "$step" "$rc" >&2 || true ;;
+    141) printf '\nFAILED  %s: interrupted (its output was closed) (exit %s)\n' "$step" "$rc" >&2 || true ;;
     *) printf '\nFAILED  %s: a command failed (exit %s); what it printed is above\n' "$step" "$rc" >&2 || true ;;
   esac
   printf '        %s\n' "It is safe to run again: ./scripts/first-boot-check.sh" >&2 || true
