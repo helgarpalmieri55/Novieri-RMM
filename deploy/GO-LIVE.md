@@ -263,7 +263,8 @@ protected **at rest**, below.
   writes the key to `/etc/it-suite/openbao-unseal/unseal.key` (or
   `--key-file`), adds `COMPOSE_FILE` and `OPENBAO_UNSEAL_KEY_FILE` to `.env`,
   and finishes by restarting OpenBao and checking it unsealed with no shares.
-  That snapshot is Shamir-sealed, and three shares open it: keep it until the
+  That snapshot is Shamir-sealed, and three shares should open it (not
+  rehearsed): keep it until the
   off-host copy of the key file has been compared with this host's
   (`sha256sum`, on both), since until then it may be the one copy of this
   vault that does not need the key file; then delete it.

@@ -39,8 +39,10 @@ die() {
   exit 1
 }
 
-# Anything that stops the run outside `die` (apt holding its lock past the 300 s each
-# apt-get waits for it, a mirror that does not answer, curl failing) ends here: FAILED,
+# Anything that stops the run outside `die` (apt holding dpkg's lock past the 300 s each
+# apt-get install or remove waits for it, an apt-get update meeting another update's
+# lock on the package lists, which it does not wait for, a mirror that does not answer,
+# curl failing) ends here: FAILED,
 # the step it was in, and the way to continue. The wait is for a VPS minutes old, whose
 # cloud-init or unattended-upgrades may still hold dpkg's lock (review N6, 2026-11-27).
 trap 'on_exit $?' EXIT

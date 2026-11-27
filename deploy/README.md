@@ -344,9 +344,11 @@ also lets in a port this stack does not need. A `FAILED` line says what failed
 and the command to go on with, which names the script by its own absolute
 path, `sudo /opt/it-suite/deploy/scripts/prepare-host.sh`, so it works from
 any folder: run it again once the fix is made, and it picks up where it
-stopped. Each `apt-get` it runs waits up to five minutes for dpkg's lock
-(`-o DPkg::Lock::Timeout=300`), which cloud-init or unattended-upgrades may
-still hold on a VPS minutes old, rather than stopping at once. It ends:
+stopped. Each `apt-get install` and `remove` it runs waits up to five minutes
+for dpkg's lock (`-o DPkg::Lock::Timeout=300`), which cloud-init or
+unattended-upgrades may still hold on a VPS minutes old, rather than stopping
+at once; an `apt-get update` that meets another update's lock on the package
+lists still stops at once, and running the script again goes on. It ends:
 
 ```text
 Docker's versions
@@ -2003,8 +2005,10 @@ The first line returns once OpenBao's health check passes, which is only when
 it is unsealed: about 5 s after a restart, when it was rehearsed (2026-11-27,
 real Docker). If that wait exits non-zero, read [If `bao status` says `Sealed true`](#if-bao-status-says-sealed-true)
 below: with the key file missing it fails at once, with `bind source path does
-not exist`; with a key that does not unseal it, it gives up with
-`application not healthy after 30s`.
+not exist`; with a key that does not unseal it, it gives up after the 60 s it
+was given, `application not healthy after 1m0s` (Compose prints the timeout
+it was given: the rehearsal, waiting 30 s, printed
+`application not healthy after 30s`).
 
 `Sealed false`, with `Seal Type static`, and nobody typed a share: then
 
@@ -2065,7 +2069,8 @@ what else stopped it.) Rehearsed on 2026-11-27 against ca47ada with real
 Docker (not on a VPS, and as root): with the key file removed, replaced by a
 wrong 32-byte key, cut to 16 bytes, and with its directory gone, this block put
 it back and OpenBao came back `Sealed false`, `Seal Type static`. (The wait
-line was measured in the same rehearsal: After a reboot or a restart, above.)
+line's three outcomes were measured in the same rehearsal, the wrong-key one
+with a 30 s timeout: After a reboot or a restart, above.)
 
 **If the key file is lost for good, OpenBao cannot be unsealed by anyone**,
 with the shares or without them, and neither can any copy of `openbao-data`
@@ -2073,7 +2078,8 @@ taken since the auto-unseal went on: the job-signing key, the agent CA and
 every sealed credential go with it (`docs/07-backup-restore.md` §5). One copy
 is older than the auto-unseal: the snapshot of `openbao-data` that
 `openbao-seal.sh enable` took just before it, under
-`/var/backups/it-suite/openbao-seal/`, Shamir-sealed, which three shares open.
+`/var/backups/it-suite/openbao-seal/`, Shamir-sealed, which three shares
+should open: that follows from how it was taken, and has not been rehearsed.
 **Keep it until the off-host copy of the key file has been compared with this
 host's** -- `sudo sha256sum /etc/it-suite/openbao-unseal/unseal.key` here and
 `sha256sum unseal.key` on your computer (`shasum -a 256 unseal.key` on macOS)

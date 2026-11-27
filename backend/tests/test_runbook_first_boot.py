@@ -524,7 +524,13 @@ def test_openbao_is_waited_for_before_it_is_asked_again_after_a_restart() -> Non
     reboot_text = _flat(_after_reboot())
     link = "[If `bao status` says `Sealed true`](#if-bao-status-says-sealed-true)"
     assert f"exits non-zero, read {link}" in reboot_text
-    for measured in ("`bind source path does not exist`", "`application not healthy after 30s`"):
+    for measured in (
+        "`bind source path does not exist`",
+        "`application not healthy after 30s`",
+        # Compose prints the timeout it was given (`pkg/compose/up.go`): the
+        # block waits 60 s, so the operator sees this one.
+        "`application not healthy after 1m0s`",
+    ):
         assert measured in reboot_text, measured
     assert "A non-zero exit from the wait" in _restore_section()
 
