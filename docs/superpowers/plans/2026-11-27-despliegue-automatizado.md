@@ -8,13 +8,13 @@
 
 **Tech Stack:** Bash 5.2 (el de Ubuntu 24.04), shellcheck 0.9.0, Python 3.12 con pytest 9.2.0 para las pruebas, Python 3 de la biblioteca estándar para el conductor de la CI, Docker Engine 29.9.3 y Compose 5.7.1 en esta sesión, OpenBao 2.6.1, Pebble 2.10.1, GitHub Actions. Ninguna dependencia nueva.
 
-**Diseño:** `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md`, aprobado por el operador el 2026-11-27 («Sí, avanza en lo que puedas avanzar mientras»): §2 es el recorrido del operador, §3 los tres guiones, §4 el desellado automático, §5 las pruebas y la CI, §6 la documentación, §8 los criterios de aceptación. Las decisiones del operador del mismo día («Automatizar antes», «Activarlo siempre», DNS con Cloudflare) ya están en `.git/sdd/decisiones-p34.md`.
+**Diseño:** `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md`, aprobado por el operador el 2026-11-27 («Sí, avanza en lo que puedas avanzar mientras»): §2 es el recorrido del operador, §3 los tres guiones, §4 el desellado automático, §5 las pruebas y la CI, §6 la documentación, §8 los criterios de aceptación. Las decisiones del operador del mismo día («Automatizar antes», «Activarlo siempre», DNS con Cloudflare) ya están en `.git/sdd/decisiones-p34.md`. **Y las resoluciones del coordinador del mismo día** a las ocho preguntas de la primera versión de este plan (al final, «Resoluciones del coordinador»): cuatro de ellas corrigen el diseño (Q3 en §5 y §8.2, Q5 en §3, Q6 en §2, §3 y §4, Q7 en §6), y cada corrección la escribe la tarea a la que pertenece, en un paso propio, «El diseño» (Tasks 1, 2, 5 y 6).
 
 ## Global Constraints
 
 - **Seguridad.** Las invariantes 1, 1b, 1c, 2, 2a, 3, 4, 5, 5a y 6 de `CLAUDE.md` no se tocan, y en concreto:
-  - **1:** ningún cambio toca la firma, los bytes canónicos ni la verificación. El trabajo de la CI sigue siendo un `hello` que el servidor firma y el agente compilado verifica antes de ejecutarlo (Task 5).
-  - **2:** el agente de prueba (`smoke-agent`) marca hacia fuera por el 443 y el 8443; `--network host` y ningún `-p`: no escucha en nada.
+  - **1:** ningún cambio toca la firma, los bytes canónicos ni la verificación. El trabajo de la CI sigue siendo un `hello` que el servidor firma y el agente compilado verifica antes de ejecutarlo, y desde la resolución Q3 prueba también la otra mitad en cada subida: el mismo binario, con una clave de firma fijada que el servidor no tiene, rechaza un `hello` firmado con `bad_signature` y no lo ejecuta (Task 5, 7c-bis). El falsador, en el ensayo, es un agente que no verifica (Task 5, Step 7, Rojo 3), en una rama que no se fusiona: `agent/` no cambia.
+  - **2:** el agente de prueba (`smoke-agent`) marca hacia fuera por el 443 y el 8443; `--network host` y ningún `-p`: no escucha en nada. El del caso negativo (`ci-agent`), en la red del stack, tampoco publica nada.
   - **3 y diseño §3, «Secretos»:** ninguna parte, token o código en la línea de órdenes de un proceso, en un registro, en un archivo temporal ni en el historial. Solo se escriben donde ya van hoy: `deploy/.env` (0600), `/etc/it-suite/gateway-issuer.token` (0600, de root) y el archivo de clave de `openbao-seal.sh`, `/etc/it-suite/openbao-unseal/unseal.key` (0400, del usuario de OpenBao). Al reescribir `.env`, `sed -i` crea su propio temporal en `deploy/`, con el modo y el dueño de `.env` (GNU sed 4.9 los conserva: medido el 2026-11-27 con un archivo de `nobody`, 0600, editado como root), y lo renombra sobre él: es lo que hacen hoy el paso 3.5 del runbook y `openbao-seal.sh`.
   - **Diseño §3:** `set -x` prohibido, y los dos guiones de primer arranque **se niegan** a correr con xtrace (`bash -x`). Sin `<<<`, y todo *here-document* con el delimitador entre comillas (`<<'EOF'`): bash, antes de la 5.1 siempre y después por encima del tamaño de una tubería, los escribe en un archivo temporal. Un secreto llega a otro proceso con `printf '%s\n' "$x" | …`, que es una orden interna y no arranca proceso.
   - **Diseño §3:** las cinco partes y el token raíz se imprimen solo si la salida es una terminal (`[ -t 1 ]`); con la salida redirigida, `first-boot.sh` se niega **antes** de `bao operator init`, salvo con `ITS_FIRST_BOOT_ALLOW_NONTTY=1`, que solo pone `deploy/ci/first_boot_answers.py`, el conductor de la CI, que enmascara cada secreto (`::add-mask::`) antes de imprimir la línea que lo lleva. El código de instalación sigue la misma regla.
@@ -22,8 +22,8 @@
 - **`| grep -q` nunca al final de una tubería con `pipefail`:** `grep` sale en cuanto encuentra, la orden de antes recibe SIGPIPE y la tubería entera da «no». Se compara la salida guardada (`[[ $out == *…* ]]`) o se usa `grep -c`/*here-string* sobre datos que no son secretos.
 - **OpenBao:** cinco partes y umbral tres **también en la CI** (hasta hoy, una); el desellado automático con clave estática siempre, en cada primer arranque (decisión del operador del 2026-11-27, «Activarlo siempre»); un OpenBao ya inicializado nunca se vuelve a inicializar. Imagen `quay.io/openbao/openbao:2.6.1`.
 - **Versiones:** Docker Engine 26 o más y Compose 2.24 o más (lo que `preflight.sh` ya exige); `busybox:1.36.1` y `golang:1.24-bookworm` para el agente de prueba, como el paso 11c; Pebble `ghcr.io/letsencrypt/pebble:2.10.1`.
-- **Interruptores para la CI, un ensayo o las pruebas, y solo para eso** (Apéndice A): `ITS_FIRST_BOOT_ALLOW_NONTTY=1`, `ITS_PREFLIGHT_SKIP_DNS=1`, `ITS_NO_SYSTEMCTL=1`, `ITS_SYSTEMD_DIR`, `ITS_ETC_DIR`; y, solo para las pruebas, `ITS_OS_RELEASE` (`prepare-host.sh`), `ITS_SMOKE_AGENT_DIR` y `ITS_BACKUP_STATE_DIR` (`first-boot-check.sh`; el segundo ya es de `scheduled-backup.sh`). Ninguno se pone en un VPS, y ninguno debilita una comprobación sin decirlo en una línea `note`.
-- **Lo que no cambia:** ni la aplicación (`backend/app`, `frontend/`, `agent/`), ni las migraciones (ninguna nueva), ni el protocolo del agente (`docs/kernel/wire-protocol/` intacto), ni `.env.example` (las dos claves que añade el desellado, `COMPOSE_FILE` y `OPENBAO_UNSEAL_KEY_FILE`, las escribe `openbao-seal.sh` en el `.env` del host, como hasta hoy), ni `CLAUDE.md`, ni los planes y diseños fechados de `docs/superpowers/`. Fuera de alcance (diseño §7): un KMS, credenciales de Cloudflare en el VPS o en la CI, automatizar el navegador o la custodia.
+- **Interruptores para la CI, un ensayo o las pruebas, y solo para eso** (Apéndice A): `ITS_FIRST_BOOT_ALLOW_NONTTY=1`, `ITS_PREFLIGHT_SKIP_DNS=1` (que `preflight.sh` rechaza con Let's Encrypt de producción como CA, o sin `ITS_ACME_CA_SERVER`, que es lo mismo: la de un host real; resolución Q4), `ITS_NO_SYSTEMCTL=1`, `ITS_SYSTEMD_DIR`, `ITS_ETC_DIR`; y, solo para las pruebas, `ITS_OS_RELEASE` (`prepare-host.sh`), `ITS_SMOKE_AGENT_DIR` y `ITS_BACKUP_STATE_DIR` (`first-boot-check.sh`; el segundo ya es de `scheduled-backup.sh`). Ninguno se pone en un VPS, y ninguno debilita una comprobación sin decirlo en una línea `note`.
+- **Lo que no cambia:** ni la aplicación (`backend/app`, `frontend/`, `agent/`), ni las migraciones (ninguna nueva), ni el protocolo del agente (`docs/kernel/wire-protocol/` intacto), ni `.env.example` (las dos claves que añade el desellado, `COMPOSE_FILE` y `OPENBAO_UNSEAL_KEY_FILE`, las escribe `openbao-seal.sh` en el `.env` del host, como hasta hoy), ni `CLAUDE.md`, ni los planes fechados de `docs/superpowers/`, ni sus diseños salvo el de este proyecto, y ese solo en los párrafos que el coordinador corrigió (Tasks 1, 2, 5 y 6, paso «El diseño»). Fuera de alcance (diseño §7): un KMS, credenciales de Cloudflare en el VPS o en la CI, automatizar el navegador o la custodia.
 - **Pruebas.** Ninguna se salta ni se debilita: cada aserción de una prueba adaptada sigue existiendo donde ahora vive la orden que fijaba, y la tarea lo dice. Cada prueba nueva se ve en rojo antes que en verde. Las pruebas de los guiones corren contra órdenes simuladas en el `PATH`; las de `first-boot.sh` y `first-boot-check.sh` ponen una cuña que registra la línea de órdenes delante de **cada** orden externa (si el guion usa una que la prueba no conoce, falla con «command not found»). Las cuñas apuntan antes a `/usr/bin` y `/bin` que al `PATH` de la sesión: esta sesión pone un envoltorio de `rm` en el `PATH` que vuelve a llamar a `rm` por su nombre, y una cuña que apuntara a él se llamaría a sí misma sin fin (medido el 2026-11-27).
 - **Textos:** los de `deploy/` (guiones, runbook, GO-LIVE) en inglés; el plan y el informe en español. Las pruebas pasan `ruff check` a 100 columnas.
 - **Verificación, desde `backend/` de la worktree:** `ITS_TEST_REDIS_URL=redis://localhost:6379/<la base de la tarea> .venv/bin/python -m pytest -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning -p no:cacheprovider -q <archivos>` (cada tarea da su número de base, del 1 al 6, para que las worktrees no compartan Redis) y `.venv/bin/ruff check app tests`. **Desde la raíz:** `shellcheck deploy/scripts/prepare-host.sh deploy/scripts/first-boot.sh deploy/scripts/first-boot-check.sh` (lo que ya exista). La suite completa la corre el coordinador en el árbol fusionado.
@@ -36,7 +36,7 @@
   ```
 
   La segunda línea imprime una ruta de la worktree. Las tareas de la oleada 1 comprueban además, en su Step 0, que el código es el medido (`CODE-AS-MEASURED`); las demás fusionan antes, por sus nombres `p5-tN`, las ramas de las que dependen, y comprueban lo que dice su Step 0.
-- **Docker (solo la Task 5, Step 6, el ensayo del trabajo de la CI aquí):** `docker version >/dev/null 2>&1 || (nohup dockerd >/tmp/dockerd.log 2>&1 &)`, y esperar a que `docker version --format '{{.Server.Version}}'` imprima `29.9.3`. **Docker Hub puede contestar `429 Too Many Requests`** a las descargas anónimas (`postgres:16`, `traefik:v3.6`, `busybox:1.36.1`, `python:3.12-slim`…); `mirror.gcr.io` funciona como espejo (comprobado por el coordinador): se pone en `/etc/docker/daemon.json` y se reinicia `dockerd` (Task 5, Step 6). Y las tres imágenes base de los `Dockerfile` se tapan en el almacén local con una copia que confía en la CA del proxy de la sesión, igual que en el plan del 2026-11-23 (Global Constraints, «Las imágenes base de la sesión»); esas imágenes son solo de esta sesión y no se publican.
+- **Docker (solo la Task 5, Step 7, el ensayo del trabajo de la CI aquí):** `docker version >/dev/null 2>&1 || (nohup dockerd >/tmp/dockerd.log 2>&1 &)`, y esperar a que `docker version --format '{{.Server.Version}}'` imprima `29.9.3`. **Docker Hub puede contestar `429 Too Many Requests`** a las descargas anónimas (`postgres:16`, `traefik:v3.6`, `busybox:1.36.1`, `python:3.12-slim`…); `mirror.gcr.io` funciona como espejo (comprobado por el coordinador): se pone en `/etc/docker/daemon.json` y se reinicia `dockerd` (Task 5, Step 7). Y las tres imágenes base de los `Dockerfile` se tapan en el almacén local con una copia que confía en la CA del proxy de la sesión, igual que en el plan del 2026-11-23 (Global Constraints, «Las imágenes base de la sesión»); esas imágenes son solo de esta sesión y no se publican.
 - **Commits.** Uno por paso «Commit», con el formato de los anteriores (`feat(deploy): …`, `test(deploy): …`, `ci(deploy): …`, `docs(deploy): …`) y estas dos líneas al final del mensaje:
 
   ```
@@ -50,12 +50,12 @@
 
 ## Lo que hace este proyecto, y lo que no
 
-**Hace.** `prepare-host.sh` (P2 a P5, y P1 con `--create-user`, Task 1); `first-boot.sh`, en dos tareas: del estado mezclado a la provisión de OpenBao, 3.6 incluido (Task 2), y de las migraciones al código del paso 8, con el desellado automático y el reinicio que lo prueba (Task 3); `first-boot-check.sh` (pasos 10, 11a, 11c a 11f y 12, Task 4); el trabajo `deploy` de la CI sobre los dos guiones, con sus comprobaciones de hoy y las dos nuevas (Task 5); el runbook, GO-LIVE §1, §4 y §6 y `docs/07-backup-restore.md`, con las pruebas que los fijan adaptadas (Task 6); el informe de despliegue (Task 7).
+**Hace.** `prepare-host.sh` (P2 a P5; P1 sigue a mano, resolución Q5, Task 1); `first-boot.sh`, en dos tareas: del estado mezclado a la provisión de OpenBao, 3.6 incluido, y justo después el desellado automático y el reinicio que lo prueba (resolución Q6, Task 2), y de las migraciones al código del paso 8 (Task 3); `first-boot-check.sh` (pasos 10, 11a, 11c a 11f y 12, Task 4); el trabajo `deploy` de la CI sobre los dos guiones, con sus comprobaciones de hoy y tres nuevas: el reinicio de OpenBao, la segunda ejecución y el rojo con la firma mala (resolución Q3, Task 5); el runbook, GO-LIVE §1, §4 y §6 y `docs/07-backup-restore.md`, con las pruebas que los fijan adaptadas (Task 6); el informe de despliegue (Task 7).
 
 **No hace.**
 1. **No crea el registro `A`.** Lo crea el coordinador con el conector de Cloudflare el día del despliegue, tras enseñar el cambio y con el «sí» del operador (diseño, cabecera y §2.0). No es código.
 2. **No automatiza el navegador** (reclamar la instalación, el segundo factor, el token de inscripción) **ni la custodia** (diseño §7). En la CI esos clics los hacen `mcp_flow.py` y `agent_flow.py`, que ya existen.
-3. **No verifica de verdad** activar ufw, instalar Docker (diseño §5, «queda como sin verificar, igual que hoy») ni los temporizadores de systemd (pregunta Q2).
+3. **No verifica de verdad** activar ufw, instalar Docker (diseño §5, «queda como sin verificar, igual que hoy») ni los temporizadores de systemd del paso 6b y del 12: la CI sigue con `ITS_NO_SYSTEMCTL=1` (resolución Q2), escribe las unidades en su propio directorio y no las activa. El plan y el informe lo dicen así.
 4. **No despliega.** La secuencia la da el informe (Task 7), y el operador la corre desde `main`.
 
 ## Lo que el código dijo al medirlo (2026-11-27)
@@ -65,11 +65,13 @@ Medido en esta sesión antes de escribir el plan, con `quay.io/openbao/openbao:2
 - **M1. `bao operator init -status` sale con 2 tanto para «no inicializado» como para una conexión rechazada** (`dial tcp 127.0.0.1:8200: connect: connection refused`, código 2). La espera de la CI de hoy (`[ "$rc" = 2 ] && break`) se fía de lo contrario, y la prueba `test_openbao_is_waited_for_until_it_answers_not_initialised` lo afirma en su docstring. `bao status -format=json` sí distingue: 0 desellado, 2 sellado (inicializado o no, con el JSON impreso), 1 sin respuesta. `first-boot.sh` lee `initialized` y `sealed` de ese JSON (Task 2), y la prueba se rehace con la medida (Task 5).
 - **M2. Formatos.** `bao status -format=json` imprime `  "initialized": false,` y `  "type": "shamir",` con dos espacios; `bao operator init -key-shares=5 -key-threshold=3` imprime `Unseal Key 1: <44 caracteres en base64>` … `Unseal Key 5: …`, una línea en blanco, `Initial Root Token: s.<24>`. `bao token lookup -format=json` lleva `"policies": [` y `"root"` en líneas distintas. `bao token create … -field=token` imprime solo el token. **`bao token lookup -field=policies` no existe** (`flag provided but not defined: -field`).
 - **M3. Una parte mala se acepta hasta el umbral**: con la tercera, OpenBao contesta 400, vuelve el progreso a 0 y sigue sellado. Una parte repetida no cuenta. `bao write sys/unseal reset=true` falla (`cannot unmarshal string … of type bool`); `printf '{"reset":true}' | bao write -format=json sys/unseal -` funciona. Por eso `first-boot.sh` comprueba cada parte contra las cinco que acaba de imprimir, no admite una repetida y, sin ellas en memoria, reinicia el progreso antes de cada ronda (Task 2).
-- **M4. El `COMPOSE_FILE` del entorno gana al de `.env`.** La CI exporta `COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml`; `openbao-seal.sh enable` escribe `COMPOSE_FILE=docker-compose.yml:openbao/auto-unseal.yml` en `.env` y se niega si `.env` ya tiene otro. Si `openbao-seal.sh` heredara el de la CI, recrearía OpenBao sin la configuración del sello al que migra; y si después la CI siguiera con el suyo, cualquier `up` haría lo mismo. Así que `first-boot.sh` llama a `sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh …` (explícito, sin fiarse de que `sudo` limpie el entorno) y, si heredó un `COMPOSE_FILE`, le añade `openbao/auto-unseal.yml` en cuanto `.env` lo tiene (Task 3); la CI hace lo mismo en `GITHUB_ENV` tras el primer arranque (Task 5).
-- **M5. Pebble crea una raíz nueva cada vez que arranca, y ninguna orden de compose corre sin `.env`** (`${ITS_PUBLIC_HOST:?}`, `${ITS_ACME_EMAIL:?}`). La comprobación del paso 7 necesita esa raíz y el paso 7 es de `first-boot.sh`. Por eso la CI escribe `.env` con el mismo `new-env.sh` que el paso 1 (su paso de hoy, sin cambios), arranca Pebble, lee su raíz y pasa `--tls-cafile`; `first-boot.sh` encuentra `.env` y dice `skip` (pregunta Q1).
-- **M6. `preflight.sh` se niega en la CI:** `getent -s dns ahostsv4 rmm.novieri.com` no devuelve nada desde un ejecutor, y si el registro `A` ya existiera devolvería la IPv4 del VPS, que no es del ejecutor. Una CI que dependiera del DNS real cambiaría de color el día en que se crea el registro. `ITS_PREFLIGHT_SKIP_DNS=1` deja la pregunta sin hacer y lo dice en una línea `note` (Task 2; pregunta Q4).
+- **M4. El `COMPOSE_FILE` del entorno gana al de `.env`.** La CI exporta `COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml`; `openbao-seal.sh enable` escribe `COMPOSE_FILE=docker-compose.yml:openbao/auto-unseal.yml` en `.env` y se niega si `.env` ya tiene otro. Si `openbao-seal.sh` heredara el de la CI, recrearía OpenBao sin la configuración del sello al que migra; y si después la CI siguiera con el suyo, cualquier `up` haría lo mismo. Así que `first-boot.sh` llama a `sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh …` (explícito, sin fiarse de que `sudo` limpie el entorno) y, si heredó un `COMPOSE_FILE`, le añade `openbao/auto-unseal.yml` en cuanto `.env` lo tiene (Task 2); la CI hace lo mismo en `GITHUB_ENV` tras el primer arranque (Task 5).
+- **M5. Pebble crea una raíz nueva cada vez que arranca, y ninguna orden de compose corre sin `.env`** (`${ITS_PUBLIC_HOST:?}`, `${ITS_ACME_EMAIL:?}`). La comprobación del paso 7 necesita esa raíz y el paso 7 es de `first-boot.sh`. Por eso la CI escribe `.env` con el mismo `new-env.sh` que el paso 1 (su paso de hoy, sin cambios), arranca Pebble, lee su raíz y pasa `--tls-cafile`; `first-boot.sh` encuentra `.env` y dice `skip`, y el conductor de la CI exige esa línea (resolución Q1).
+- **M6. `preflight.sh` se niega en la CI:** `getent -s dns ahostsv4 rmm.novieri.com` no devuelve nada desde un ejecutor, y si el registro `A` ya existiera devolvería la IPv4 del VPS, que no es del ejecutor. Una CI que dependiera del DNS real cambiaría de color el día en que se crea el registro. `ITS_PREFLIGHT_SKIP_DNS=1` deja la pregunta sin hacer y lo dice en una línea `note`; y se niega si la CA de ACME es la de producción de Let's Encrypt o no está puesta, porque eso es un host real (Task 2; resolución Q4).
 - **M7. Compose 5.7.1:** `docker compose ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}'` imprime `long|running|healthy|0` y `one|exited||0`; `docker compose up <servicio de una vez>` vuelve con 0 cuando su contenedor termina; un contenedor con `--network host` lleva el nombre de máquina del host (`hostname` dentro y fuera: `vm`).
 - **M8. GNU sed 4.9 conserva el dueño y el modo** de un archivo que edita con `-i` como root (un archivo de `nobody:nogroup` 0600 sigue así): el `.env` del operador no pasa a ser de root cuando `sudo openbao-seal.sh` lo reescribe.
+- **M9. `docker compose up -d` vuelve a arrancar los contenedores de una vez que ya salieron** (`migrate`, `postgres-grants`, `openbao-init`): el mismo `Id`, con `StartedAt` nuevo (Compose 5.7.1). Una huella con la hora de arranque de cada contenedor cambiaría en cada segunda ejecución sin que nada hubiera cambiado. La de la CI (Task 5) toma de cada contenedor su `Id` y, si está en marcha, su hora de arranque; si salió, su código de salida.
+- **M10. Una clave fijada que nadie firma.** El agente lee `job_signing_public_key_pem` de su `pins.json` con `x509.ParsePKIXPublicKey` y exige que sea Ed25519 (`agent/internal/enroll/enroll.go`); 32 bytes al azar dentro del envoltorio de RFC 8410 (`302a300506032b6570032100` y los 32 bytes, en PEM) se leen siempre como una clave válida, y ninguna firma del servidor verifica contra ella (Go 1.24, 2000 claves: todas se leen, ninguna verifica). `agent_flow.py` la hace con la biblioteca estándar de Python, sin `openssl`. El rechazo se ve en tres sitios: el trabajo acaba `refused` con el resultado `{"refused": "bad_signature"}`; la auditoría tiene `jobs.refused` con el id del trabajo; y el agente escribe `level=WARN msg="job refused" job_id=… job_type=hello reason=bad_signature`. La comprobación es `if !ed25519.Verify(v.key, msg, sig) {`, `agent/internal/jobs/verify.go:180`.
 
 ## Oleadas y paralelismo
 
@@ -84,21 +86,21 @@ Medido en esta sesión antes de escribir el plan, con `quay.io/openbao/openbao:2
 
 | Task | Qué | Diseño | Base Redis |
 |---|---|---|---|
-| 1 | `prepare-host.sh` y sus pruebas con órdenes simuladas | §3, §5 | 1 |
-| 2 | `first-boot.sh`, primera parte: estado mezclado, pasos 1 a 3.6, la negativa sin terminal; el arnés de pruebas; `ITS_PREFLIGHT_SKIP_DNS` | §3, §5 | 2 |
-| 3 | `first-boot.sh`, segunda parte: pasos 4 a 7, el desellado automático y su reinicio, el código del paso 8 | §3, §4, §5 | 3 |
+| 1 | `prepare-host.sh` y sus pruebas con órdenes simuladas; el diseño, §3 | §3, §5 | 1 |
+| 2 | `first-boot.sh`, primera parte: estado mezclado, pasos 1 a 3.6, el desellado automático y su reinicio justo después, la negativa sin terminal; el arnés de pruebas; `ITS_PREFLIGHT_SKIP_DNS` y su negativa con producción; el diseño, §2, §3 y §4 | §2, §3, §4, §5 | 2 |
+| 3 | `first-boot.sh`, segunda parte: pasos 4 a 7, sin partes al relanzarlos, y el código del paso 8 | §3, §5 | 3 |
 | 4 | `first-boot-check.sh` y sus pruebas | §3, §5 | 4 |
-| 5 | La CI `deploy` sobre los guiones, con las dos comprobaciones nuevas; el conductor `first_boot_answers.py`; las pruebas de la CI adaptadas; el ensayo aquí en rojo y en verde | §5, §8.2 | 5 |
-| 6 | El runbook (recorrido de tres órdenes, el apéndice), GO-LIVE §1, §4 y §6, `docs/07`; las pruebas que los fijan | §4, §6, §8.5 | 6 |
+| 5 | La CI `deploy` sobre los guiones, con las tres comprobaciones nuevas (la firma mala, en el paso 7c-bis); el conductor `first_boot_answers.py`; la fase `refused` de `agent_flow.py`; las pruebas de la CI adaptadas; el ensayo aquí en rojo y en verde; el diseño, §5 y §8.2 | §5, §8.2 | 5 |
+| 6 | El runbook (recorrido de tres órdenes, el apéndice), GO-LIVE §1, §4 y §6, `docs/07`; las pruebas que los fijan; el diseño, §6 | §4, §6, §8.5 | 6 |
 | 7 | El informe de despliegue, rehecho sobre el runbook nuevo | §6, §8 | — |
 
-**Por qué este reparto.** El que proponía el coordinador, con dos ajustes que salen del código. `first-boot.sh` se parte en el paso 3.6: la primera parte es la de los secretos y los estados que hay que negar (la que más merece una revisión aparte), la segunda es mecánica salvo el desellado; las dos comparten archivo, así que van seguidas. El arnés de pruebas (un `docker` falso que hace de compose, OpenBao y Postgres) nace entero en la Task 2 aunque la 2 no use todo: es la interfaz del guion entero, y así la 3 solo añade pruebas. `preflight.sh` cambia tres líneas y va con la Task 2, que es la que necesita el interruptor. `first-boot-check.sh` lleva su propio `docker` falso, más pequeño, para no depender de la Task 2 y poder ir en paralelo. Y el runbook y la CI van en paralelo porque no comparten archivo; el riesgo de que la Task 5 corrija una línea que el runbook cita lo cubre una prueba de la 6 (las líneas que el runbook cita son líneas que los guiones imprimen) al fusionar en el orden 5, 6.
+**Por qué este reparto.** El que proponía el coordinador, con dos ajustes que salen del código. `first-boot.sh` se parte tras el desellado automático, que desde la resolución Q6 va justo después del paso 3.6: la primera parte es la de los secretos, los estados que hay que negar y el cambio de sello (la que más merece una revisión aparte), la segunda es mecánica y, como OpenBao ya se desella solo, nunca pide una parte; las dos comparten archivo, así que van seguidas. El arnés de pruebas (un `docker` falso que hace de compose, OpenBao y Postgres) nace entero en la Task 2 aunque la 2 no use todo: es la interfaz del guion entero, y así la 3 solo añade pruebas. `preflight.sh` cambia tres líneas y va con la Task 2, que es la que necesita el interruptor. `first-boot-check.sh` lleva su propio `docker` falso, más pequeño, para no depender de la Task 2 y poder ir en paralelo. Y el runbook y la CI van en paralelo porque no comparten archivo; el riesgo de que la Task 5 corrija una línea que el runbook cita lo cubre una prueba de la 6 (las líneas que el runbook cita son líneas que los guiones imprimen) al fusionar en el orden 5, 6.
 
 ## Notas de integración del coordinador
 
-- **Oleada 1, choques esperados: ninguno.** La 1 crea `deploy/scripts/prepare-host.sh` y `backend/tests/test_prepare_host_script.py`; la 2, `deploy/scripts/first-boot.sh`, `backend/tests/first_boot_support.py`, `backend/tests/test_first_boot_script.py` y toca `deploy/scripts/preflight.sh` y `backend/tests/test_preflight_script.py`; la 4, `deploy/scripts/first-boot-check.sh` y `backend/tests/test_first_boot_check_script.py`.
+- **Oleada 1, choques esperados: ninguno.** La 1 crea `deploy/scripts/prepare-host.sh` y `backend/tests/test_prepare_host_script.py`; la 2, `deploy/scripts/first-boot.sh`, `backend/tests/first_boot_support.py`, `backend/tests/test_first_boot_script.py` y toca `deploy/scripts/preflight.sh` y `backend/tests/test_preflight_script.py`; la 4, `deploy/scripts/first-boot-check.sh` y `backend/tests/test_first_boot_check_script.py`. **La 1 y la 2 tocan las dos el diseño**, `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md`, en párrafos distintos (la 1, el de `prepare-host.sh` en §3; la 2, §2, el de `first-boot.sh` en §3 y §4): se fusionan en cualquier orden sin conflicto (medido el 2026-11-27 con `git merge` de las dos ediciones sobre `6f616aa`).
 - **Oleada 2:** la 3 edita los dos archivos de la 2 y ninguno más.
-- **Oleada 3:** la 5 es dueña de `.github/workflows/ci.yml`, `deploy/ci/first_boot_answers.py`, `backend/tests/test_ci_first_boot.py`, `backend/tests/test_ci_mcp_flow.py` y `backend/tests/test_ci_agent_flow.py`; la 6, de `deploy/README.md`, `deploy/GO-LIVE.md`, `docs/07-backup-restore.md`, `backend/tests/test_runbook_first_boot.py` y `backend/tests/test_deploy_runbook_secrets.py`. **Si el ensayo de la 5 (Step 6) obliga a corregir un guion**, la corrección va en la rama de la 5 con su commit y su prueba, la 5 se fusiona antes que la 6, y la 6 vuelve a pasar `tests/test_runbook_first_boot.py` sobre el árbol fusionado (su `test_the_lines_the_runbook_quotes_are_lines_the_scripts_print` se pone en rojo si una línea citada cambió).
+- **Oleada 3:** la 5 es dueña de `.github/workflows/ci.yml`, `deploy/ci/first_boot_answers.py`, `deploy/ci/agent_flow.py`, `deploy/ci/mcp_flow.py`, `backend/tests/test_ci_first_boot.py`, `backend/tests/test_ci_mcp_flow.py` y `backend/tests/test_ci_agent_flow.py`; la 6, de `deploy/README.md`, `deploy/GO-LIVE.md`, `docs/07-backup-restore.md`, `backend/tests/test_runbook_first_boot.py` y `backend/tests/test_deploy_runbook_secrets.py`. Las dos tocan el diseño, en párrafos distintos (la 5, §5 y §8.2; la 6, §6), y se fusionan sin conflicto en el orden 5, 6 (medido como el de la oleada 1). **Si el ensayo de la 5 (Step 7) obliga a corregir un guion**, la corrección va en la rama de la 5 con su commit y su prueba, la 5 se fusiona antes que la 6, y la 6 vuelve a pasar `tests/test_runbook_first_boot.py` sobre el árbol fusionado (su `test_the_lines_the_runbook_quotes_are_lines_the_scripts_print` se pone en rojo si una línea citada cambió).
 - **Las pruebas que una tarea escribe y otra lee:** `tests/test_first_boot_script.py::test_step_6b_writes_the_units_the_runbook_writes` (Task 3) lee los dos *here-documents* de las unidades del paso 6b en el README **donde estén**; la Task 6 los mueve al apéndice sin cambiar un carácter de su contenido. `tests/test_ci_mcp_flow.py` y `tests/test_ci_agent_flow.py` (Task 5) leen texto de `first-boot.sh` y `first-boot-check.sh` (las Tasks 2 a 4): sus nombres y líneas están en el Apéndice A.
 - **Contratos que una tarea fija y otras consumen:** el Apéndice A.
 
@@ -111,17 +113,18 @@ Medido en esta sesión antes de escribir el plan, con `quay.io/openbao/openbao:2
 **Files:**
 - Create: `deploy/scripts/prepare-host.sh` (ejecutable)
 - Test: `backend/tests/test_prepare_host_script.py`
+- Modify: `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md` (§3, el párrafo de `prepare-host.sh`: resolución Q5)
 
 **Interfaces:**
 - Consumes: nada de otras tareas. Lo que ejecuta es lo de P2 a P5 de `deploy/README.md` tal como está en `6f616aa` (la Task 6 lo mueve al apéndice sin cambiarlo).
 - Produces:
-  - `sudo ./scripts/prepare-host.sh` desde `deploy/` (o `sudo deploy/scripts/prepare-host.sh` desde la raíz: hace `cd` a su propia carpeta), y `./scripts/prepare-host.sh --create-user <nombre>` como root. Sale 0 con el host listo, 1 con `FAILED` y las órdenes para seguir.
+  - `sudo ./scripts/prepare-host.sh` desde `deploy/` (o `sudo deploy/scripts/prepare-host.sh` desde la raíz: hace `cd` a su propia carpeta), sin opciones salvo `--help`. Sale 0 con el host listo, 1 con `FAILED` y las órdenes para seguir. Como root sin `sudo` (sin `SUDO_USER`) se niega con `FAILED  which account is the operator? Run this with sudo from that account`, seguida de `sudo ./scripts/prepare-host.sh` y `a VPS with only root makes the account first, by hand: deploy/README.md, P1`; y `--create-user`, como cualquier otra opción, con `FAILED  unknown argument: --create-user`.
   - Las líneas que la Task 6 cita en el runbook, exactas: `Docker's versions`, `  ok      Docker Engine <versión> (26 or newer)`, `  ok      Docker Compose <versión> (2.24 or newer)`, `The host is ready for the first boot`, `  note    log out, and log in again as <cuenta>: the docker group applies to a new login only` y `  note    then, as <cuenta>: cd <deploy/ de la copia> && ./scripts/first-boot.sh`.
   - `ITS_OS_RELEASE` (solo pruebas; por defecto `/etc/os-release`).
   - Para la Task 5: el archivo pasa `shellcheck` sin avisos.
 
 **Decisiones de la tarea.**
-- **La cuenta del operador es `SUDO_USER`**, y sin ella (root directo) hace falta `--create-user`; las dos a la vez se niegan, porque `--create-user` bajo `sudo` crearía una segunda cuenta de operador. `--create-user` hace P1 como el runbook (`adduser`, `sudo`, las claves de root), pero solo sirve donde root ya tiene la copia del repositorio: el recorrido del diseño hace P6 como el operador, así que en un VPS con solo `root` P1 se hace a mano (pregunta Q5).
+- **La cuenta del operador es `SUDO_USER`, y el guion no crea ninguna** (resolución Q5 del coordinador, 2026-11-27): P1 se hace a mano, como dice el diseño §2.0, porque el guion vive en la copia que P6 hace desde esa cuenta. Sin `SUDO_USER` (root directo) se niega antes de cambiar nada y dice dónde está P1. La prueba `test_it_has_no_way_to_make_the_account` fija que la opción no existe y que el guion no llama a `adduser`.
 - **Cada tramo se comprueba antes por una orden simulable**, nunca leyendo un archivo de `/etc` directamente: `ufw status verbose`, `dpkg-query`, `apt-config dump`, `systemctl is-active`, `timedatectl show`, `docker version`, `id -nG`. Así la segunda ejecución de la prueba ve lo que hizo la primera, y la de un host real ve lo que el host tiene.
 - **P5 se salta solo con Docker CE del repositorio de Docker** (`dpkg-query` de `docker-ce`) **y** las dos versiones mínimas: un `docker.io` de Ubuntu que contesta a `docker version` no basta, porque es justo lo que el runbook dice que no se use.
 - **`DEBIAN_FRONTEND=noninteractive`**: un paquete que preguntara a mitad dejaría el guion esperando sin decir por qué; el runbook lo dice en el apéndice (Task 6).
@@ -150,12 +153,14 @@ Crear `backend/tests/test_prepare_host_script.py`:
 2026-11-27-despliegue-automatizado §3, §5).
 
 Every command that changes or asks the host -- `apt-get`, `ufw`,
-`timedatectl`, `usermod`, `adduser`, `curl`, `install`, `chmod`, `tee`,
-`dpkg`, `dpkg-query`, `apt-config`, `systemctl`, `docker`, `id` -- is a stub
-on PATH that logs its arguments and answers from a small state directory, so
-a second run sees what the first one did. What is pinned: the commands and
-their order, which are the runbook's P1 to P5; a second run that changes
-nothing; and the refusals. Turning ufw on and installing Docker for real are
+`timedatectl`, `usermod`, `curl`, `install`, `chmod`, `tee`, `dpkg`,
+`dpkg-query`, `apt-config`, `systemctl`, `docker`, `id` -- is a stub on PATH
+that logs its arguments and answers from a small state directory, so a
+second run sees what the first one did. What is pinned: the commands and
+their order, which are the runbook's P2 to P5; a second run that changes
+nothing; and the refusals. P1 is not the script's: the operator account is
+made by hand, as root, before the checkout it would run from exists
+(coordinator's ruling Q5, 2026-11-27). Turning ufw on and installing Docker for real are
 not run anywhere by this repository: they stay unverified, as before.
 """
 
@@ -177,11 +182,6 @@ case "$1" in
       else exit 1; fi ;;
   -nG) cat "$STUB_STATE/groups-$2" 2>/dev/null || echo "$2" ;;
 esac
-""",
-    "adduser": r"""#!/bin/sh
-echo "adduser $*" >> "$STUB_LOG"
-for last; do :; done
-touch "$STUB_STATE/user-$last"; echo "$last" > "$STUB_STATE/groups-$last"
 """,
     "usermod": r"""#!/bin/sh
 echo "usermod $*" >> "$STUB_LOG"
@@ -285,7 +285,7 @@ FIRST_RUN = [
     "usermod -aG docker rmmadmin",
 ]
 #: The commands that change something. A second run logs none of them.
-CHANGING = ("adduser", "usermod", "ufw allow", "ufw --force", "apt-get ",
+CHANGING = ("usermod", "ufw allow", "ufw --force", "apt-get ",
             "tee ", "timedatectl set-ntp", "curl ", "install ", "chmod ")  # fmt: skip
 
 UBUNTU = 'ID=ubuntu\nVERSION_ID="24.04"\nUBUNTU_CODENAME=noble\nVERSION_CODENAME=noble\n'
@@ -396,34 +396,24 @@ def test_it_refuses_to_run_as_anyone_but_root(tmp_path: Path) -> None:
 
 
 def test_without_sudo_user_it_asks_for_the_operator(tmp_path: Path) -> None:
+    """Run from a root login, there is no operator to put in `docker`: the
+    account is P1's, made by hand first."""
     box = Box(tmp_path)
     done = box.run(SUDO_USER="")
     assert done.returncode == 1
-    assert "--create-user rmmadmin" in done.stderr
+    assert "by hand: deploy/README.md, P1" in done.stderr
     assert box.changes() == []
 
 
-def test_create_user_as_root_does_p1_first(tmp_path: Path) -> None:
+def test_it_has_no_way_to_make_the_account(tmp_path: Path) -> None:
+    """Coordinator's ruling Q5 (2026-11-27): P1 stays manual, so the option
+    that made the account is gone and refused like any unknown one."""
     box = Box(tmp_path)
     done = box.run("--create-user", "rmmadmin", SUDO_USER="")
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert box.changes()[:4] == [
-        'adduser --gecos  rmmadmin',
-        "usermod -aG sudo rmmadmin",
-        "install -d -m 700 -o rmmadmin -g rmmadmin /home/rmmadmin/.ssh",
-        "install -m 600 -o rmmadmin -g rmmadmin /root/.ssh/authorized_keys"
-        " /home/rmmadmin/.ssh/authorized_keys",
-    ]
-    assert box.changes()[4:] == FIRST_RUN
-    again = box.run("--create-user", "rmmadmin", SUDO_USER="")
-    assert again.returncode == 0 and box.changes() == []
-
-
-def test_create_user_under_sudo_is_refused(tmp_path: Path) -> None:
-    box = Box(tmp_path)
-    done = box.run("--create-user", "other")
-    assert done.returncode == 1 and "is for a root login" in done.stderr
+    assert done.returncode == 1
+    assert "unknown argument: --create-user" in done.stderr
     assert box.changes() == []
+    assert "adduser" not in SCRIPT.read_text()
 
 
 def test_a_host_that_is_not_ubuntu_is_refused_before_anything(tmp_path: Path) -> None:
@@ -460,7 +450,7 @@ def test_an_extra_open_port_is_warned_about(tmp_path: Path) -> None:
 
 Run, desde `backend/`: `ITS_TEST_REDIS_URL=redis://localhost:6379/1 .venv/bin/python -m pytest -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning -p no:cacheprovider -q tests/test_prepare_host_script.py`
 
-Expected: `13 failed` (el guion no existe: `FileNotFoundError` al copiarlo y `bash -n` con 127).
+Expected: `12 failed` (el guion no existe: `FileNotFoundError` al copiarlo y `bash -n` con 127).
 
 - [ ] **Step 3: El guion**
 
@@ -472,20 +462,20 @@ Crear `deploy/scripts/prepare-host.sh` y hacerlo ejecutable (`chmod +x deploy/sc
 # Prepare a new Ubuntu Server 24.04 VPS for Novieri RMM: deploy/README.md,
 # Prerequisites, P2 to P5 (design 2026-11-27-despliegue-automatizado §3).
 #
-#   sudo ./scripts/prepare-host.sh                      # from the operator account
-#   ./scripts/prepare-host.sh --create-user rmmadmin    # logged in as root: P1 too
+#   sudo ./scripts/prepare-host.sh        # from the operator account
 #
 # WHAT IT DOES, in the runbook's order, each part skipped when it is done
 # already: P2 the firewall (22, 443 and 8443 in, nothing else; ufw on); P3
 # unattended security updates; P4 the clock (NTP on, if it is not); P5 Docker
-# CE from Docker's own repository, and the operator account in the `docker`
-# group. With --create-user, run as root, P1 first: the account, in `sudo`,
-# with root's authorized SSH keys. It ends by checking Docker Engine 26 and
+# CE from Docker's own repository, and the operator account -- the one that
+# ran sudo -- in the `docker` group. It ends by checking Docker Engine 26 and
 # Compose 2.24, the two versions preflight.sh refuses below.
 #
-# WHAT IT DOES NOT DO: clone the repository (P6: the deploy key is yours to
-# add in GitHub), touch DNS, or open any other port. Its commands are the
-# runbook's, in deploy/README.md's appendix, "What each script does, by hand".
+# WHAT IT DOES NOT DO: make the operator account (P1, by hand, as root: the
+# checkout this script lives in is made by that account, in P6), clone the
+# repository (P6: the deploy key is yours to add in GitHub), touch DNS, or
+# open any other port. Its commands are the runbook's, in deploy/README.md's
+# appendix, "What each script does, by hand".
 #
 # Prints `run` before what it changes, `skip` for what it finds done, `ok`
 # for a check that held. Run it again after any failure.
@@ -506,10 +496,8 @@ die() {
   exit 1
 }
 
-create_user=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --create-user) [ $# -ge 2 ] || die "--create-user needs a name"; create_user="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" "./scripts/prepare-host.sh --help" ;;
   esac
@@ -522,18 +510,11 @@ export DEBIAN_FRONTEND=noninteractive
 
 [ "$(id -u)" = 0 ] || die "this changes the firewall, the packages and the groups: it runs as root" \
   "sudo ./scripts/prepare-host.sh"
-if [ -n "$create_user" ]; then
-  [ -z "${SUDO_USER:-}" ] || die "--create-user is for a root login, and this is sudo from $SUDO_USER" \
-    "sudo ./scripts/prepare-host.sh   (without --create-user: $SUDO_USER is the operator)"
-  [[ $create_user =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || die "--create-user needs a lower-case account name, such as rmmadmin"
-  operator="$create_user"
-else
-  operator="${SUDO_USER:-}"
-  if [ -z "$operator" ] || [ "$operator" = root ]; then
-    die "which account is the operator? Run this with sudo from that account" \
-        "sudo ./scripts/prepare-host.sh" \
-        "or, logged in as root on a host with no other account: ./scripts/prepare-host.sh --create-user rmmadmin"
-  fi
+operator="${SUDO_USER:-}"
+if [ -z "$operator" ] || [ "$operator" = root ]; then
+  die "which account is the operator? Run this with sudo from that account" \
+      "sudo ./scripts/prepare-host.sh" \
+      "a VPS with only root makes the account first, by hand: deploy/README.md, P1"
 fi
 ID="" VERSION_ID="" UBUNTU_CODENAME="" VERSION_CODENAME=""
 # shellcheck disable=SC1090  # the system's own description of itself
@@ -545,25 +526,6 @@ ID="" VERSION_ID="" UBUNTU_CODENAME="" VERSION_CODENAME=""
 # No `| grep -q` under pipefail: grep leaving early is a SIGPIPE upstream, and a false "no".
 in_group() { [[ " $(id -nG "$1") " == *" $2 "* ]]; }
 at_least() { [ -n "$1" ] && [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
-
-# --------------------------------------------------------------- P1
-
-if [ -n "$create_user" ]; then
-  say "P1 — the operator account, $operator"
-  if id -u "$operator" >/dev/null 2>&1; then
-    skip "P1: the account $operator exists"
-    if in_group "$operator" sudo; then skip "P1: $operator is in sudo"
-    else act "usermod -aG sudo $operator"; usermod -aG sudo "$operator"; fi
-  else
-    act "adduser $operator: it asks for the account's password, twice; sudo will ask for it"
-    adduser --gecos "" "$operator"
-    usermod -aG sudo "$operator"
-    install -d -m 700 -o "$operator" -g "$operator" "/home/$operator/.ssh"
-    install -m 600 -o "$operator" -g "$operator" /root/.ssh/authorized_keys "/home/$operator/.ssh/authorized_keys" \
-      || die "root has no authorized SSH keys to give $operator" \
-             "put your public key in /home/$operator/.ssh/authorized_keys, mode 600, owned by $operator, before you log out"
-  fi
-fi
 
 # --------------------------------------------------------------- P2
 
@@ -693,12 +655,53 @@ note "then, as $operator: cd $deploy_dir && ./scripts/first-boot.sh"
 
 Run, desde `backend/`: la orden del Step 2, y `.venv/bin/ruff check app tests`. Desde la raíz: `shellcheck deploy/scripts/prepare-host.sh && echo SHELLCHECK-CLEAN` y `test -x deploy/scripts/prepare-host.sh && echo EXECUTABLE`.
 
-Expected: `13 passed`; `All checks passed!`; `SHELLCHECK-CLEAN`; `EXECUTABLE`.
+Expected: `12 passed`; `All checks passed!`; `SHELLCHECK-CLEAN`; `EXECUTABLE`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: El diseño, §3** (resolución Q5)
+
+Con este guion, desde la raíz (no se guarda en el repositorio):
 
 ```bash
-git add deploy/scripts/prepare-host.sh backend/tests/test_prepare_host_script.py
+S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
+cat > "$S/task1_spec.py" <<'TASK1_SPEC'
+"""Plan 2026-11-27, Task 1: the design's §3 says what prepare-host.sh is now
+(coordinator's ruling Q5, 2026-11-27): no --create-user, P1 by hand. One anchor."""
+
+from pathlib import Path
+
+SPEC = Path("docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md")
+OLD = """\
+**`prepare-host.sh`** (como `root` o con `sudo`): P2 cortafuegos, P3
+actualizaciones, P4 reloj (activa NTP si hace falta), P5 Docker CE del
+repositorio de Docker, y el grupo `docker` para la cuenta que lo llama
+(`SUDO_USER`). Con `--create-user <nombre>` y lanzado como `root`, hace también
+P1. Termina comprobando las versiones mínimas (Engine 26, Compose 2.24) y
+diciendo que hay que salir y volver a entrar.
+"""
+NEW = """\
+**`prepare-host.sh`** (con `sudo`, desde la cuenta de operador): P2 cortafuegos,
+P3 actualizaciones, P4 reloj (activa NTP si hace falta), P5 Docker CE del
+repositorio de Docker, y el grupo `docker` para la cuenta que lo llama
+(`SUDO_USER`). No crea ninguna cuenta: P1 se hace a mano (§2, paso 0), y
+lanzado como `root` sin `sudo` se niega y lo dice (decisión del coordinador del
+2026-11-27, pregunta Q5 del plan). Termina comprobando las versiones mínimas
+(Engine 26, Compose 2.24) y diciendo que hay que salir y volver a entrar.
+"""
+text = SPEC.read_text()
+assert text.count(OLD) == 1, "§3's prepare-host.sh paragraph is not there exactly once"
+SPEC.write_text(text.replace(OLD, NEW))
+print("design §3: prepare-host.sh makes no account")
+TASK1_SPEC
+python3 "$S/task1_spec.py"
+grep -c 'create-user' docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
+```
+
+Expected: `design §3: prepare-host.sh makes no account` y `0`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add deploy/scripts/prepare-host.sh backend/tests/test_prepare_host_script.py docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
 git commit -m "feat(deploy): prepare-host.sh, the runbook's P2 to P5 in one command
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -707,27 +710,31 @@ Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 
 ---
 
-### Task 2: `first-boot.sh`, primera parte — el estado del host y los pasos 1 a 3.6 (oleada 1, en paralelo con las Tasks 1 y 4)
+### Task 2: `first-boot.sh`, primera parte — el estado del host, los pasos 1 a 3.6 y el desellado automático (oleada 1, en paralelo con las Tasks 1 y 4)
 
 **Files:**
 - Create: `deploy/scripts/first-boot.sh` (ejecutable)
 - Create: `backend/tests/first_boot_support.py` (el arnés: un `docker` falso, los guiones hermanos simulados, las cuñas)
 - Test: `backend/tests/test_first_boot_script.py`
-- Modify: `deploy/scripts/preflight.sh` (una rama nueva antes de la pregunta al DNS), `backend/tests/test_preflight_script.py` (una prueba al final)
+- Modify: `deploy/scripts/preflight.sh` (una rama nueva antes de la pregunta al DNS), `backend/tests/test_preflight_script.py` (dos pruebas al final, una con dos casos)
+- Modify: `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md` (§2, el párrafo de `first-boot.sh` en §3, y §4: resolución Q6)
 
 **Interfaces:**
-- Consumes: `./scripts/new-env.sh --host <nombre> [--acme-email …] [--acme-ca-server …]`, `./scripts/build-images.sh` y `./scripts/preflight.sh` tal como están; `deploy/openbao/its-app.hcl` y `gateway-issuer.hcl`, montados en `/bao/` del contenedor `openbao`.
+- Consumes: `./scripts/new-env.sh --host <nombre> [--acme-email …] [--acme-ca-server …]`, `./scripts/build-images.sh` y `./scripts/preflight.sh` tal como están; `./scripts/openbao-seal.sh enable --key-file RUTA --yes` sin cambios (las partes, una por línea, por la entrada estándar cuando no es una terminal; escribe `COMPOSE_FILE` y `OPENBAO_UNSEAL_KEY_FILE` en `.env`); `deploy/openbao/its-app.hcl` y `gateway-issuer.hcl`, montados en `/bao/` del contenedor `openbao`.
 - Produces:
   - **La línea de órdenes, que la Task 3 completa y la 5 y la 6 usan:** `./scripts/first-boot.sh [--host NOMBRE] [--acme-email DIRECCIÓN] [--acme-ca-server URL] [--tls-cafile PEM]` desde `deploy/` (o con su ruta desde cualquier sitio). `--host` solo vale para un `.env` nuevo (por defecto `rmm.novieri.com`); con `.env`, el host es su `ITS_PUBLIC_HOST`, y un `--host` distinto se niega. `--tls-cafile` se acepta y se resuelve a ruta absoluta antes del `cd` (la Task 3 se la pasa a `check-public-tls.sh`). Sale 0 con todo hecho, 1 con `FAILED`.
-  - **Variables de entorno:** `ITS_FIRST_BOOT_ALLOW_NONTTY=1` (imprime partes y token sin terminal); `ITS_ETC_DIR` (por defecto `/etc/it-suite`: el archivo del token `gateway-issuer`). La Task 3 añade `ITS_SYSTEMD_DIR` e `ITS_NO_SYSTEMCTL`.
-  - **Líneas que leen otros**, exactas: `  skip    step 1: .env exists (new-env.sh never overwrites one), for <host>` (la Task 5 la exige en la CI); cada tramo ya hecho, `  skip    step <n>: …`; cada tramo que cambia algo, `  run     …`; las partes, `  share <n>     <parte>` (cinco espacios tras el número) y `  root token  <token>` (las lee `first_boot_answers.py`, Task 5); la petición `Type SAVED once the five shares and the root token are stored off this VPS: ` y las de partes `Unseal key share <n> of 3 (hidden): ` y `OpenBao root token, printed by step 3.2 (hidden): ` (por la entrada estándar; el texto de la pregunta solo se ve en una terminal). En esta tarea la última línea es `Steps 1 to 3.6: done.`; la Task 3 la sustituye.
-  - **Lo que el código deja para la Task 3 y para las pruebas de la 5:** `dc()` (`docker compose "$@" </dev/null`), `env_get`, `env_put`, `env_token_set`, `auto_unseal_on`, `follow_auto_unseal`, `bao_state` (pone `bao_up`, `bao_init`, `bao_sealed`, `bao_type`), `wait_unsealed`, `bao_with TOKEN ORDEN…`, `is_root_token`, `psql_admin`, `service_health`, `oneshot_exit`, `read_share N` (deja la parte en `$share`), y los arreglos `shares` (las cinco, si esta ejecución las imprimió) y `typed` (las tres de 3.3). Las pruebas de la Task 5 buscan en el código, sin comentarios, `dc exec -T openbao bao operator init -key-shares=5 -key-threshold=3`, `dc up openbao-init`, `dc exec -T openbao bao status -format=json`, `"initialized"`, `[ "$(stat -c %a .env)" = 600 ]` y `env_put ITS_OPENBAO_TOKEN "$app"`.
+  - **Variables de entorno:** `ITS_FIRST_BOOT_ALLOW_NONTTY=1` (imprime partes y token sin terminal); `ITS_ETC_DIR` (por defecto `/etc/it-suite`: el archivo del token `gateway-issuer`, `$ITS_ETC_DIR/gateway-issuer.token`, y el archivo de clave del desellado, `--key-file "$ITS_ETC_DIR/openbao-unseal/unseal.key"`, el de `openbao-seal.sh`). La Task 3 añade `ITS_SYSTEMD_DIR` e `ITS_NO_SYSTEMCTL`. La cabecera del guion ya describe el guion entero, pasos 4 a 8 incluidos: la Task 3 no la toca.
+  - **Líneas que leen otros**, exactas: `  skip    step 1: .env exists (new-env.sh never overwrites one), for <host>` (la Task 5 la exige en la CI); cada tramo ya hecho, `  skip    step <n>: …`; cada tramo que cambia algo, `  run     …`; las partes, `  share <n>     <parte>` (cinco espacios tras el número) y `  root token  <token>` (las lee `first_boot_answers.py`, Task 5); la petición `Type SAVED once the five shares and the root token are stored off this VPS: ` y las de partes `Unseal key share <n> of 3 (hidden): ` y `OpenBao root token, printed by step 3.2 (hidden): ` (por la entrada estándar; el texto de la pregunta solo se ve en una terminal). **El desellado, justo después del 3.6** (resolución Q6): la cabecera `OpenBao's auto-unseal, with a static key (GO-LIVE.md §4; decided 2026-11-27)`, la línea `  run     sudo ./scripts/openbao-seal.sh enable --key-file <archivo> --yes, the three shares on its stdin`; después `OpenBao restarts and unseals itself`, `  run     docker compose restart openbao` y `  ok      OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed` (Task 6); hechos ya, `  skip    auto-unseal: on, and OpenBao is unsealed with its static key` y `  skip    the restart that proves it ran when the auto-unseal was turned on`. Sin las tres partes en memoria (otra ejecución, que paró tras el 3.3 con OpenBao desellado), `  note    openbao-seal.sh needs three shares to move the seal, and this run holds none: type them` y las tres peticiones de partes. **Una segunda ejecución con todo hecho no imprime ninguna `  run     ` y sus diez primeras `  skip    ` son**, en este orden, `step 1`, `step 1b`, `step 2`, `step 3.1`, `step 3.2`, `step 3.3`, `step 3.4`, `step 3.6`, `auto-unseal` y `the restart that proves it…`. En esta tarea la última línea es `Steps 1 to 3.6 and the auto-unseal: done.`; la Task 3 la sustituye.
+  - **Lo que el código deja para la Task 3 y para las pruebas de la 5:** `dc()` (`docker compose "$@" </dev/null`), `env_get`, `env_put`, `env_token_set`, `auto_unseal_on`, `follow_auto_unseal`, `bao_state` (pone `bao_up`, `bao_init`, `bao_sealed`, `bao_type`), `wait_unsealed`, `bao_with TOKEN ORDEN…`, `is_root_token`, `psql_admin`, `service_health`, `oneshot_exit`, `read_share N` (deja la parte en `$share`), `auto_unseal`, `restart_proof`, y los arreglos `shares` (las cinco, si esta ejecución las imprimió) y `typed` (las tres de 3.3, vacío tras el desellado). El bloque `main` acaba en `step_3_6`, `auto_unseal`, `restart_proof`: la Task 3 pone sus pasos detrás. Las pruebas de la Task 5 buscan en el código, sin comentarios, `dc exec -T openbao bao operator init -key-shares=5 -key-threshold=3`, `dc up openbao-init`, `dc exec -T openbao bao status -format=json`, `"initialized"`, `[ "$(stat -c %a .env)" = 600 ]` y `env_put ITS_OPENBAO_TOKEN "$app"`.
   - **`tests/first_boot_support.py`**: `Host(tmp_path)`, `Host.run(*args, stdin=…, env=…)`, `Host.state`, `Host.secrets` (`shares`, `root`, `its-app`, `gateway-issuer`, `code`), `Host.argv()`, `Host.all_secrets()`, `Host.files_holding(valor)`, `Host.write_env(**claves)`, `Host.env()`, y `lines(salida, prefijo)`. Simula el guion entero, pasos 4 a 8 incluidos, para que la Task 3 solo añada pruebas.
-  - **`preflight.sh`:** con `ITS_PREFLIGHT_SKIP_DNS=1`, en lugar del registro `A` y el `AAAA` imprime `  note    <host> was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): the CI or a rehearsal, never a real host`; todo lo demás igual.
+  - **`preflight.sh`:** con `ITS_PREFLIGHT_SKIP_DNS=1` y una CA de ACME que no es la de producción (`ITS_ACME_CA_SERVER` de `.env`: Pebble en la CI, *staging* en un ensayo), en lugar del registro `A` y el `AAAA` imprime `  note    <host> was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): the CI or a rehearsal, never a real host`; todo lo demás igual. **Con la de producción, `https://acme-v02.api.letsencrypt.org/directory`, o sin `ITS_ACME_CA_SERVER`** (que es la misma), se niega como sus otras negativas, con `ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA (ITS_ACME_CA_SERVER is <valor o unset>): …` (resolución Q4).
 
 **Decisiones de la tarea.**
 - **El estado mezclado, en tres formas** (diseño §3, «se niega si `.env` ya existe y OpenBao está inicializado con otro `.env`»), cada una con la orden para empezar de cero: (a) sin `.env` y con volúmenes del proyecto `it-suite` (un `.env` nuevo no abriría los de Postgres ni los de OpenBao: se dice cómo devolver el `.env` de su custodia o, destruyendo los volúmenes, cómo quitarlos aunque `docker compose` ya no pueda leer el archivo); (b) `.env` con tokens y un OpenBao sin inicializar; (c) `.env` con un `OPENBAO_TOKEN` que no es el token raíz de este OpenBao (se comprueba en cuanto está desellado). Un `.env` con los tokens en `change-me` y un OpenBao inicializado **no** es mezclado: es una ejecución que paró tras `bao operator init`, y se sigue.
 - **«¿Está inicializado?» se pregunta con `bao status -format=json`**, nunca con `operator init -status` (M1).
+- **El desellado automático va justo después del paso 3.6** (resolución Q6 del coordinador, 2026-11-27; el diseño §2, §3 y §4 lo dicen desde el Step 5). Así, si un paso del 4 al 7 falla (lo más probable en un VPS real es el 7: el registro `A`, el cortafuegos del proveedor), la siguiente ejecución encuentra OpenBao desellándose solo y no pide ninguna parte. Necesita OpenBao provisionado (3.6) y desellado con Shamir; si no, se niega con `sudo ./scripts/openbao-seal.sh status`.
+- **`sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file … --yes`**, con las tres partes de 3.3 por su entrada estándar (M4). `--yes` porque la confirmación ya la dio el operador (diseño §2, «sin preguntar»); `openbao-seal.sh` sigue haciendo su instantánea, su migración y su propio reinicio de prueba. Y después, **un reinicio más, del propio `first-boot.sh`**, que comprueba `Sealed false` y `Seal Type static` (diseño §4). En una ejecución en la que el desellado ya estaba hecho, ni lo uno ni lo otro: `skip`. Si el guion heredó un `COMPOSE_FILE` (la CI), le añade `openbao/auto-unseal.yml` en cuanto `.env` lo tiene (M4).
+- **`ITS_PREFLIGHT_SKIP_DNS=1` nunca contra Let's Encrypt de producción** (resolución Q4): un nombre que nadie preguntó al DNS gastaría los 5 certificados por semana que producción da a `rmm.novieri.com`, y sin `ITS_ACME_CA_SERVER` la CA es esa, la de un host real. La comprobación está en `preflight.sh`, no en `first-boot.sh`: así vale también para quien lance `preflight.sh` a mano.
 - **SAVED, en mayúsculas**, y la pantalla se borra después (también el historial de la terminal, `\033[3J`): «enseñar una vez» del diseño §2. Si la entrada se acaba antes, el guion para diciendo que las partes están arriba, en pantalla, y que la próxima vez pedirá el token raíz y tres partes.
 - **Cada parte tecleada se compara con las cinco impresas** y no se admite una repetida (M3): un error de copia se ve al teclearla, no tres partes después. Sin las cinco en memoria (otra ejecución), hasta tres rondas de tres, reiniciando el progreso antes de cada una.
 - **El token raíz nunca se vuelve a pedir si se tiene**: de la memoria (esta ejecución), de `.env` (`OPENBAO_TOKEN`, que el paso 3.5 escribe como hoy), o, solo si no está en ninguno, con entrada oculta y comprobado contra OpenBao.
@@ -1353,6 +1360,7 @@ from pathlib import Path
 from tests.first_boot_support import SCRIPT, Host, lines
 
 ALLOW = {"ITS_FIRST_BOOT_ALLOW_NONTTY": "1"}
+RESTART_SKIP = "the restart that proves it ran when the auto-unseal was turned on"
 
 
 def _saved_and_three(host: Host, picks: tuple[int, ...] = (1, 3, 4)) -> str:
@@ -1390,7 +1398,9 @@ def test_nothing_in_it_traces_or_spills_a_here_string() -> None:
         assert heredoc.startswith("'"), heredoc
 
 
-def test_a_new_host_runs_every_step_to_3_6_and_asks_only_what_it_must(tmp_path: Path) -> None:
+def test_a_new_host_runs_every_step_to_the_auto_unseal_and_asks_only_what_it_must(
+    tmp_path: Path,
+) -> None:
     host = Host(tmp_path)
     done = host.run(stdin=_saved_and_three(host), env=ALLOW)
     assert done.returncode == 0, done.stdout + done.stderr
@@ -1417,6 +1427,31 @@ def test_a_new_host_runs_every_step_to_3_6_and_asks_only_what_it_must(tmp_path: 
     assert oct(token.stat().st_mode & 0o777) == "0o600"
     assert host.state["bao"]["sealed"] is False
     assert host.state["bao"]["policies"] == ["its-app", "gateway-issuer"]
+    # Right after 3.6 (coordinator's ruling Q6): the auto-unseal, with the three
+    # shares of step 3.3 on openbao-seal.sh's stdin, and the restart that proves it.
+    assert ran.index("docker compose up openbao-init") < ran.index("docker compose restart openbao")
+    assert any(r.startswith("sudo ./scripts/openbao-seal.sh enable --key-file ") for r in ran)
+    assert host.state["seal_stdin"] == 3
+    assert host.state["bao"]["type"] == "static"
+    assert env["COMPOSE_FILE"] == "docker-compose.yml:openbao/auto-unseal.yml"
+    assert env["OPENBAO_UNSEAL_KEY_FILE"] == str(host.etc / "openbao-unseal" / "unseal.key")
+    assert "ok      OpenBao restarted and came back unsealed by itself" in done.stdout
+
+
+def test_a_second_run_skips_every_step_to_the_auto_unseal(tmp_path: Path) -> None:
+    host = Host(tmp_path)
+    assert host.run(stdin=_saved_and_three(host), env=ALLOW).returncode == 0
+    again = host.run()
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert lines(again.stdout, "run") == []
+    skipped = [s.split(":")[0] for s in lines(again.stdout, "skip")]
+    # The first ten: the steps Task 3 adds after them skip too, in their turn.
+    assert skipped[:10] == [
+        "step 1", "step 1b", "step 2", "step 3.1", "step 3.2", "step 3.3", "step 3.4",
+        "step 3.6", "auto-unseal", RESTART_SKIP,
+    ]  # fmt: skip
+    for changing in ("compose restart", "openbao-seal.sh", "operator init", "tee "):
+        assert changing not in host.argv(), changing
 
 
 def test_no_secret_is_an_argument_or_in_a_file_the_runbook_does_not_name(tmp_path: Path) -> None:
@@ -1544,36 +1579,98 @@ def test_the_preflight_refusing_stops_before_postgres(tmp_path: Path) -> None:
     assert done.returncode == 1
     assert "the pre-flight refused" in done.stderr
     assert "compose up" not in host.argv()
+
+
+def test_an_inherited_compose_file_gains_the_auto_unseal_overlay(tmp_path: Path) -> None:
+    """The CI's COMPOSE_FILE (the Pebble overlay) wins over .env's: after the
+    auto-unseal, every docker call carries openbao/auto-unseal.yml too, and
+    openbao-seal.sh itself sees no inherited COMPOSE_FILE at all."""
+    host = Host(tmp_path)
+    pebble = "docker-compose.yml:ci/acme-pebble.yml"
+    done = host.run(stdin=_saved_and_three(host), env={**ALLOW, "COMPOSE_FILE": pebble})
+    assert done.returncode == 0, done.stdout + done.stderr
+    log = host.argv().splitlines()
+    seal = next(i for i, line in enumerate(log) if line.startswith("openbao-seal.sh enable"))
+    assert log[seal + 1] == "  COMPOSE_FILE="
+    before = {line for line in log[:seal] if line.startswith("  COMPOSE_FILE=")}
+    after = {line for line in log[seal + 2 :] if line.startswith("  COMPOSE_FILE=")}
+    assert before == {f"  COMPOSE_FILE={pebble}"}
+    assert after == {f"  COMPOSE_FILE={pebble}:openbao/auto-unseal.yml"}
+
+
+def test_without_an_inherited_compose_file_none_is_set(tmp_path: Path) -> None:
+    host = Host(tmp_path)
+    done = host.run(stdin=_saved_and_three(host), env=ALLOW)
+    assert done.returncode == 0, done.stdout + done.stderr
+    composed = {line for line in host.argv().splitlines() if line.startswith("  COMPOSE_FILE=")}
+    assert composed == {"  COMPOSE_FILE="}
+
+
+def test_a_run_after_a_failed_auto_unseal_asks_for_three_shares(tmp_path: Path) -> None:
+    host = Host(tmp_path)
+    first = host.run(stdin=_saved_and_three(host), env={**ALLOW, "FAKE_SEAL_FAIL": "1"})
+    assert first.returncode == 1 and "openbao-seal.sh enable failed" in first.stderr
+    shares = host.secrets["shares"]
+    again = host.run(stdin="".join(s + "\n" for s in (shares[0], shares[2], shares[4])))
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "this run holds none: type them" in again.stdout
+    assert host.state["seal_stdin"] == 3 and host.state["bao"]["type"] == "static"
 ```
 
-Y al final de `backend/tests/test_preflight_script.py`, tras `test_an_s3_public_endpoint_on_the_public_host_has_no_note`, dos líneas en blanco y:
+Y al final de `backend/tests/test_preflight_script.py`, tras `test_an_s3_public_endpoint_on_the_public_host_has_no_note`, dos líneas en blanco y las dos pruebas del interruptor: la que lo deja pasar con Pebble como CA, y la que lo rechaza con Let's Encrypt de producción, puesta o por omisión:
 
 ```python
 def test_the_ci_can_leave_the_name_unasked_and_is_told_so(tmp_path: Path) -> None:
     """ITS_PREFLIGHT_SKIP_DNS=1 (the CI's `deploy` job, design
     2026-11-27-despliegue-automatizado §5): no public DNS holds the name, and
     the refusal it would earn is not this run's to fix. Said, not silent; and
-    every other check still runs."""
+    every other check still runs. Only against a CA that is not Let's Encrypt
+    production: Pebble here, as in CI."""
+    pebble = {**GOOD_ENV, "ITS_ACME_CA_SERVER": "https://pebble:14000/dir"}
     host = {**GOOD_HOST, "FAKE_V4": "", "FAKE_V6": "2001:db8::7"}
-    run = _run(tmp_path, GOOD_ENV, {**host, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    run = _run(tmp_path, pebble, {**host, "ITS_PREFLIGHT_SKIP_DNS": "1"})
     assert run.returncode == 0, run.stdout
     assert (
         "note    rmm.novieri.com was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): "
         "the CI or a rehearsal, never a real host"
     ) in run.stdout
     assert "ok      Docker Engine 29.9.3" in run.stdout
-    no_email = {**GOOD_ENV, "ITS_ACME_EMAIL": ""}
+    no_email = {**pebble, "ITS_ACME_EMAIL": ""}
     refused = _run(tmp_path, no_email, {**host, "ITS_PREFLIGHT_SKIP_DNS": "1"})
     assert refused.returncode == 1 and "ITS_ACME_EMAIL is empty" in refused.stdout
     # Without it, the same host is refused: the knob is what made the difference.
-    assert _run(tmp_path, GOOD_ENV, host).returncode == 1
+    assert _run(tmp_path, pebble, host).returncode == 1
+
+
+@pytest.mark.parametrize(
+    "ca",
+    [
+        pytest.param("https://acme-v02.api.letsencrypt.org/directory", id="production"),
+        pytest.param(None, id="unset"),
+    ],
+)
+def test_the_dns_is_never_left_unasked_against_lets_encrypt_production(
+    tmp_path: Path, ca: str | None
+) -> None:
+    """Coordinator's ruling Q4 (2026-11-27): a skipped DNS check against
+    production would spend its 5-certificates-a-week limit on a name nobody
+    checked. Refused, with the fix, whatever DNS would have said; an unset
+    ITS_ACME_CA_SERVER is production, as Traefik reads it."""
+    env = {k: v for k, v in GOOD_ENV.items() if k != "ITS_ACME_CA_SERVER"}
+    if ca is not None:
+        env["ITS_ACME_CA_SERVER"] = ca
+    run = _run(tmp_path, env, {**GOOD_HOST, "ITS_PREFLIGHT_SKIP_DNS": "1"})
+    assert run.returncode == 1, run.stdout
+    refusal = "REFUSE  ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA"
+    assert refusal in run.stdout
+    assert "was not asked of DNS" not in run.stdout
 ```
 
 - [ ] **Step 2: Las pruebas fallan**
 
 Run, desde `backend/`: `ITS_TEST_REDIS_URL=redis://localhost:6379/2 .venv/bin/python -m pytest -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning -p no:cacheprovider -q tests/test_first_boot_script.py tests/test_preflight_script.py`
 
-Expected: `16 failed, 25 passed`: las 15 de `test_first_boot_script.py` (el guion no existe) y `test_the_ci_can_leave_the_name_unasked_and_is_told_so` (la nota no sale y el guion se niega por el DNS).
+Expected: `22 failed, 25 passed`: las 19 de `test_first_boot_script.py` (el guion no existe), `test_the_ci_can_leave_the_name_unasked_and_is_told_so` (la nota no sale y el guion se niega por el DNS) y los dos casos de `test_the_dns_is_never_left_unasked_against_lets_encrypt_production` (se niega, pero por el DNS, no por el interruptor: falta su mensaje).
 
 - [ ] **Step 3: El guion, y la rama de `preflight.sh`**
 
@@ -1582,8 +1679,9 @@ Crear `deploy/scripts/first-boot.sh` y hacerlo ejecutable (`chmod +x deploy/scri
 ```bash
 #!/usr/bin/env bash
 #
-# The first boot of a new Novieri RMM host: steps 1 to 7 of deploy/README.md's
-# appendix, OpenBao's auto-unseal, and step 8's install code (design
+# The first boot of a new Novieri RMM host, as deploy/README.md's appendix
+# numbers it: steps 1 to 3.6; OpenBao's auto-unseal and the restart that
+# proves it; steps 4 to 7; and step 8's install code (design
 # 2026-11-27-despliegue-automatizado §2 to §4).
 #
 #   ./scripts/first-boot.sh                    # rmm.novieri.com, from deploy/
@@ -1601,7 +1699,8 @@ Crear `deploy/scripts/first-boot.sh` y hacerlo ejecutable (`chmod +x deploy/scri
 # .env, the audit key or a token file. Run again after `bao operator init`,
 # it asks for what it no longer holds in memory: the root token (hidden) if
 # .env does not hold the tokens yet, and three shares if OpenBao is sealed and
-# the auto-unseal is not on yet.
+# the auto-unseal is not on yet. From step 4 on OpenBao unseals itself, so a
+# failure there is run again with no share at all.
 #
 # IT REFUSES a mixed state -- .env and OpenBao (or the volumes) from two
 # different first boots -- and says how to start from zero. And it refuses to
@@ -1665,6 +1764,7 @@ cd "$(dirname "$(readlink -f "$0")")/.."   # deploy/
 etc_dir="${ITS_ETC_DIR:-/etc/it-suite}"
 allow_nontty="${ITS_FIRST_BOOT_ALLOW_NONTTY:-0}"
 token_file="$etc_dir/gateway-issuer.token"
+key_file="$etc_dir/openbao-unseal/unseal.key"
 command -v docker >/dev/null 2>&1 || die "docker is not on PATH" "sudo ./scripts/prepare-host.sh, then log out and in again"
 
 # ------------------------------------------------------------- helpers
@@ -2077,6 +2177,50 @@ step_3_6() {
   ok "step 3.6: openbao provisioning complete"
 }
 
+enabled_now=no
+auto_unseal() {
+  say "OpenBao's auto-unseal, with a static key (GO-LIVE.md §4; decided 2026-11-27)"
+  local n
+  bao_state
+  if auto_unseal_on && [ "$bao_type" = static ] && [ "$bao_sealed" = false ]; then
+    skip "auto-unseal: on, and OpenBao is unsealed with its static key"
+    return 0
+  fi
+  if [ "$bao_type" != shamir ] || [ "$bao_sealed" != false ]; then
+    die "OpenBao reports seal $bao_type, sealed $bao_sealed: openbao-seal.sh enable needs it unsealed, with shares" \
+        "sudo ./scripts/openbao-seal.sh status"
+  fi
+  if [ "${#typed[@]}" != 3 ]; then
+    note "openbao-seal.sh needs three shares to move the seal, and this run holds none: type them"
+    typed=()
+    for n in 1 2 3; do read_share "$n"; typed+=("$share"); done
+    share=""
+  fi
+  act "sudo ./scripts/openbao-seal.sh enable --key-file $key_file --yes, the three shares on its stdin"
+  # env -u: openbao-seal.sh writes COMPOSE_FILE into .env, and an inherited
+  # one would win over it and recreate OpenBao without the seal it migrates to.
+  printf '%s\n' "${typed[@]}" | sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file "$key_file" --yes \
+    || die "openbao-seal.sh enable failed (above, with its way back)" "sudo ./scripts/openbao-seal.sh status"
+  typed=()
+  auto_unseal_on || die "openbao-seal.sh enable did not put the auto-unseal overlay into .env" "sudo ./scripts/openbao-seal.sh status"
+  follow_auto_unseal
+  enabled_now=yes
+}
+
+restart_proof() {
+  say "OpenBao restarts and unseals itself"
+  if [ "$enabled_now" != yes ]; then
+    skip "the restart that proves it ran when the auto-unseal was turned on"
+    return 0
+  fi
+  act "docker compose restart openbao"
+  dc restart openbao
+  wait_unsealed || die "OpenBao came back sealed after a restart: the auto-unseal does not work" \
+    "sudo ./scripts/openbao-seal.sh status" "docker compose logs --tail 50 openbao"
+  [ "$bao_type" = static ] || die "OpenBao unsealed, but its seal is $bao_type, not static" "sudo ./scripts/openbao-seal.sh status"
+  ok "OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed"
+}
+
 # ------------------------------------------------------------------ main
 
 check_state_before_anything
@@ -2089,7 +2233,9 @@ step_3_2
 step_3_3
 step_3_4
 step_3_6
-say "Steps 1 to 3.6: done."
+auto_unseal
+restart_proof
+say "Steps 1 to 3.6 and the auto-unseal: done."
 ```
 
 Y la rama de `preflight.sh`, con este guion, desde la raíz (no se guarda en el repositorio; `$S` es el scratchpad de la sesión):
@@ -2115,9 +2261,17 @@ NEW = '''# for the name is read as an AAAA, and refused like one. `|| true`: get
 # ITS_PREFLIGHT_SKIP_DNS=1 leaves the name unasked, and says so: for the CI's
 # `deploy` job and a rehearsal, where no public DNS holds the name and Pebble's
 # validator asks its own (design 2026-11-27-despliegue-automatizado §5). Never
-# on a real host: the A record is what Let's Encrypt validates.
+# against Let's Encrypt production, and so never on a real host: a name nobody
+# checked spends the 5 certificates a week production allows it, and that CA
+# is the one an unset ITS_ACME_CA_SERVER means (coordinator's ruling Q4,
+# 2026-11-27).
 if [ "${ITS_PREFLIGHT_SKIP_DNS:-0}" = 1 ]; then
-  printf '  note    %s was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): the CI or a rehearsal, never a real host\\n' "$public_host"
+  case "${acme_ca:-https://acme-v02.api.letsencrypt.org/directory}" in
+    https://acme-v02.api.letsencrypt.org/directory)
+      refuse "ITS_PREFLIGHT_SKIP_DNS=1 with Let's Encrypt production as the ACME CA (ITS_ACME_CA_SERVER is ${acme_ca:-unset}): a name nobody asked DNS about would spend the 5 certificates a week production allows it. Unset ITS_PREFLIGHT_SKIP_DNS on a real host; a rehearsal sets ITS_ACME_CA_SERVER to staging or Pebble." ;;
+    *)
+      printf '  note    %s was not asked of DNS (ITS_PREFLIGHT_SKIP_DNS=1): the CI or a rehearsal, never a real host\\n' "$public_host" ;;
+  esac
 elif [ -n "$public_host" ] && [ "$public_host" != "your-host" ]; then
 '''
 text = PREFLIGHT.read_text()
@@ -2134,13 +2288,91 @@ Expected: `preflight.sh: ITS_PREFLIGHT_SKIP_DNS=1`.
 
 Run, desde `backend/`: la orden del Step 2, y `.venv/bin/ruff check app tests`. Desde la raíz: `shellcheck deploy/scripts/first-boot.sh && echo SHELLCHECK-CLEAN` y `test -x deploy/scripts/first-boot.sh && echo EXECUTABLE`.
 
-Expected: `41 passed`; `All checks passed!`; `SHELLCHECK-CLEAN`; `EXECUTABLE`. (`shellcheck deploy/scripts/preflight.sh` da dos avisos de nivel *info*, SC2086, en las líneas 49 y 191, que ya estaban: esta tarea no las toca, y el paso de shellcheck de la CI, Task 5, solo mira los tres guiones nuevos.)
+Expected: `47 passed`; `All checks passed!`; `SHELLCHECK-CLEAN`; `EXECUTABLE`. (`shellcheck deploy/scripts/preflight.sh` da dos avisos de nivel *info*, SC2086, en las líneas 49 y 191, que ya estaban: esta tarea no las toca, y el paso de shellcheck de la CI, Task 5, solo mira los tres guiones nuevos.)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: El diseño, §2, §3 y §4** (resolución Q6)
+
+Con este guion, desde la raíz (no se guarda en el repositorio):
 
 ```bash
-git add deploy/scripts/first-boot.sh deploy/scripts/preflight.sh backend/tests/first_boot_support.py backend/tests/test_first_boot_script.py backend/tests/test_preflight_script.py
-git commit -m "feat(deploy): first-boot.sh, steps 1 to 3.6, and the states it refuses
+S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
+cat > "$S/task2_spec.py" <<'TASK2_SPEC'
+"""Plan 2026-11-27, Task 2: the design's §2, §3 and §4 put the auto-unseal
+right after step 3.6 (coordinator's ruling Q6, 2026-11-27). Each anchor once;
+nothing is written unless all are there."""
+
+from pathlib import Path
+
+SPEC = Path("docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md")
+EDITS = (
+    (
+        """\
+   - Al final: el desellado automático (`openbao-seal.sh enable`), un reinicio
+     de OpenBao que demuestra que vuelve solo, y el código de instalación del
+     paso 8 impreso en pantalla.
+""",
+        """\
+   - Justo después del paso 3.6, antes de que el paso 4 arranque nada: el
+     desellado automático (`openbao-seal.sh enable`, con esas tres partes) y un
+     reinicio de OpenBao que demuestra que vuelve solo. Desde ahí, un fallo se
+     relanza sin teclear ninguna parte (decisión del coordinador del
+     2026-11-27, pregunta Q6 del plan).
+   - Al final: el código de instalación del paso 8 impreso en pantalla.
+""",
+    ),
+    (
+        """\
+**`first-boot.sh`** (la cuenta de operador, desde `deploy/`): pasos 1, 1b, 1c,
+2, 3.1 a 3.6, 4, 4b, 5, 6, 6b y 7 del runbook; el desellado automático; el
+código del paso 8. Se niega si `.env` ya existe y OpenBao está inicializado
+""",
+        """\
+**`first-boot.sh`** (la cuenta de operador, desde `deploy/`): pasos 1, 1b, 1c,
+2 y 3.1 a 3.6 del runbook; el desellado automático; los pasos 4, 4b, 5, 6, 6b y
+7; el código del paso 8. Se niega si `.env` ya existe y OpenBao está inicializado
+""",
+    ),
+    (
+        """\
+pide las tres partes. Nunca vuelve a inicializar un OpenBao ya inicializado.
+""",
+        """\
+pide las tres partes. Desde el paso 4, OpenBao se desella solo, y un fallo se
+relanza sin partes. Nunca vuelve a inicializar un OpenBao ya inicializado.
+""",
+    ),
+    (
+        """\
+- `first-boot.sh` llama a `openbao-seal.sh enable` con las tres partes que ya
+  tiene, sin volver a pedirlas, y comprueba `Sealed false` tras reiniciar
+  `openbao`.
+""",
+        """\
+- `first-boot.sh` llama a `openbao-seal.sh enable` justo después del paso 3.6,
+  con las tres partes que ya tiene, sin volver a pedirlas, y comprueba `Sealed
+  false` tras reiniciar `openbao`, antes del paso 4.
+""",
+    ),
+)
+text = SPEC.read_text()
+for old, _ in EDITS:
+    assert text.count(old) == 1, old[:60]
+for old, new in EDITS:
+    text = text.replace(old, new)
+SPEC.write_text(text)
+print("design §2, §3 and §4: the auto-unseal right after step 3.6")
+TASK2_SPEC
+python3 "$S/task2_spec.py"
+grep -ci 'justo después del paso 3.6' docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
+```
+
+Expected: `design §2, §3 and §4: the auto-unseal right after step 3.6` y `2`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add deploy/scripts/first-boot.sh deploy/scripts/preflight.sh backend/tests/first_boot_support.py backend/tests/test_first_boot_script.py backend/tests/test_preflight_script.py docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
+git commit -m "feat(deploy): first-boot.sh, steps 1 to 3.6 and the auto-unseal, and the states it refuses
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
@@ -2148,23 +2380,21 @@ Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 
 ---
 
-### Task 3: `first-boot.sh`, segunda parte — pasos 4 a 7, el desellado automático y su reinicio, el código del paso 8 (oleada 2, tras la Task 2)
+### Task 3: `first-boot.sh`, segunda parte — pasos 4 a 7 y el código del paso 8 (oleada 2, tras la Task 2)
 
 **Files:**
-- Modify: `deploy/scripts/first-boot.sh` (cuatro variables tras el `cd`; los pasos 4 a 8 en lugar del bloque `main` de la Task 2)
+- Modify: `deploy/scripts/first-boot.sh` (tres variables tras el `cd`; los pasos 4 a 8 en lugar del bloque `main` de la Task 2, que acaba en el desellado)
 - Test: `backend/tests/test_first_boot_script.py` (pruebas nuevas al final; el arnés de la Task 2 no cambia)
 
 **Interfaces:**
-- Consumes: de la Task 2, todo lo que su bloque Interfaces lista; de `deploy/README.md` (en cualquier sección), los dos *here-documents* `sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'` y `… its-gateway-cert.timer …`; `./scripts/check-public-tls.sh [--cafile PEM]`, `./scripts/openbao-seal.sh enable --key-file RUTA --yes` (las partes, una por línea, por la entrada estándar cuando no es una terminal) e `issue-gateway-cert.py <host>` (el token por la entrada estándar), sin cambios.
+- Consumes: de la Task 2, todo lo que su bloque Interfaces lista; de `deploy/README.md` (en cualquier sección), los dos *here-documents* `sudo tee /etc/systemd/system/its-gateway-cert.service >/dev/null <<'EOF'` y `… its-gateway-cert.timer …`; `./scripts/check-public-tls.sh [--cafile PEM]` e `issue-gateway-cert.py <host>` (el token por la entrada estándar), sin cambios. Del orden de la Task 2: cuando el paso 4 empieza, OpenBao ya tiene el sello estático y `.env` su `COMPOSE_FILE`, así que ningún paso de esta tarea pide ni usa una parte.
 - Produces:
   - **Variables de entorno nuevas:** `ITS_SYSTEMD_DIR` (por defecto `/etc/systemd/system`) e `ITS_NO_SYSTEMCTL=1` (el paso 6b escribe sus dos unidades y no llama a `systemctl`), los mismos nombres que `install-backup-timer.sh`.
-  - **El archivo de clave:** `--key-file "$ITS_ETC_DIR/openbao-unseal/unseal.key"`, por defecto `/etc/it-suite/openbao-unseal/unseal.key`, el de `openbao-seal.sh`.
-  - **Líneas que leen otros**, exactas: la última línea de una ejecución buena, `First boot: every step is done.` (Tasks 5 y 6), seguida de seis `note`; `  run     docker compose restart openbao` y `  ok      OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed` (Task 6); el código, `  install code  <código>` (lo enmascara `first_boot_answers.py`, Task 5); `  note    open https://<host>/ in a browser you trust and enter it (deploy/README.md, First boot, 2): it is a password until you have` (Task 6); y sin terminal ni `ITS_FIRST_BOOT_ALLOW_NONTTY`, en lugar del código, `  note    the install code is not printed, the output is not a terminal; read it with: docker compose exec api cat /var/lib/its/secrets/setup-code`. **Una segunda ejecución con todo hecho no imprime ninguna línea `  run     ` e imprime 16 `  skip    `**, en este orden: `step 1`, `step 1b`, `step 2`, `step 3.1`, `step 3.2`, `step 3.3`, `step 3.4`, `step 3.6`, `step 4`, `step 4b`, `step 5`, `step 6`, `step 6b`, `step 7`, `auto-unseal`, `the restart that proves it…` (la CI lo comprueba, Task 5).
+  - **Líneas que leen otros**, exactas: la última cabecera de una ejecución buena, `First boot: every step is done.` (Tasks 5 y 6), seguida de seis `note`; las cabeceras de los pasos, como `Step 4 — migrations` (la Task 6 la cita); el código, `  install code  <código>` (lo enmascara `first_boot_answers.py`, Task 5); `  note    open https://<host>/ in a browser you trust and enter it (deploy/README.md, First boot, 2): it is a password until you have` (Task 6); y sin terminal ni `ITS_FIRST_BOOT_ALLOW_NONTTY`, en lugar del código, `  note    the install code is not printed, the output is not a terminal; read it with: docker compose exec api cat /var/lib/its/secrets/setup-code`. **Una segunda ejecución con todo hecho no imprime ninguna línea `  run     ` e imprime 16 `  skip    `**, en este orden: `step 1`, `step 1b`, `step 2`, `step 3.1`, `step 3.2`, `step 3.3`, `step 3.4`, `step 3.6`, `auto-unseal`, `the restart that proves it…`, `step 4`, `step 4b`, `step 5`, `step 6`, `step 6b`, `step 7` (la CI lo comprueba, Task 5).
   - **Para las pruebas de la Task 5:** el paso 6 es `if ! sudo cat "$token_file" | docker compose run --rm --no-deps -T \` … `--entrypoint python gateway /tmp/issue-gateway-cert.py "$host"; then`; el 6b, `sudo systemctl daemon-reload` antes de `sudo systemctl enable --now its-gateway-cert.timer`.
 
 **Decisiones de la tarea.**
-- **El desellado va tras el paso 7, como dice el diseño** (§2 y §3: «pasos … 6b y 7 del runbook; el desellado automático; el código del paso 8»). Consecuencia: si el paso 7 falla (lo más probable en un VPS real: el registro `A`, el cortafuegos del proveedor), la siguiente ejecución ya no tiene las tres partes en memoria y las vuelve a pedir para `openbao-seal.sh` (pregunta Q6).
-- **`sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file … --yes`**, con las tres partes de 3.3 por su entrada estándar (M4). `--yes` porque la confirmación ya la dio el operador (diseño §2, «sin preguntar»); `openbao-seal.sh` sigue haciendo su instantánea, su migración y su propio reinicio de prueba. Y después, **un reinicio más, del propio `first-boot.sh`**, que comprueba `Sealed false` y `Seal Type static` (diseño §4). En una ejecución en la que el desellado ya estaba hecho, ni lo uno ni lo otro: `skip`.
+- **Ningún paso de esta tarea pide una parte** (resolución Q6: el desellado es de la Task 2, justo después del 3.6). Si el paso 7 falla (lo más probable en un VPS real: el registro `A`, el cortafuegos del proveedor), la siguiente ejecución encuentra OpenBao desellado solo, salta del 1 al desellado y sigue sin preguntar nada: `test_a_failed_step_7_runs_again_with_no_share` lo fija, y `test_the_auto_unseal_comes_before_step_4`, el orden.
 - **El paso 5 escribe la clave HMAC con `set -C`** (*noclobber*): el bloque del runbook, tal cual, la sobrescribiría si existiera, y una clave nueva deja sin verificar toda la cadena de auditoría escrita hasta entonces. La Task 6 pone el mismo `set -C` en el bloque del apéndice.
 - **El paso 7 no se fía de un vistazo**: espera hasta cinco minutos a que cada servicio esté en marcha (y sano, si tiene comprobación) y las tres de una vez hayan salido con 0, y después **15 segundos más sin que ningún contenedor se reinicie**: un servicio que se reinicia para siempre está en marcha un momento cada vez (fila 15 de «What was broken», el `worker` del ensayo del 2026-11-24). Si un servicio de una vez sale con otro código, o el tiempo se acaba, `FAILED` nombra los servicios y da sus `docker compose logs`.
 - **El paso 8 genera el código él mismo**, preguntando a la api por `http://localhost:8000/api/v1/setup/status` desde dentro de su contenedor (el `healthcheck` de `api` hace lo mismo con `/livez`): esa primera petición es la que crea el código (`app/api/v1/setup.py`), y así no hace falta ni DNS ni la confianza en el certificado. Con la instalación ya reclamada, `skip`.
@@ -2177,11 +2407,11 @@ Desde la raíz de la worktree:
 ```bash
 git merge --no-edit p5-t2
 git log --oneline -3
-test -x deploy/scripts/first-boot.sh && grep -c '^say "Steps 1 to 3.6: done."$' deploy/scripts/first-boot.sh
+test -x deploy/scripts/first-boot.sh && grep -c '^say "Steps 1 to 3.6 and the auto-unseal: done."$' deploy/scripts/first-boot.sh
 grep -c '^def test_' backend/tests/test_first_boot_script.py
 ```
 
-Expected: la fusión con la Task 2 entre los tres primeros; `1`; `15`. Si no, se para y se avisa al coordinador. Después, la preparación de Global Constraints.
+Expected: la fusión con la Task 2 entre los tres primeros; `1`; `19`. Si no, se para y se avisa al coordinador. Después, la preparación de Global Constraints.
 
 - [ ] **Step 1: Las pruebas**
 
@@ -2236,8 +2466,8 @@ def test_a_second_run_skips_every_step_and_changes_nothing(tmp_path: Path) -> No
     skipped = [s.split(":")[0] for s in lines(again.stdout, "skip")]
     assert skipped == [
         "step 1", "step 1b", "step 2", "step 3.1", "step 3.2", "step 3.3", "step 3.4",
-        "step 3.6", "step 4", "step 4b", "step 5", "step 6", "step 6b", "step 7",
-        "auto-unseal", "the restart that proves it ran when the auto-unseal was turned on",
+        "step 3.6", "auto-unseal", RESTART_SKIP,
+        "step 4", "step 4b", "step 5", "step 6", "step 6b", "step 7",
     ]  # fmt: skip
     assert (host.state["services"], host.state["bao"], host.state["files"], host.env()) == before
     argv = host.argv()
@@ -2304,29 +2534,6 @@ def test_with_systemd_the_timer_is_enabled(tmp_path: Path) -> None:
     assert "sudo systemctl list-timers its-gateway-cert.timer --no-pager" in argv
 
 
-def test_an_inherited_compose_file_gains_the_auto_unseal_overlay(tmp_path: Path) -> None:
-    """The CI's COMPOSE_FILE (the Pebble overlay) wins over .env's: after the
-    auto-unseal, every docker call carries openbao/auto-unseal.yml too, and
-    openbao-seal.sh itself sees no inherited COMPOSE_FILE at all."""
-    host = Host(tmp_path)
-    pebble = "docker-compose.yml:ci/acme-pebble.yml"
-    done = host.run(stdin=_saved_and_three(host), env={**ALLOW, "COMPOSE_FILE": pebble})
-    assert done.returncode == 0, done.stdout + done.stderr
-    log = host.argv().splitlines()
-    seal = next(i for i, line in enumerate(log) if line.startswith("openbao-seal.sh enable"))
-    assert log[seal + 1] == "  COMPOSE_FILE="
-    before = {line for line in log[:seal] if line.startswith("  COMPOSE_FILE=")}
-    after = {line for line in log[seal + 2 :] if line.startswith("  COMPOSE_FILE=")}
-    assert before == {f"  COMPOSE_FILE={pebble}"}
-    assert after == {f"  COMPOSE_FILE={pebble}:openbao/auto-unseal.yml"}
-
-
-def test_without_an_inherited_compose_file_none_is_set(tmp_path: Path) -> None:
-    host, _ = _done_host(tmp_path)
-    composed = {line for line in host.argv().splitlines() if line.startswith("  COMPOSE_FILE=")}
-    assert composed == {"  COMPOSE_FILE="}
-
-
 def test_a_failed_one_shot_stops_the_run(tmp_path: Path) -> None:
     host = Host(tmp_path)
     host.state["oneshot_exit"] = {"migrate": 1}
@@ -2346,17 +2553,6 @@ def test_a_service_that_keeps_restarting_stops_step_7(tmp_path: Path) -> None:
     assert "after 300 s, still waiting on:" in done.stderr and "(restarted)" in done.stderr
 
 
-def test_a_run_after_a_failed_auto_unseal_asks_for_three_shares(tmp_path: Path) -> None:
-    host = Host(tmp_path)
-    first = host.run(stdin=_saved_and_three(host), env={**ALLOW, "FAKE_SEAL_FAIL": "1"})
-    assert first.returncode == 1 and "openbao-seal.sh enable failed" in first.stderr
-    shares = host.secrets["shares"]
-    again = host.run(stdin="".join(s + "\n" for s in (shares[0], shares[2], shares[4])))
-    assert again.returncode == 0, again.stdout + again.stderr
-    assert "this run holds none: type them" in again.stdout
-    assert host.state["seal_stdin"] == 3 and host.state["bao"]["type"] == "static"
-
-
 def test_the_tls_cafile_reaches_the_certificate_check(tmp_path: Path) -> None:
     host = Host(tmp_path)
     root = tmp_path / "root.pem"
@@ -2364,13 +2560,40 @@ def test_the_tls_cafile_reaches_the_certificate_check(tmp_path: Path) -> None:
     done = host.run("--tls-cafile", "root.pem", stdin=_saved_and_three(host), env=ALLOW)
     assert done.returncode == 0, done.stdout + done.stderr
     assert f"check-public-tls.sh --cafile {root}" in host.argv()
+
+
+def test_the_auto_unseal_comes_before_step_4(tmp_path: Path) -> None:
+    """Coordinator's ruling Q6 (2026-11-27): right behind step 3.6, so the
+    stack step 7 starts is already static-sealed."""
+    host, _ = _done_host(tmp_path)
+    argv = host.argv().splitlines()
+    seal = next(i for i, line in enumerate(argv) if line.startswith("openbao-seal.sh enable"))
+    restart = argv.index("docker compose restart openbao")
+    migrate = argv.index("docker compose up migrate")
+    assert seal < restart < migrate < argv.index("docker compose up -d")
+
+
+def test_a_failed_step_7_runs_again_with_no_share(tmp_path: Path) -> None:
+    """The point of ruling Q6: step 7 is where a real VPS fails (the A record,
+    the provider's firewall), and by then OpenBao unseals itself. Run again
+    with nothing on stdin, it asks for no share and finishes."""
+    host = Host(tmp_path)
+    refused_tls = {**ALLOW, "FAKE_RC_CHECK_PUBLIC_TLS": "1"}
+    first = host.run(stdin=_saved_and_three(host), env=refused_tls)
+    assert first.returncode == 1
+    assert "the certificate on :443 is not one a browser accepts" in first.stderr
+    assert host.state["bao"]["type"] == "static"
+    again = host.run(stdin="")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "skip    auto-unseal: on, and OpenBao is unsealed with its static key" in again.stdout
+    assert "openbao-seal.sh" not in host.argv()
 ```
 
 - [ ] **Step 2: Las pruebas fallan**
 
 Run, desde `backend/`: `ITS_TEST_REDIS_URL=redis://localhost:6379/3 .venv/bin/python -m pytest -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning -p no:cacheprovider -q tests/test_first_boot_script.py`
 
-Expected: `13 failed, 16 passed`. Las 15 de la Task 2 pasan, y una de las 14 nuevas también, `test_without_an_inherited_compose_file_none_is_set` (sin desellado todavía, nadie exporta nada: hoy es vacía, y con la implementación pasa a decir algo).
+Expected: `13 failed, 19 passed`: las 19 de la Task 2 pasan, y las 13 nuevas fallan (el guion para tras el desellado, sin pasos 4 a 8).
 
 - [ ] **Step 3: Los pasos 4 a 8**
 
@@ -2379,9 +2602,10 @@ Con este guion, desde la raíz (no se guarda en el repositorio):
 ````bash
 S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
 cat > "$S/task3_edit.py" <<'TASK3_EDIT'
-"""Plan 2026-11-27, Task 3: first-boot.sh gets steps 4 to 8, the auto-unseal
-and the restart that proves it (design 2026-11-27-despliegue-automatizado §3,
-§4). Two anchors, each exactly once; nothing is written unless both are."""
+"""Plan 2026-11-27, Task 3: first-boot.sh gets steps 4 to 7 and step 8's
+install code, after the auto-unseal Task 2 put right behind step 3.6 (design
+2026-11-27-despliegue-automatizado §3, §4). Two anchors, each exactly once;
+nothing is written unless both are."""
 
 from pathlib import Path
 
@@ -2392,6 +2616,7 @@ VARS_A = r'''cd "$(dirname "$(readlink -f "$0")")/.."   # deploy/
 etc_dir="${ITS_ETC_DIR:-/etc/it-suite}"
 allow_nontty="${ITS_FIRST_BOOT_ALLOW_NONTTY:-0}"
 token_file="$etc_dir/gateway-issuer.token"
+key_file="$etc_dir/openbao-unseal/unseal.key"
 '''
 VARS = r'''cd "$(dirname "$(readlink -f "$0")")/.."   # deploy/
 deploy_dir="$PWD"
@@ -2414,7 +2639,9 @@ step_3_2
 step_3_3
 step_3_4
 step_3_6
-say "Steps 1 to 3.6: done."
+auto_unseal
+restart_proof
+say "Steps 1 to 3.6 and the auto-unseal: done."
 '''
 STEPS_4_TO_8 = r'''step_4() {
   say "Step 4 — migrations"
@@ -2631,50 +2858,6 @@ step_7() {
   note "step 7: the per-address sign-in limits the api started with: $limits"
 }
 
-enabled_now=no
-auto_unseal() {
-  say "OpenBao's auto-unseal, with a static key (GO-LIVE.md §4; decided 2026-11-27)"
-  local n
-  bao_state
-  if auto_unseal_on && [ "$bao_type" = static ] && [ "$bao_sealed" = false ]; then
-    skip "auto-unseal: on, and OpenBao is unsealed with its static key"
-    return 0
-  fi
-  if [ "$bao_type" != shamir ] || [ "$bao_sealed" != false ]; then
-    die "OpenBao reports seal $bao_type, sealed $bao_sealed: openbao-seal.sh enable needs it unsealed, with shares" \
-        "sudo ./scripts/openbao-seal.sh status"
-  fi
-  if [ "${#typed[@]}" != 3 ]; then
-    note "openbao-seal.sh needs three shares to move the seal, and this run holds none: type them"
-    typed=()
-    for n in 1 2 3; do read_share "$n"; typed+=("$share"); done
-    share=""
-  fi
-  act "sudo ./scripts/openbao-seal.sh enable --key-file $key_file --yes, the three shares on its stdin"
-  # env -u: openbao-seal.sh writes COMPOSE_FILE into .env, and an inherited
-  # one would win over it and recreate OpenBao without the seal it migrates to.
-  printf '%s\n' "${typed[@]}" | sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file "$key_file" --yes \
-    || die "openbao-seal.sh enable failed (above, with its way back)" "sudo ./scripts/openbao-seal.sh status"
-  typed=()
-  auto_unseal_on || die "openbao-seal.sh enable did not put the auto-unseal overlay into .env" "sudo ./scripts/openbao-seal.sh status"
-  follow_auto_unseal
-  enabled_now=yes
-}
-
-restart_proof() {
-  say "OpenBao restarts and unseals itself"
-  if [ "$enabled_now" != yes ]; then
-    skip "the restart that proves it ran when the auto-unseal was turned on"
-    return 0
-  fi
-  act "docker compose restart openbao"
-  dc restart openbao
-  wait_unsealed || die "OpenBao came back sealed after a restart: the auto-unseal does not work" \
-    "sudo ./scripts/openbao-seal.sh status" "docker compose logs --tail 50 openbao"
-  [ "$bao_type" = static ] || die "OpenBao unsealed, but its seal is $bao_type, not static" "sudo ./scripts/openbao-seal.sh status"
-  ok "OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed"
-}
-
 step_8() {
   say "Step 8 — the install code"
   local needed code
@@ -2717,14 +2900,14 @@ step_3_2
 step_3_3
 step_3_4
 step_3_6
+auto_unseal
+restart_proof
 step_4
 step_4b
 step_5
 step_6
 step_6b
 step_7
-auto_unseal
-restart_proof
 step_8
 finish
 '''
@@ -2733,24 +2916,24 @@ for anchor in (VARS_A, MAIN_A):
     assert text.count(anchor) == 1, anchor.splitlines()[0]
 text = text.replace(VARS_A, VARS).replace(MAIN_A, STEPS_4_TO_8)
 SCRIPT.write_text(text)
-print("first-boot.sh: steps 4 to 8, the auto-unseal and its restart")
+print("first-boot.sh: steps 4 to 8")
 TASK3_EDIT
 python3 "$S/task3_edit.py"
 ````
 
-Expected: `first-boot.sh: steps 4 to 8, the auto-unseal and its restart`. El archivo resultante tiene 812 líneas (`wc -l deploy/scripts/first-boot.sh`).
+Expected: `first-boot.sh: steps 4 to 8`. El archivo resultante tiene 814 líneas (`wc -l deploy/scripts/first-boot.sh`).
 
 - [ ] **Step 4: Las pruebas pasan**
 
 Run, desde `backend/`: la orden del Step 2, y `.venv/bin/ruff check app tests`. Desde la raíz: `shellcheck deploy/scripts/first-boot.sh && echo SHELLCHECK-CLEAN`.
 
-Expected: `29 passed` (unos 45 s: cada prueba arranca el guion entero contra el arnés); `All checks passed!`; `SHELLCHECK-CLEAN`.
+Expected: `32 passed` (unos 50 s: cada prueba arranca el guion entero contra el arnés); `All checks passed!`; `SHELLCHECK-CLEAN`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add deploy/scripts/first-boot.sh backend/tests/test_first_boot_script.py
-git commit -m "feat(deploy): first-boot.sh, steps 4 to 8 and OpenBao's auto-unseal
+git commit -m "feat(deploy): first-boot.sh, steps 4 to 8, with OpenBao unsealing itself
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
@@ -2768,13 +2951,14 @@ Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 - Consumes: el stack que deja `first-boot.sh` (no su código); `./scripts/install-backup-timer.sh` y `./scripts/scheduled-backup.sh` tal como están (`ITS_NO_SYSTEMCTL`, `ITS_SYSTEMD_DIR`, `ITS_BACKUP_STATE_DIR` ya son suyos); la línea del agente `msg=enrolled device_id=<uuid>` (`agent/internal/enroll/enroll.go:493`, con el `slog` de texto de `cmd/agent/main.go:267`).
 - Produces:
   - `./scripts/first-boot-check.sh [--tls-cafile PEM] [--connect IPv4] [--wait-job SEGUNDOS]` desde `deploy/`. `--tls-cafile` es la única CA en la que confían los `curl` del 11a y el agente (montada como su `/etc/ssl/certs/ca-certificates.crt`); `--connect` hace que los `curl` llamen a `<host>:443` en esa dirección (`--resolve`, `--noproxy '*'`) y que el agente la tenga como `--add-host <host>:<dirección>`; `--wait-job` (por defecto 600) es lo que espera el 11d. Lee el token de inscripción por la entrada estándar (oculto en una terminal; termine o no en salto de línea). Sale 0 o 1 con `FAILED`.
+  - **Sus dos primeras líneas, siempre** (resolución Q8), antes de preguntar nada a OpenBao: `  note    this enrols a throwaway agent on this VPS (step 11c) and retires it, with its key (11f).` y `  note    It is safe to run again: a second run enrols and retires another; the first stays in the console, offline.` (la Task 6 lo dice en el runbook).
   - **Líneas que lee la CI (Task 5) y cita el runbook (Task 6)**, exactas: `  ok      step 11c: the agent enrolled as device <uuid>, connected over :8443, and its token file is gone` (la CI espera esta línea antes de pedir el trabajo); `Step 12 — the first backup, so that there is a way back`; `  ok      step 12: the newest backup: <hora>`; las dos `note` de la copia fuera del host; y la última cabecera, `First boot is complete.`, seguida de tres `note`.
   - **El agente**: `docker run -d --name smoke-agent --network host --user <uid>:<gid>` con el binario `../agent/dist/novieri-agent`, la CA, su directorio de datos y `ITS_AGENT_ENROLL_URL=https://<host>`; el token, en `<datos>/enroll-token` (0600), nunca en su entorno. Para las pruebas de la Task 5, la orden empieza en `  run_args=(-d --name smoke-agent --network host` y contiene `-v "${tls_cafile:-/etc/ssl/certs/ca-certificates.crt}:/etc/ssl/certs/ca-certificates.crt:ro"`, `-e "ITS_AGENT_ENROLL_URL=https://$host"` y `[ -z "$connect" ] || run_args+=(--add-host "$host:$connect")`.
   - `ITS_SMOKE_AGENT_DIR` (solo pruebas; por defecto `/tmp/smoke-agent`, el del runbook).
 
 **Decisiones de la tarea.**
 - **11d acepta cualquier trabajo que haya pedido una persona** para **ese** dispositivo (el `device_id` de la línea `msg=enrolled` del agente, comprobado con su forma de UUID antes de entrar en la consulta), firmado y terminado en `succeeded`. En el VPS es el `inventory.collect` del botón; en la CI, el `hello` de `agent_flow.py`. La consulta del runbook mira el último trabajo pedido de toda la base; la del guion, el de su dispositivo, para no tomar por bueno otro que hubiera.
-- **Relanzarlo tras un fallo no pide otro token si el agente sigue en marcha** (de la ejecución que paró en el 11d): lo reutiliza. Tras una ejecución completa, el 11f ya lo retiró, y una segunda inscribe otro agente de prueba (pregunta Q8).
+- **Relanzarlo tras un fallo no pide otro token si el agente sigue en marcha** (de la ejecución que paró en el 11d): lo reutiliza. Tras una ejecución completa, el 11f ya lo retiró, y una segunda inscribe y retira otro agente de prueba; el primero queda en la consola, desconectado (resolución Q8 del coordinador: así está bien, y el guion lo dice en sus dos primeras líneas, en cada ejecución, también en la que para porque OpenBao está sellado). `test_a_second_run_retires_its_own_agent_and_keeps_the_backup_it_has` fija que la segunda inscribe el suyo, lo retira y conserva la copia que encuentra (el 12 dice `skip`); `test_its_first_lines_say_it_enrols_and_retires_a_throwaway_agent`, las dos líneas, también cuando OpenBao está sellado.
 - **El binario no se vuelve a compilar si es más nuevo que cada archivo de `agent/`**: en la CI lo compila antes el paso nativo de Go, y así el guion no repite la compilación en un contenedor.
 - **El 12 con `sudo journalctl`**: una cuenta creada por `adduser` no está en `adm` ni en `systemd-journal`, y sin `sudo` el `journalctl` del runbook no enseña nada. Con `ITS_NO_SYSTEMCTL=1` corre el `ExecStart` del servicio, `sudo ./scripts/scheduled-backup.sh`, como el ensayo del 2026-11-24 (D7).
 - **Lo primero, `bao status`** (`CLAUDE.md`: toda secuencia tras el primer arranque empieza preguntando a OpenBao): sellado, el guion para con la orden de «After a reboot or a restart».
@@ -3125,14 +3309,37 @@ def test_a_broken_audit_chain_stops_it(tmp_path: Path) -> None:
     assert done.returncode == 1 and "an audit chain is broken" in done.stderr
 
 
-def test_a_second_run_keeps_the_backup_it_has(tmp_path: Path) -> None:
+def test_a_second_run_retires_its_own_agent_and_keeps_the_backup_it_has(tmp_path: Path) -> None:
+    """Coordinator's ruling Q8 (2026-11-27): safe to run again. A second whole
+    run enrols another throwaway agent and retires it too; the backup it
+    finds is kept."""
     box = Box(tmp_path)
     assert box.run().returncode == 0
     again = box.run()
     assert again.returncode == 0, again.stdout + again.stderr
+    assert "busybox:1.36.1" in box.argv(), "the second run enrols an agent of its own"
+    assert box.state["agent_running"] is False and not box.agent_data.exists()
     kept = "skip    step 12: the nightly backup timer is installed, and a backup exists"
     assert kept in again.stdout
     assert "scheduled-backup.sh" not in box.argv()
+
+
+OPENING = [
+    "  note    this enrols a throwaway agent on this VPS (step 11c) and retires it, with its key"
+    " (11f).",
+    "  note    It is safe to run again: a second run enrols and retires another; the first stays"
+    " in the console, offline.",
+]
+
+
+def test_its_first_lines_say_it_enrols_and_retires_a_throwaway_agent(tmp_path: Path) -> None:
+    """Ruling Q8: read before anything happens -- on a run that stops at the
+    first check too."""
+    box = Box(tmp_path)
+    assert box.run().stdout.splitlines()[:2] == OPENING
+    box.state["bao_rc"] = 2
+    stopped = box.run()
+    assert stopped.returncode == 1 and stopped.stdout.splitlines()[:2] == OPENING
 
 
 def test_a_binary_newer_than_its_sources_is_not_built_again(tmp_path: Path) -> None:
@@ -3153,7 +3360,7 @@ def test_a_binary_newer_than_its_sources_is_not_built_again(tmp_path: Path) -> N
 
 Run, desde `backend/`: `ITS_TEST_REDIS_URL=redis://localhost:6379/4 .venv/bin/python -m pytest -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning -p no:cacheprovider -q tests/test_first_boot_check_script.py`
 
-Expected: `16 failed` (el guion no existe).
+Expected: `17 failed` (el guion no existe).
 
 - [ ] **Step 3: El guion**
 
@@ -3174,9 +3381,11 @@ Crear `deploy/scripts/first-boot-check.sh` y hacerlo ejecutable (`chmod +x deplo
 # (11c), says when to press Run job -> Collect inventory and waits for the job
 # (11d), verifies the audit chain (11e), retires the agent (11f) and takes the
 # first backup (12). It prints `run` before what it changes, `skip` for what
-# it finds done, `ok` for a check that held; run it again after any failure.
-# A second run enrols a second throwaway agent; the first stays in the console
-# as a record, offline.
+# it finds done, `ok` for a check that held. It is safe to run again, after a
+# failure or after a success: a run that stopped finds its agent still up and
+# goes on from 11d; a second whole run enrols, and retires, another throwaway
+# agent, and the first stays in the console as a record, offline. Its first
+# two lines say so.
 #
 # The token reaches the agent in a 0600 file in its data directory, as the
 # runbook puts it there, and nowhere else: never an argument, never printed.
@@ -3231,6 +3440,8 @@ if [ -n "$tls_cafile" ]; then
 fi
 
 cd "$(dirname "$(readlink -f "$0")")/.."   # deploy/
+note "this enrols a throwaway agent on this VPS (step 11c) and retires it, with its key (11f)."
+note "It is safe to run again: a second run enrols and retires another; the first stays in the console, offline."
 unit_dir="${ITS_SYSTEMD_DIR:-/etc/systemd/system}"
 no_systemctl="${ITS_NO_SYSTEMCTL:-0}"
 backup_state="${ITS_BACKUP_STATE_DIR:-/var/lib/it-suite/backup}"   # scheduled-backup.sh's
@@ -3452,7 +3663,7 @@ note "and openbao-data volumes -- GO-LIVE.md §6."
 
 Run, desde `backend/`: la orden del Step 2, y `.venv/bin/ruff check app tests`. Desde la raíz: `shellcheck deploy/scripts/first-boot-check.sh && echo SHELLCHECK-CLEAN` y `test -x deploy/scripts/first-boot-check.sh && echo EXECUTABLE`.
 
-Expected: `16 passed`; `All checks passed!`; `SHELLCHECK-CLEAN`; `EXECUTABLE`.
+Expected: `17 passed`; `All checks passed!`; `SHELLCHECK-CLEAN`; `EXECUTABLE`.
 
 - [ ] **Step 5: Commit**
 
@@ -3472,24 +3683,31 @@ Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 - Create: `deploy/ci/first_boot_answers.py` (el operador de la CI ante `first-boot.sh`)
 - Create: `backend/tests/test_ci_first_boot.py`
 - Modify: `.github/workflows/ci.yml` (el trabajo `deploy`, líneas 369 a 876 en `6f616aa`; ningún otro trabajo)
-- Modify: `backend/tests/test_ci_mcp_flow.py` (seis pruebas), `backend/tests/test_ci_agent_flow.py` (cinco pruebas)
+- Modify: `deploy/ci/agent_flow.py` (entero: dos tokens con una sola sesión, y la fase nueva `refused`), `deploy/ci/mcp_flow.py` (tres códigos de recuperación para `agent_flow.py`, no dos)
+- Modify: `backend/tests/test_ci_mcp_flow.py` (seis pruebas), `backend/tests/test_ci_agent_flow.py` (cinco pruebas, y ocho nuevas al final)
+- Modify: `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md` (§5, la lista de comprobaciones, y §8.2: resolución Q3)
 
 **Interfaces:**
-- Consumes: de las Tasks 2 y 3, la línea de órdenes de `first-boot.sh`, sus líneas `  share <n>     …`, `  root token  …`, `  install code  …`, `  skip    step 1: .env exists (new-env.sh never overwrites one), for rmm.novieri.com`, `First boot: every step is done.`, las 16 `skip` de una segunda ejecución y ninguna `run`; las variables `ITS_FIRST_BOOT_ALLOW_NONTTY`, `ITS_NO_SYSTEMCTL`, `ITS_SYSTEMD_DIR`; los textos de su código que las pruebas buscan (Task 2, Interfaces). De la Task 4, `--tls-cafile`, `--connect`, `--wait-job`, la línea `  ok      step 11c:` y `First boot is complete.`, y el texto de `run_args`. De la Task 2, `ITS_PREFLIGHT_SKIP_DNS=1`. De la Task 1, nada más que pasar `shellcheck`.
+- Consumes: de las Tasks 2 y 3, la línea de órdenes de `first-boot.sh`, sus líneas `  share <n>     …`, `  root token  …`, `  install code  …`, `  skip    step 1: .env exists (new-env.sh never overwrites one), for rmm.novieri.com`, `First boot: every step is done.`, las 16 `skip` de una segunda ejecución y ninguna `run`; las variables `ITS_FIRST_BOOT_ALLOW_NONTTY`, `ITS_NO_SYSTEMCTL`, `ITS_SYSTEMD_DIR`; los textos de su código que las pruebas buscan (Task 2, Interfaces). De la Task 4, `--tls-cafile`, `--connect`, `--wait-job`, la línea `  ok      step 11c:` y `First boot is complete.`, y el texto de `run_args`. De la Task 2, `ITS_PREFLIGHT_SKIP_DNS=1` (con Pebble como CA no se niega). De la Task 1, nada más que pasar `shellcheck`. Del agente, sin cambios (M10): `pins.json` en su directorio de datos, con `job_signing_public_key_pem`; la línea `gateway connected` de cada conexión; y el rechazo, `refused` con `{"refused": "bad_signature"}`, `jobs.refused` en la auditoría y `msg="job refused" … job_type=hello … reason=bad_signature` en su registro.
 - Produces:
   - `python3 ci/first_boot_answers.py [--script RUTA] [--require LÍNEA]… [--timeout S] -- <argumentos de first-boot.sh>`, desde `deploy/`: la salida del guion, con cada secreto enmascarado antes de su línea; `SAVED` y las partes 1, 3 y 5 por la entrada estándar del guion en cuanto imprime el token raíz; sale con el código del guion, o con 1 si falta una línea de `--require`, si imprimió un número de partes que no es cinco con su token raíz, o si pasó `--timeout` (por defecto 2400 s).
   - En `GITHUB_ENV`, para los pasos siguientes: `PEBBLE_MINICA`, `COMPOSE_FILE` (primero `docker-compose.yml:ci/acme-pebble.yml`, y tras el primer arranque `docker-compose.yml:ci/acme-pebble.yml:openbao/auto-unseal.yml`), `ITS_PREFLIGHT_SKIP_DNS=1`, `ITS_NO_SYSTEMCTL=1`, `ITS_SYSTEMD_DIR=$RUNNER_TEMP/systemd` y `PEBBLE_ROOT=$RUNNER_TEMP/pebble-root.pem`.
-  - **El nombre del trabajo no cambia**: `deploy (compose first boot · app_user privileges)`.
+  - `python3 ci/agent_flow.py … --phase token --token-file A [--token-file B]…` (un token de un uso por archivo, con una sola sesión) y `… --phase refused --hostname H --container C --pins-file P` (las tres obligatorias; imprime `agent_flow: phase refused: every assertion held` o `FAIL  …` y sale con 1). `mcp_flow.py` guarda tres códigos de recuperación en el `--state-file`: uno por sesión de `agent_flow.py` (`token`, `job`, `refused`).
+  - **El nombre del trabajo no cambia**: `deploy (compose first boot · app_user privileges)`, y tampoco su lista de pasos más allá de los del primer arranque: el caso negativo es el apartado 7c-bis del paso del OAuth, junto al 7c.
 
 **Decisiones de la tarea.**
-- **El paso «Throwaway .env» se queda como está** (es el paso 1 de `first-boot.sh`, con Pebble como CA), porque Pebble no arranca sin `.env` y la comprobación del paso 7 necesita su raíz (M5). `first-boot.sh` lo encuentra y dice `skip`, y el conductor exige esa línea; el paso 1 dentro del guion lo cubren las pruebas de la Task 2 (pregunta Q1).
+- **El paso «Throwaway .env» se queda como está** (es el paso 1 de `first-boot.sh`, con Pebble como CA), porque Pebble no arranca sin `.env` y la comprobación del paso 7 necesita su raíz (M5). `first-boot.sh` lo encuentra y dice `skip`, y el conductor exige esa línea (`--require '  skip    step 1: .env exists (new-env.sh never overwrites one), for rmm.novieri.com'`; `test_the_first_boot_is_answered_and_must_end_as_a_good_one_does` la fija, y el ensayo verde la enseña); el paso 1 dentro del guion lo cubren las pruebas de la Task 2 (resolución Q1: aceptado así).
 - **Cinco partes y umbral tres en la CI**, como en el VPS: el conductor lee las cinco de la salida del guion, enmascara cada una y devuelve la primera, la tercera y la quinta (no las tres primeras, para que un guion que se quedara solo con las primeras se viera).
-- **Todas las comprobaciones de hoy siguen**, cada una donde está ahora su orden: el certificado por ACME (`check-public-tls.sh` en el paso 7 del guion y otra vez en el paso del OAuth, contra la raíz de Pebble); el 503 con la api parada; el agente compilado inscrito por el 443 con un token de un uso, conectado por el 8443 y ejecutando un `hello` firmado, con la cadena de auditoría (`agent_flow.py`, y ahora además el 11e de `first-boot-check.sh`); los privilegios de `app_user` (los mismos tres pasos); la copia y la restauración (los mismos dos pasos, que ahora van al final y paran antes la capa de aplicación); el `worker` sano. **Dos nuevas** (diseño §5): «OpenBao unseals itself after a restart» y «first-boot.sh again», con huella de `.env`, de los dos archivos de secretos, de cada contenedor (id y hora de arranque) y del esquema antes y después, ninguna línea `run` y al menos 16 `skip`.
-- **El rojo con la firma mala no es un paso de la CI hoy**: fue un ensayo (plan del 2026-11-23, Task 10, Step 6, «Rojo 2: la firma»). El diseño §5 lo cuenta entre las comprobaciones de hoy; este plan lo mantiene como ensayo, en el Step 6 (pregunta Q3).
-- **Los temporizadores de systemd no se activan en el ejecutor** (`ITS_NO_SYSTEMCTL=1`): las unidades se escriben en `$RUNNER_TEMP/systemd` y el 12 ejecuta el `ExecStart` del servicio. Siguen sin verificar, como hasta hoy (pregunta Q2).
-- **El agente de la CI es el de `first-boot-check.sh`**: en la red del ejecutor (`--network host`) con `--add-host rmm.novieri.com:127.0.0.1`, donde Traefik publica el 443 y el 8443, en lugar de un `ci-agent` en la red del stack con la dirección de Traefik. Lo que se comprueba es lo mismo: el nombre público, el 443 y el 8443 a través de Traefik, la raíz de Pebble como única CA. `agent_flow.py` sigue pidiendo el token (11b) y el `hello` (11d) con la sesión del dueño que crea `mcp_flow.py`; el `hostname` del agente es el del ejecutor (M7).
+- **Todas las comprobaciones de hoy siguen**, cada una donde está ahora su orden: el certificado por ACME (`check-public-tls.sh` en el paso 7 del guion y otra vez en el paso del OAuth, contra la raíz de Pebble); el 503 con la api parada; el agente compilado inscrito por el 443 con un token de un uso, conectado por el 8443 y ejecutando un `hello` firmado, con la cadena de auditoría (`agent_flow.py`, y ahora además el 11e de `first-boot-check.sh`); los privilegios de `app_user` (los mismos tres pasos); la copia y la restauración (los mismos dos pasos, que ahora van al final y paran antes la capa de aplicación); el `worker` sano. **Tres nuevas** (diseño §5, con la resolución Q3): «OpenBao unseals itself after a restart»; «first-boot.sh again», con huella de `.env`, de los dos archivos de secretos, de cada contenedor (su id y, en marcha, su hora de arranque; salido, su código: M9) y del esquema antes y después, ninguna línea `run` y al menos 16 `skip`; y el rojo con la firma mala, el 7c-bis (abajo).
+- **El rojo con la firma mala pasa a ser un paso permanente de la CI** (resolución Q3 del coordinador, 2026-11-27; hasta hoy fue un ensayo, plan del 2026-11-23, Task 10, Step 6, «Rojo 2: la firma»), y el diseño §5 lo cuenta como añadido desde el Step 5 de esta tarea. Es el apartado **7c-bis** del paso del OAuth, cuando `first-boot-check.sh` ya terminó: un segundo agente, `ci-agent`, el mismo binario, inscrito con el segundo token de un uso que `--phase token` emitió en la misma sesión que el primero, en la red del stack con `--add-host rmm.novieri.com:172.19.240.250` (la dirección de Traefik en `ci/acme-pebble.yml`, como el `ci-agent` de la CI de hoy) y la raíz de Pebble como única CA. `agent_flow.py --phase refused`, con un tercer código de recuperación: el dispositivo en línea; para el agente, cambia en su `pins.json` la clave de firma de trabajos por una que nadie firma (M10) y lo arranca otra vez; espera a que vuelva a conectar; pide un `hello` que el servidor firma como siempre; y exige `refused`, `{"refused": "bad_signature"}`, que el saludo no vuelva (no se ejecutó), la cadena verificada con `jobs.refused` y sin `jobs.succeeded` para ese trabajo. El paso exige además la línea del rechazo en el registro del agente.
+  - *Por qué otro agente y no el de `first-boot-check.sh`:* el 11f lo retira y borra sus datos, y cambiarle la clave a mitad de su ejecución haría fallar el 11d, que es justo lo que ese guion prueba.
+  - *Su rojo:* en el Step 2, las pruebas nuevas de `test_ci_agent_flow.py` con un cliente y un `docker` falsos (un agente que ejecuta el `hello`, o que lo rechaza por otra razón, ponen la fase en rojo; sin el tercer código, se niega antes de nada); y en el Step 7, **Rojo 3**, un agente compilado que no verifica la firma: el paso del OAuth se pone en rojo en el 7c-bis, y solo ahí.
+  - *Su coste:* unos dos minutos por ejecución (la inscripción, un reinicio del agente y un trabajo).
+- **Los temporizadores de systemd no se activan en el ejecutor** (`ITS_NO_SYSTEMCTL=1`): las unidades se escriben en `$RUNNER_TEMP/systemd` y el 12 ejecuta el `ExecStart` del servicio. **El 6b y el 12 quedan sin verificar**, como hasta hoy (resolución Q2: se mantiene así); lo dicen el comentario del paso del primer arranque y el informe (Task 7).
+- **El agente del caso bueno es el de `first-boot-check.sh`**: en la red del ejecutor (`--network host`) con `--add-host rmm.novieri.com:127.0.0.1`, donde Traefik publica el 443 y el 8443, en lugar del `ci-agent` de hoy, en la red del stack con la dirección de Traefik (que sigue, para el caso negativo del 7c-bis). Lo que se comprueba es lo mismo: el nombre público, el 443 y el 8443 a través de Traefik, la raíz de Pebble como única CA. `agent_flow.py` sigue pidiendo el token (11b) y el `hello` (11d) con la sesión del dueño que crea `mcp_flow.py`; el `hostname` del agente es el del ejecutor (M7).
 - **El trabajo no guarda ningún secreto del almacén**: ni la parte, ni el token raíz, ni los dos tokens; los cuatro son de `first-boot.sh`. La prueba de que no viajan en una línea de órdenes es la de la Task 2, sobre cada orden del guion; la de que el registro los enmascara, la de esta tarea.
 - **La espera de OpenBao de la CI con `operator init -status` desaparece** con el resto de su primer arranque, y su prueba se rehace con la medida (M1).
+- **La huella de la segunda ejecución** toma de cada contenedor su `Id` y, en marcha, su hora de arranque; salido, su código de salida (M9): `docker compose up -d` vuelve a arrancar los de una vez con el mismo `Id`, y una huella con su hora no se repetiría nunca.
 - **El ejecutor no es un host de despliegue** (lo da por hecho ya el `down -v` de `teardown`): `teardown` borra con `sudo` lo que los guiones escribieron como root fuera de la copia.
 
 - [ ] **Step 0: La worktree, con las Tasks 1 a 4**
@@ -3504,7 +3722,7 @@ grep -c '^  say "First boot: every step is done."$' deploy/scripts/first-boot.sh
 cd backend && ITS_TEST_REDIS_URL=redis://localhost:6379/5 .venv/bin/python -m pytest -p no:cacheprovider -q tests/test_prepare_host_script.py tests/test_first_boot_script.py tests/test_first_boot_check_script.py tests/test_preflight_script.py; cd ..
 ```
 
-Expected: las fusiones; `prepare-host.sh ok`, `first-boot.sh ok`, `first-boot-check.sh ok`; `1` (la última cabecera, en `finish()`, la de la Task 3); y `84 passed`. Si no, se para y se avisa al coordinador.
+Expected: las fusiones; `prepare-host.sh ok`, `first-boot.sh ok`, `first-boot-check.sh ok`; `1` (la última cabecera, en `finish()`, la de la Task 3); y `89 passed` (12, 32, 17 y 28). Si no, se para y se avisa al coordinador.
 
 - [ ] **Step 1: Las pruebas**
 
@@ -3699,6 +3917,12 @@ def test_the_first_boot_is_answered_and_must_end_as_a_good_one_does() -> None:
     run = _run("first boot -- scripts/first-boot.sh")
     assert "python3 ci/first_boot_answers.py" in run
     assert "--require 'First boot: every step is done.'" in run
+    # Ruling Q1 (2026-11-27): the job wrote .env with new-env.sh, as step 1
+    # does, so that Pebble could start first; the script must say it skipped it.
+    assert (
+        "--require '  skip    step 1: .env exists (new-env.sh never overwrites one), "
+        "for rmm.novieri.com'"
+    ) in run
     assert '-- --tls-cafile "$PEBBLE_ROOT"' in run
     assert "tee" not in run, "the shares go to the masked log, and to no file"
     assert run.index("python3 ci/first_boot_answers.py") < run.index(
@@ -3721,7 +3945,10 @@ def test_the_second_run_must_change_nothing_and_run_nothing() -> None:
         "sha256sum .env",
         "sudo sha256sum /etc/it-suite/gateway-issuer.token "
         "/etc/it-suite/openbao-unseal/unseal.key",
-        "xargs docker inspect -f '{{.Name}} {{.Id}} {{.State.StartedAt}}'",
+        # A one-shot runs again on every `up -d`, under the same id (measured
+        # 2026-11-27): its exit code is what must hold, a service's start time.
+        "xargs docker inspect -f '{{.Name}} {{.Id}} {{if .State.Running}}{{.State.StartedAt}}"
+        "{{else}}exit={{.State.ExitCode}}{{end}}'",
         "select version_num from alembic_version",
         './scripts/first-boot.sh --tls-cafile "$PEBBLE_ROOT" </dev/null',
         '[ "$before" = "$after" ]',
@@ -3746,7 +3973,7 @@ def test_the_teardown_removes_what_the_scripts_wrote_as_root() -> None:
         assert path in run, path
 ```
 
-Y las pruebas de la CI que fijaban el primer arranque propio del trabajo, con este guion, desde la raíz (no se guarda):
+Y las pruebas de la CI que fijaban el primer arranque propio del trabajo, más las ocho nuevas del caso negativo al final de `test_ci_agent_flow.py`, con este guion, desde la raíz (no se guarda):
 
 ````bash
 S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
@@ -3906,6 +4133,10 @@ CHECK = (
     '| ./scripts/first-boot-check.sh --tls-cafile "$pebble_root" --connect 127.0.0.1 '
     "--wait-job 180"
 )
+REFUSED = (
+    "agents --phase refused --hostname ci-agent --container ci-agent "
+    '--pins-file "$agent_data/pins.json"'
+)
 
 
 def test_the_agent_enrols_after_the_claim_and_before_the_last_checks() -> None:
@@ -3923,6 +4154,9 @@ def test_the_agent_enrols_after_the_claim_and_before_the_last_checks() -> None:
         run.index('agents --phase job --hostname "$(hostname)"'),
         run.index('wait "$check"'),
         run.index("grep -qx 'First boot is complete.' \\"$RUNNER_TEMP/check.log\\""),
+        run.index("docker run -d --name ci-agent"),
+        run.index(REFUSED),
+        run.index("grep -E 'msg=\\"job refused\\".*job_type=hello.*reason=bad_signature'"),
         run.index('if grep -qi keycloak <<<"$running"'),
     ]
     assert order == sorted(order), order
@@ -3971,8 +4205,8 @@ def test_what_the_agent_held_goes_however_the_step_ends() -> None:
     assert (
         """trap 'rm -f "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json" """
         """"$RUNNER_TEMP/enroll-token" "$RUNNER_TEMP/check.log"; """
-        """docker rm -f smoke-agent >/dev/null 2>&1 || true; """
-        """rm -rf /tmp/smoke-agent' EXIT""" in run
+        """docker rm -f smoke-agent ci-agent >/dev/null 2>&1 || true; """
+        """rm -rf /tmp/smoke-agent "$RUNNER_TEMP/agent-data"' EXIT""" in run
     )
     line = next(x.strip() for x in run.splitlines() if "agents --phase job" in x)
     assert line.endswith(
@@ -3991,6 +4225,200 @@ NEW_WORKER = (
 text = AGENT.read_text()
 assert text.count(OLD_WORKER) == 1
 AGENT.write_text(text.replace(OLD_WORKER, NEW_WORKER))
+NEW_TESTS = r'''
+
+# --------------------------------------------------------------------------- #
+# The negative half of invariant 1, end to end (coordinator's ruling Q3,
+# plan 2026-11-27, Task 5): an agent made to pin a key the server does not
+# hold refuses the signed hello with bad_signature and runs nothing.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_negative_case_runs_on_its_own_agent_as_an_endpoint_would() -> None:
+    """Its own agent, enrolled with the second token: first-boot-check.sh
+    retired its one at 11f. It dials rmm.novieri.com as traefik's address on
+    the stack's network and trusts Pebble's root alone; the token is in its
+    0600 file, never in its environment; it listens on nothing."""
+    run = _run(OAUTH_STEP)
+    assert (
+        'agents --phase token --token-file "$RUNNER_TEMP/enroll-token" '
+        '--token-file "$agent_data/enroll-token"'
+    ) in run
+    assert 'echo "::add-mask::$(<"$agent_data/enroll-token")"' in run
+    start = run.index("docker run -d --name ci-agent")
+    command = run[start : run.index("busybox:1.36.1 /usr/local/bin/novieri-agent", start)]
+    assert "--network it-suite_default" in command
+    assert "--add-host rmm.novieri.com:172.19.240.250" in command
+    assert '-v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro"' in command
+    assert '-v "$agent_data:/var/lib/novieri-agent"' in command
+    assert "ITS_AGENT_ENROLL_TOKEN" not in command
+    assert "--privileged" not in command and "-p " not in command
+    assert run.index('test ! -e "$agent_data/enroll-token"') < run.index(REFUSED)
+    line = next(x.strip() for x in run.splitlines() if x.strip().startswith(REFUSED))
+    assert line.endswith(
+        "|| { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }"
+    )
+
+
+def test_the_owner_keeps_a_third_recovery_code_for_it() -> None:
+    """One recovery code per sign-in: token, job and refused."""
+    source = (REPO / "deploy/ci/mcp_flow.py").read_text()
+    assert "self.remember_owner(email, password, list(codes)[:3])" in source
+
+
+class _TokenClient(_FakeClient):
+    """Mints a different token each time, and counts the sign-ins."""
+
+    def __init__(self) -> None:
+        self.minted = 0
+        self.logins = 0
+
+    def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
+        if path == "/api/v1/auth/login":
+            self.logins += 1
+        if path == "/api/v1/enrollment-tokens":
+            self.minted += 1
+            body = {"token": f"TOKEN-{self.minted}", "max_uses": 1, "site_id": "s1"}
+            return _Answer(201, body, path)
+        return super().request(method, path, **kwargs)
+
+
+def test_one_sign_in_mints_one_one_use_token_per_file(tmp_path: Path) -> None:
+    client = _TokenClient()
+    owner = {"email": "e", "password": "p", "recovery_codes": ["a", "b", "c"]}
+    flow = agents.AgentFlow(client, owner)
+    first, second = tmp_path / "one", tmp_path / "two"
+    flow.token(str(first), str(second))
+    assert (first.read_text(), second.read_text()) == ("TOKEN-1", "TOKEN-2")
+    assert client.logins == 1 and client.minted == 2
+    for path in (first, second):
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
+
+
+def test_the_distrusted_pin_is_an_ed25519_key_nobody_signs_with() -> None:
+    """RFC 8410's SubjectPublicKeyInfo around 32 bytes: the agent parses it as
+    it parses the real one (x509.ParsePKIXPublicKey, then the Ed25519 type
+    check), and no signature verifies against it. The rest of pins.json stays."""
+    pins = {"ca_bundle_pem": "CA", "job_signing_public_key_pem": "OLD"}
+    new = agents.distrusted(pins, raw=bytes(range(32)))
+    assert new["ca_bundle_pem"] == "CA"
+    pem = new["job_signing_public_key_pem"].splitlines()
+    assert pem[0] == "-----BEGIN PUBLIC KEY-----" and pem[-1] == "-----END PUBLIC KEY-----"
+    der = base64.b64decode("".join(pem[1:-1]))
+    assert der == bytes.fromhex("302a300506032b6570032100") + bytes(range(32))
+    assert agents.distrusted(pins) != agents.distrusted(pins), "a fresh key each time"
+    same = {"job_signing_public_key_pem": new["job_signing_public_key_pem"]}
+    with pytest.raises(agents.Failed):
+        agents.distrusted(same, raw=bytes(range(32)))
+
+
+class _RefusedClient(_FakeClient):
+    """The refused phase's calls: ci-agent online, a hello that ends STATUS
+    with RESULT ("GREETING": the greeting it was sent), and an audit log with
+    its dispatch and its ending."""
+
+    def __init__(self, status: str, result: Any) -> None:
+        self.status, self.result = status, result
+        self.sent: dict[str, Any] = {}
+
+    def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
+        if path == "/api/v1/devices?limit=200":
+            device = {"id": "dev-1", "hostname": "ci-agent", "agent_status": "online"}
+            return _Answer(200, {"items": [device]}, path)
+        if path == "/api/v1/jobs" and method == "POST":
+            self.sent = kwargs["body"]
+            return _Answer(201, {"id": "job-1", "signed": True, "status": "queued"}, path)
+        if path == "/api/v1/jobs/job-1":
+            result = self.result
+            if result == "GREETING":
+                result = {"greeting": self.sent["params"]["message"]}
+            body = {"id": "job-1", "signed": True, "status": self.status, "result": result}
+            return _Answer(200, body, path)
+        if path == "/api/v1/audit/verify":
+            return _Answer(200, {"ok": True, "broken_at": None, "count": 9}, path)
+        if path == "/api/v1/audit?limit=200":
+            ending = "jobs.refused" if self.status == "refused" else "jobs.succeeded"
+            trail = [
+                ("enrollment.token_created", "token-1"),
+                ("enrollment.device_enrolled", "dev-1"),
+                ("gateway.connected", "dev-1"),
+                ("jobs.dispatched", "job-1"),
+                (ending, "job-1"),
+            ]
+            items = [
+                {"id": f"06b04ea5-2723-7825-8000-00000000000{n}", "action": a, "target_id": t}
+                for n, (a, t) in enumerate(trail, 1)
+            ]
+            return _Answer(200, {"items": items}, path)
+        return super().request(method, path, **kwargs)
+
+
+class _FakeDocker:
+    """`docker logs` counts one `gateway connected` per start."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.starts = 1
+
+    def __call__(self, *args: str) -> str:
+        self.calls.append(args)
+        if args[0] == "start":
+            self.starts += 1
+        if args[0] == "logs":
+            return 'level=INFO msg="gateway connected"\n' * self.starts
+        return ""
+
+
+THREE = {"email": "e", "password": "p", "recovery_codes": ["a", "b", "c"]}
+
+
+def _refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, client: _RefusedClient) -> Any:
+    monkeypatch.setattr(agents.time, "sleep", lambda _s: None)
+    pins = tmp_path / "pins.json"
+    pins.write_text(json.dumps({"ca_bundle_pem": "CA", "job_signing_public_key_pem": "OLD"}))
+    docker = _FakeDocker()
+    flow = agents.AgentFlow(client, THREE, docker=docker)
+    flow.refused("ci-agent", "ci-agent", str(pins), 5.0)
+    return flow, docker, json.loads(pins.read_text())
+
+
+def test_a_hello_refused_with_bad_signature_and_not_run_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow, docker, pins = _refused(
+        tmp_path, monkeypatch, _RefusedClient("refused", {"refused": "bad_signature"})
+    )
+    assert flow.reached == set(agents.PHASES["refused"])
+    assert [call[0] for call in docker.calls] == ["logs", "stop", "start", "logs"]
+    assert pins["ca_bundle_pem"] == "CA" and pins["job_signing_public_key_pem"] != "OLD"
+
+
+def test_a_hello_the_agent_ran_fails_the_negative_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The falsifier: an agent that stopped verifying runs it, and answers."""
+    with pytest.raises(agents.Failed, match="the hello it does not trust ended succeeded"):
+        _refused(tmp_path, monkeypatch, _RefusedClient("succeeded", "GREETING"))
+
+
+def test_a_refusal_for_another_reason_fails_the_negative_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(agents.Failed, match="refused, but not for its signature"):
+        _refused(tmp_path, monkeypatch, _RefusedClient("refused", {"refused": "expired"}))
+
+
+def test_the_negative_case_needs_its_own_recovery_code(tmp_path: Path) -> None:
+    owner = {"email": "e", "password": "p", "recovery_codes": ["a", "b"]}
+    flow = agents.AgentFlow(_RefusedClient("refused", {}), owner, docker=_FakeDocker())
+    with pytest.raises(agents.Failed, match="no third recovery code"):
+        flow.refused("ci-agent", "ci-agent", str(tmp_path / "pins.json"), 1.0)
+'''
+AGENT.write_text(AGENT.read_text().rstrip("\n") + "\n" + NEW_TESTS)
+text = AGENT.read_text()
+OLD_IMPORTS = "import ast\nimport importlib.util\nimport json\n"
+assert text.count(OLD_IMPORTS) == 1
+AGENT.write_text(text.replace(OLD_IMPORTS, "import ast\nimport base64\nimport importlib.util\nimport json\n"))
 print("the CI tests pin the job that runs the scripts")
 TASK5_TESTS
 python3 "$S/task5_tests.py"
@@ -4006,11 +4434,24 @@ Expected: `the CI tests pin the job that runs the scripts`. Lo que cada prueba a
 | `test_the_files_that_hold_a_secret_are_the_runners_alone` | `chmod 600 .env` antes del token raíz; el código enmascarado | el código enmascarado, igual; y el token de inscripción enmascarado antes de dárselo al guion; `.env` comprobado 0600 en el guion antes del primer token |
 | `test_the_deploy_job_copies_no_certificate_and_checks_the_one_acme_gave` | `roots/0` antes de la comprobación del certificado, en el paso del OAuth | `roots/0` en el paso de Pebble, antes del primer arranque, que pasa `--tls-cafile "$PEBBLE_ROOT"`; la comprobación, igual |
 | `test_the_address_the_job_asks_pebble_at_is_the_one_the_override_gives_it` | `--resolve pebble:15000:` en el paso del OAuth | en el paso de Pebble |
-| `test_the_agent_enrols_after_the_claim_and_before_the_last_checks` | el orden emitir certificado → gateway → token → `ci-agent` → trabajo | el orden token → `first-boot-check.sh` → su `ok step 11c` → trabajo → fin del guion → comprobaciones finales |
+| `test_the_agent_enrols_after_the_claim_and_before_the_last_checks` | el orden emitir certificado → gateway → token → `ci-agent` → trabajo | el orden token → `first-boot-check.sh` → su `ok step 11c` → trabajo → fin del guion → `ci-agent` → fase `refused` → la línea del rechazo en su registro → comprobaciones finales |
 | `test_the_agent_dials_the_public_name_and_trusts_only_pebbles_root` | `--network it-suite_default`, `--add-host` a Traefik, la raíz de Pebble como única CA | los mismos tres hechos en `first-boot-check.sh` (`--add-host`, la CA, la URL) y las banderas con que la CI lo llama; sin `ITS_AGENT_ENROLL_TOKEN`, sin `-p`, sin `--privileged` |
 | `test_the_gateway_issuer_token_is_masked_and_travels_on_stdin` → `test_the_gateway_issuer_token_is_first_boots_and_travels_on_stdin` | `gw_token` enmascarado y por la entrada estándar | el trabajo no tiene ninguno; `first-boot.sh` lo manda de su archivo 0600 por la entrada estándar |
-| `test_what_the_agent_held_goes_however_the_step_ends` | la trampa con `ci-agent` y `agent-data` | la trampa con `enroll-token`, `check.log`, `smoke-agent` y `/tmp/smoke-agent` |
+| `test_what_the_agent_held_goes_however_the_step_ends` | la trampa con `ci-agent` y `agent-data` | la trampa con `enroll-token`, `check.log`, `smoke-agent`, `/tmp/smoke-agent`, `ci-agent` y `$RUNNER_TEMP/agent-data` |
 | `test_the_deploy_job_waits_for_a_healthy_worker` | el `worker` tras el agente | el `worker` tras `First boot is complete.` |
+
+Y, nuevas al final de `test_ci_agent_flow.py`, las del caso negativo (resolución Q3):
+
+| Prueba nueva | Fija |
+|---|---|
+| `test_the_negative_case_runs_on_its_own_agent_as_an_endpoint_would` | los dos tokens con una sesión, los dos enmascarados; `ci-agent` en `it-suite_default` con `--add-host rmm.novieri.com:172.19.240.250`, la raíz de Pebble como única CA y sus datos en `$agent_data`; sin `ITS_AGENT_ENROLL_TOKEN`, sin `-p`, sin `--privileged`; el token borrado antes de la fase `refused`, y los registros si falla |
+| `test_the_owner_keeps_a_third_recovery_code_for_it` | `mcp_flow.py` guarda tres códigos |
+| `test_one_sign_in_mints_one_one_use_token_per_file` | una sesión, dos tokens distintos, dos archivos 0600 |
+| `test_the_distrusted_pin_is_an_ed25519_key_nobody_signs_with` | M10: el DER es el prefijo de RFC 8410 y los 32 bytes; una clave nueva cada vez; el resto de `pins.json` igual; una clave igual a la de antes se rechaza |
+| `test_a_hello_refused_with_bad_signature_and_not_run_holds` | la fase, en verde, con un trabajo `refused` por `bad_signature` y un agente que vuelve a conectar |
+| `test_a_hello_the_agent_ran_fails_the_negative_case` | un `hello` que acabó `succeeded` (un agente que no verifica) pone la fase en rojo |
+| `test_a_refusal_for_another_reason_fails_the_negative_case` | un `refused` por otra razón (`wrong_device`) también |
+| `test_the_negative_case_needs_its_own_recovery_code` | sin tercer código, la fase se niega antes de iniciar sesión |
 
 - [ ] **Step 2: Las pruebas fallan**
 
@@ -4021,9 +4462,9 @@ ITS_TEST_REDIS_URL=redis://localhost:6379/5 .venv/bin/python -m pytest -W error:
 ITS_TEST_REDIS_URL=redis://localhost:6379/5 .venv/bin/python -m pytest -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning -p no:cacheprovider -q tests/test_ci_mcp_flow.py tests/test_ci_agent_flow.py
 ```
 
-Expected: `1 error` (al importar: `deploy/ci/first_boot_answers.py` no existe); y `11 failed, 61 passed`.
+Expected: `1 error` (al importar: `deploy/ci/first_boot_answers.py` no existe); y `19 failed, 61 passed`: las once de la tabla y las ocho nuevas (`agents.distrusted` no existe, `token` no admite dos archivos, no hay fase `refused` ni `ci-agent` en el trabajo, y `mcp_flow.py` guarda dos códigos).
 
-- [ ] **Step 3: El conductor y el trabajo**
+- [ ] **Step 3: El conductor, los dos flujos y el trabajo**
 
 Crear `deploy/ci/first_boot_answers.py`:
 
@@ -4154,6 +4595,483 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
+Sustituir `deploy/ci/agent_flow.py` entero por:
+
+```python
+"""The CI's live check of an endpoint: the Linux agent built from this
+checkout enrols over the stack's front door, connects to the gateway on :8443
+with mutual TLS, verifies and runs a signed `hello`, and the audit chain still
+verifies (design 2026-11-23-vps-y-marca-novieri §4 and §5; plan 2026-11-23,
+Task 10). And the negative half of invariant 1, end to end (coordinator's
+ruling Q3, plan 2026-11-27, Task 5): the same binary, made to pin a
+job-signing key the server does not hold, refuses a signed `hello` with
+`bad_signature` and never runs it.
+
+It drives only the console's own API, signed in as the owner `mcp_flow.py`
+created (its `--state-file`: the address, the password and three recovery
+codes, mode 0600): one recovery code per phase, because a sign-in spends a
+second factor and a TOTP code may not be replayed inside its window. The
+agents themselves are started by the `deploy` job between the phases.
+
+    python3 ci/agent_flow.py --base https://rmm.novieri.com \\
+        --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" \\
+        --state-file "$RUNNER_TEMP/ci-owner.json" \\
+        --phase token --token-file "$RUNNER_TEMP/enroll-token" \\
+        --token-file "$RUNNER_TEMP/agent-data/enroll-token"
+    python3 ci/agent_flow.py ... --phase job --hostname "$(hostname)"
+    python3 ci/agent_flow.py ... --phase refused --hostname ci-agent \\
+        --container ci-agent --pins-file "$RUNNER_TEMP/agent-data/pins.json"
+
+`token`: for each `--token-file`, a one-use, one-hour enrollment token for the
+organization's own client's Principal site, written to a NEW file, 0600
+(`O_EXCL`), and never printed. `job`: the device the agent enrolled, online; a
+`hello` dispatched to it, signed by the server and answered by the agent with
+its greeting; and the audit chain verified, with the enrolment, the dispatch
+and the result in it. `refused`: the device online; its agent stopped, the
+job-signing key it pinned at enrollment (`pins.json`) replaced by one nobody
+holds the private half of, and started again; a `hello` the server signs as
+always, refused with `bad_signature` and no greeting; and the chain verified,
+with the dispatch and the refusal in it and no success. It prints what held,
+never a token, a password or a code.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import secrets
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mcp_flow import (  # noqa: E402
+    SESSION_COOKIE,
+    Client,
+    Failed,
+    Unreachable,
+    check,
+    ok,
+    parse_resolve,
+    pin_resolution,
+)
+
+#: What each phase has to have proven before it may say "every assertion
+#: held"; `main` fails a phase that came back with any of these unmarked
+#: (the same rule as `mcp_flow.PHASES`). `backend/tests/test_ci_agent_flow.py`
+#: holds the lists and every mark.
+PHASES: dict[str, tuple[str, ...]] = {
+    "token": (
+        "signed in with a recovery code",
+        "the Principal site of the organization's own client",
+        "a one-use enrollment token, written and not printed",
+    ),
+    "job": (
+        "signed in with a recovery code",
+        "the agent's device, online",
+        "a server-signed hello, answered by the agent",
+        "the audit chain verifies, with the agent in it",
+    ),
+    "refused": (
+        "signed in with a recovery code",
+        "the agent's device, online",
+        "the agent's pinned job-signing key, one the server does not hold",
+        "a server-signed hello, refused with bad_signature and never run",
+        "the audit chain verifies, with the refusal in it",
+    ),
+}
+#: The audit actions the job phase must find, in this order, after the token.
+AGENT_TRAIL = (
+    "enrollment.token_created",
+    "enrollment.device_enrolled",
+    "gateway.connected",
+    "jobs.dispatched",
+    "jobs.succeeded",
+)
+#: The refused phase's, for its device and its hello.
+REFUSAL_TRAIL = (
+    "enrollment.device_enrolled",
+    "gateway.connected",
+    "jobs.dispatched",
+    "jobs.refused",
+)
+TERMINAL = frozenset({"succeeded", "failed", "expired", "refused", "cancelled"})
+#: SubjectPublicKeyInfo for Ed25519 (RFC 8410), before the 32 key bytes.
+ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+
+
+def write_secret(path: str, value: str) -> None:
+    """A NEW file, 0600 from its creation (`O_EXCL`); nothing printed."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(value)
+
+
+def distrusted(pins: dict[str, Any], raw: bytes | None = None) -> dict[str, Any]:
+    """`pins` with `job_signing_public_key_pem` replaced by an Ed25519 key
+    nobody holds the private half of: 32 random bytes in the RFC 8410
+    wrapper. The agent parses it as it parses the real one
+    (`agent/internal/enroll/enroll.go`, `parseEd25519PublicKey`), and no
+    signature the server makes verifies against it."""
+    key = raw if raw is not None else os.urandom(32)
+    check(len(key) == 32, "an Ed25519 public key is 32 bytes")
+    body = base64.b64encode(ED25519_SPKI_PREFIX + key).decode("ascii")
+    pem = "-----BEGIN PUBLIC KEY-----\n" + body + "\n-----END PUBLIC KEY-----\n"
+    check(pem != pins.get("job_signing_public_key_pem"), "the new key is the old one")
+    return {**pins, "job_signing_public_key_pem": pem}
+
+
+def run_docker(*args: str) -> str:
+    """One `docker` command on the runner; its output, both streams."""
+    done = subprocess.run(["docker", *args], capture_output=True, text=True, check=True)
+    return done.stdout + done.stderr
+
+
+def read_owner(path: str) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as handle:
+        owner = json.load(handle)
+    check(
+        isinstance(owner, dict)
+        and isinstance(owner.get("recovery_codes"), list)
+        and len(owner["recovery_codes"]) >= 2,
+        "the owner's state file holds no two recovery codes",
+    )
+    return owner
+
+
+def principal_site(
+    clients: list[dict[str, Any]], sites_of: Callable[[str], list[dict[str, Any]]]
+) -> str:
+    """The organization's own client (`kind` internal) and its site named
+    Principal (`app/services/clients.py`, `PRINCIPAL_SITE`)."""
+    internal = [c for c in clients if c.get("kind") == "internal"]
+    check(len(internal) == 1, f"{len(internal)} internal clients, not one")
+    sites = [s for s in sites_of(internal[0]["id"]) if s.get("name") == "Principal"]
+    check(len(sites) == 1, "the internal client has no site named Principal")
+    return str(sites[0]["id"])
+
+
+def chain_order(events: list[dict[str, Any]]) -> list[str]:
+    """The actions oldest first, in the chain's own order: by `id`, a UUIDv7
+    (`docs/07-backup-restore.md`, "`ORDER BY id` is the correct ordering").
+    Not by `ts`, which is whole seconds: a job dispatched and answered in the
+    same second would read answered first (measured on 2026-11-23)."""
+    return [event["action"] for event in sorted(events, key=lambda event: str(event["id"]))]
+
+
+def trail_for(events: list[dict[str, Any]], device_id: str, job_id: str) -> list[str]:
+    """The chain's actions, oldest first, that belong to THIS agent and THIS
+    hello: the device's enrolment and connection (`target_id` the device's) and
+    the hello's `jobs.*` events (`target_id` the job's). The gateway sends the
+    device an `inventory.collect` of its own on connect, so a check on names
+    alone is satisfied by a job that is not the hello."""
+    target = {
+        "enrollment.device_enrolled": device_id,
+        "gateway.connected": device_id,
+        "jobs.dispatched": job_id,
+        "jobs.succeeded": job_id,
+    }
+    return [
+        event["action"]
+        for event in sorted(events, key=lambda event: str(event["id"]))
+        if event["action"] == "enrollment.token_created"
+        or target.get(event["action"]) == event.get("target_id")
+        or (event["action"] == "jobs.refused" and event.get("target_id") == job_id)
+    ]
+
+
+def trail_in_order(actions: list[str], expected: tuple[str, ...] = AGENT_TRAIL) -> bool:
+    """`expected` appears in `actions` as a subsequence, oldest first."""
+    rest = iter(actions)
+    return all(any(action == want for action in rest) for want in expected)
+
+
+class AgentFlow:
+    def __init__(
+        self,
+        client: Client,
+        owner: dict[str, Any],
+        docker: Callable[..., str] = run_docker,
+    ) -> None:
+        self.http = client
+        self.owner = owner
+        self.docker = docker
+        self.reached: set[str] = set()
+
+    def done(self, section: str) -> None:
+        self.reached.add(section)
+
+    def get(self, path: str) -> Any:
+        answer = self.http.request("GET", path)
+        check(answer.status == 200, f"GET {answer.path} answered {answer.status}")
+        return answer.json()
+
+    def sign_in(self, code_index: int) -> None:
+        login = self.http.request(
+            "POST",
+            "/api/v1/auth/login",
+            body={"email": self.owner["email"], "password": self.owner["password"]},
+            console=True,
+        )
+        check(login.status == 200, f"the sign-in answered {login.status}")
+        check(login.json().get("state") == "factor_required", "the sign-in asked for no factor")
+        factor = self.http.request(
+            "POST",
+            "/api/v1/auth/factor/recovery",
+            body={"code": self.owner["recovery_codes"][code_index]},
+            console=True,
+        )
+        check(factor.status == 200, f"the recovery code answered {factor.status}")
+        check(factor.json().get("state") == "signed_in", "the recovery code did not sign in")
+        check(SESSION_COOKIE in self.http.cookies.values, "no session cookie after the factor")
+        ok("signed in: password and a recovery code")
+        self.done("signed in with a recovery code")
+
+    def token(self, *token_files: str) -> None:
+        """One one-use token per file: one sign-in, however many agents."""
+        check(len(token_files) >= 1, "no --token-file to write a token to")
+        self.sign_in(0)
+        site = principal_site(
+            self.get("/api/v1/clients"), lambda cid: self.get(f"/api/v1/clients/{cid}/sites")
+        )
+        ok("the site: the internal client's Principal")
+        self.done("the Principal site of the organization's own client")
+        for token_file in token_files:
+            made = self.http.request(
+                "POST",
+                "/api/v1/enrollment-tokens",
+                body={"name": "ci agent", "expires_in_hours": 1, "max_uses": 1, "site_id": site},
+                console=True,
+            )
+            check(made.status == 201, f"POST /api/v1/enrollment-tokens answered {made.status}")
+            body = made.json()
+            check(
+                body.get("max_uses") == 1 and body.get("site_id") == site, "not the token asked for"
+            )
+            write_secret(token_file, body["token"])
+            ok("an enrollment token: one use, one hour, written 0600 and not printed")
+        self.done("a one-use enrollment token, written and not printed")
+
+    def device(self, hostname: str, wait_s: float) -> str:
+        deadline = time.monotonic() + wait_s
+        seen = "no device"
+        while True:
+            items = self.get("/api/v1/devices?limit=200")["items"]
+            mine = [d for d in items if d.get("hostname") == hostname]
+            if mine:
+                seen = f"agent_status={mine[0].get('agent_status')}"
+                if mine[0].get("agent_status") == "online":
+                    return str(mine[0]["id"])
+            if time.monotonic() > deadline:
+                raise Failed(f"no online device {hostname} after {wait_s:.0f} s ({seen})")
+            time.sleep(2)
+
+    def distrust(self, container: str, pins_file: str, wait_s: float) -> None:
+        """Stop the agent, replace the key it pinned, start it, and wait for it
+        to connect again (one more `gateway connected` in its log)."""
+        before = self.docker("logs", container).count("gateway connected")
+        self.docker("stop", container)
+        with open(pins_file, encoding="utf-8") as handle:
+            pins = json.load(handle)
+        with open(pins_file, "w", encoding="utf-8") as handle:
+            json.dump(distrusted(pins), handle)
+        self.docker("start", container)
+        deadline = time.monotonic() + wait_s
+        while self.docker("logs", container).count("gateway connected") <= before:
+            if time.monotonic() > deadline:
+                raise Failed(f"{container} did not connect again in {wait_s:.0f} s")
+            time.sleep(2)
+        ok("the agent pins a job-signing key the server does not hold, and is connected again")
+        self.done("the agent's pinned job-signing key, one the server does not hold")
+
+    def job(self, hostname: str, wait_s: float) -> None:
+        self.sign_in(1)
+        device_id = self.device(hostname, wait_s)
+        ok(f"the device {hostname} enrolled and is online")
+        self.done("the agent's device, online")
+
+        message = "novieri-ci-" + secrets.token_hex(4)
+        made = self.http.request(
+            "POST",
+            "/api/v1/jobs",
+            body={"type": "hello", "device_id": device_id, "params": {"message": message}},
+            console=True,
+        )
+        check(made.status == 201, f"POST /api/v1/jobs answered {made.status}")
+        job = made.json()
+        check(job.get("signed") is True, "the job carries no server signature")
+        deadline = time.monotonic() + wait_s
+        while job.get("status") not in TERMINAL:
+            if time.monotonic() > deadline:
+                raise Failed(f"the hello job is still {job.get('status')} after {wait_s:.0f} s")
+            time.sleep(1)
+            job = self.get(f"/api/v1/jobs/{job['id']}")
+        check(job["status"] == "succeeded", f"the hello job ended {job['status']}")
+        check(job.get("result") == {"greeting": message}, "the hello result is not its greeting")
+        ok("hello: server-signed, answered by the agent with its greeting")
+        self.done("a server-signed hello, answered by the agent")
+
+        verified = self.get("/api/v1/audit/verify")
+        check(
+            verified.get("ok") is True and verified.get("broken_at") is None, "the chain is broken"
+        )
+        events = self.get("/api/v1/audit?limit=200")["items"]
+        check(
+            trail_in_order(trail_for(events, device_id, str(job["id"]))),
+            f"the audit log lacks, for this device and this hello, in order: "
+            f"{', '.join(AGENT_TRAIL)}",
+        )
+        ok(f"the audit chain verifies over {verified['count']} events, the agent's included")
+        self.done("the audit chain verifies, with the agent in it")
+
+
+    def refused(self, hostname: str, container: str, pins_file: str, wait_s: float) -> None:
+        check(
+            len(self.owner["recovery_codes"]) >= 3,
+            "the owner's state file holds no third recovery code for this phase",
+        )
+        self.sign_in(2)
+        device_id = self.device(hostname, wait_s)
+        ok(f"the device {hostname} enrolled and is online")
+        self.done("the agent's device, online")
+        self.distrust(container, pins_file, wait_s)
+
+        message = "novieri-ci-refused-" + secrets.token_hex(4)
+        made = self.http.request(
+            "POST",
+            "/api/v1/jobs",
+            body={"type": "hello", "device_id": device_id, "params": {"message": message}},
+            console=True,
+        )
+        check(made.status == 201, f"POST /api/v1/jobs answered {made.status}")
+        job = made.json()
+        check(job.get("signed") is True, "the job carries no server signature")
+        deadline = time.monotonic() + wait_s
+        while job.get("status") not in TERMINAL:
+            if time.monotonic() > deadline:
+                raise Failed(f"the hello job is still {job.get('status')} after {wait_s:.0f} s")
+            time.sleep(1)
+            job = self.get(f"/api/v1/jobs/{job['id']}")
+        check(job["status"] == "refused", f"the hello it does not trust ended {job['status']}")
+        check(
+            job.get("result") == {"refused": "bad_signature"},
+            f"refused, but not for its signature: {job.get('result')}",
+        )
+        check(message not in json.dumps(job), "the refused hello's greeting came back: it ran")
+        ok("hello: server-signed, refused by the agent with bad_signature, never run")
+        self.done("a server-signed hello, refused with bad_signature and never run")
+
+        verified = self.get("/api/v1/audit/verify")
+        check(
+            verified.get("ok") is True and verified.get("broken_at") is None, "the chain is broken"
+        )
+        events = self.get("/api/v1/audit?limit=200")["items"]
+        check(
+            trail_in_order(trail_for(events, device_id, str(job["id"])), REFUSAL_TRAIL),
+            f"the audit log lacks, for this device and this hello, in order: "
+            f"{', '.join(REFUSAL_TRAIL)}",
+        )
+        check(
+            not any(
+                e["action"] == "jobs.succeeded" and e.get("target_id") == str(job["id"])
+                for e in events
+            ),
+            "the audit log says the refused hello succeeded",
+        )
+        ok(f"the audit chain verifies over {verified['count']} events, the refusal included")
+        self.done("the audit chain verifies, with the refusal in it")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--base", required=True, help="the public entrypoint")
+    parser.add_argument("--cafile", help="the root the entrypoint's certificate chains to")
+    parser.add_argument(
+        "--resolve", type=parse_resolve, action="append", default=[], help="NAME:ADDRESS"
+    )
+    parser.add_argument("--state-file", required=True, help="the owner's sign-in (mcp_flow.py)")
+    parser.add_argument("--phase", choices=tuple(PHASES), required=True)
+    parser.add_argument(
+        "--token-file", action="append", default=[], help="phase token: where a token goes"
+    )
+    parser.add_argument("--hostname", help="phases job and refused: the agent's hostname")
+    parser.add_argument("--container", help="phase refused: the agent's container")
+    parser.add_argument("--pins-file", help="phase refused: the agent's pins.json")
+    parser.add_argument("--wait-s", type=float, default=120.0)
+    args = parser.parse_args(argv)
+    if args.phase == "token" and not args.token_file:
+        parser.error("--phase token needs --token-file")
+    if args.phase == "job" and not args.hostname:
+        parser.error("--phase job needs --hostname")
+    if args.phase == "refused" and not (args.hostname and args.container and args.pins_file):
+        parser.error("--phase refused needs --hostname, --container and --pins-file")
+    pin_resolution(dict(args.resolve))
+    try:
+        flow = AgentFlow(Client(args.base, args.cafile), read_owner(args.state_file))
+        if args.phase == "token":
+            flow.token(*args.token_file)
+        elif args.phase == "job":
+            flow.job(args.hostname, args.wait_s)
+        else:
+            flow.refused(args.hostname, args.container, args.pins_file, args.wait_s)
+    except Failed as exc:
+        print(f"FAIL  {exc}")
+        return 1
+    except Unreachable as exc:
+        print(f"UNREACHABLE  {exc}", file=sys.stderr)
+        return 2
+    missing = [section for section in PHASES[args.phase] if section not in flow.reached]
+    if missing:
+        print(f"FAIL  phase {args.phase} never reached: {'; '.join(missing)}")
+        return 1
+    print(f"agent_flow: phase {args.phase}: every assertion held")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Y `mcp_flow.py`, con este guion, desde la raíz (no se guarda):
+
+```bash
+S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
+cat > "$S/task5_mcp.py" <<'TASK5_MCP'
+"""Plan 2026-11-27, Task 5: mcp_flow.py leaves a third recovery code for
+agent_flow.py's `refused` phase (coordinator's ruling Q3). Two anchors."""
+
+from pathlib import Path
+
+FLOW = Path("deploy/ci/mcp_flow.py")
+text = FLOW.read_text()
+for old, new in (
+    (
+        "`--state-file`, in phase open, writes the owner's address, password and two\n"
+        "recovery codes to a new file,",
+        "`--state-file`, in phase open, writes the owner's address, password and three\n"
+        "recovery codes to a new file,",
+    ),
+    (
+        "        self.remember_owner(email, password, list(codes)[:2])\n",
+        "        self.remember_owner(email, password, list(codes)[:3])\n",
+    ),
+):
+    assert text.count(old) == 1, old
+    text = text.replace(old, new)
+FLOW.write_text(text)
+print("mcp_flow.py: three recovery codes for agent_flow.py")
+TASK5_MCP
+python3 "$S/task5_mcp.py"
+```
+
+Expected: `mcp_flow.py: three recovery codes for agent_flow.py`.
+
 Y el trabajo `deploy`, con este guion, desde la raíz (no se guarda):
 
 ````bash
@@ -4278,9 +5196,14 @@ PEBBLE_AND_FIRST_BOOT = """\
           echo "PEBBLE_ROOT=$RUNNER_TEMP/pebble-root.pem" >> "$GITHUB_ENV"
 
       - name: first boot -- scripts/first-boot.sh, answered as an operator would
-        # deploy/README.md, First boot, 1: steps 1 to 7, OpenBao's auto-unseal
-        # and step 8's install code, with FIVE shares and a threshold of three,
-        # as on the VPS. ITS_FIRST_BOOT_ALLOW_NONTTY=1 lets it print the shares
+        # deploy/README.md, First boot, 1: steps 1 to 3.6, OpenBao's
+        # auto-unseal, steps 4 to 7 and step 8's install code, with FIVE shares
+        # and a threshold of three, as on the VPS. Step 1 is the step above's
+        # (Pebble starts only with a .env, and step 7 needs its root), so the
+        # script must say it skipped it: the second --require. The systemd
+        # timers of steps 6b and 12 are written, never enabled here
+        # (ITS_NO_SYSTEMCTL=1): unverified, as before 2026-11-27.
+        # ITS_FIRST_BOOT_ALLOW_NONTTY=1 lets it print the shares
         # and the root token with no terminal; first_boot_answers.py masks
         # each one before its line is printed, types SAVED and three shares
         # back on the script's stdin, and fails unless the run ends as a good
@@ -4322,15 +5245,19 @@ PEBBLE_AND_FIRST_BOOT = """\
         # New with design 2026-11-27 (§3, §5): a run again after a failure is
         # the script's whole recovery story. With no terminal and nothing on
         # stdin it may print no secret, ask nothing, and change nothing: the
-        # same .env, token and key files, containers (by id and start time) and
-        # schema before and after, no `run` line, and every step a `skip`.
+        # same .env, token and key files, containers and schema before and
+        # after, no `run` line, and every step a `skip`. A container is its id
+        # and, while it runs, its start time; a one-shot (migrate,
+        # postgres-grants, openbao-init) runs again on every `up -d` under the
+        # same id -- measured with Compose 5.7.1 on 2026-11-27 -- so for one
+        # its exit code is what must not change.
         working-directory: deploy
         run: |
           set -euo pipefail
           fingerprint() {
             sha256sum .env
             sudo sha256sum /etc/it-suite/gateway-issuer.token /etc/it-suite/openbao-unseal/unseal.key
-            docker compose ps -aq | sort | xargs docker inspect -f '{{.Name}} {{.Id}} {{.State.StartedAt}}'
+            docker compose ps -aq | sort | xargs docker inspect -f '{{.Name}} {{.Id}} {{if .State.Running}}{{.State.StartedAt}}{{else}}exit={{.State.ExitCode}}{{end}}'
             docker compose exec -T postgres psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version'
           }
           before="$(fingerprint)"
@@ -4363,7 +5290,7 @@ OAUTH_RUN_OLD = cut("          set -euo pipefail\n          umask 077\n         
 OAUTH_RUN_NEW = """\
           set -euo pipefail
           umask 077
-          trap 'rm -f "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json" "$RUNNER_TEMP/enroll-token" "$RUNNER_TEMP/check.log"; docker rm -f smoke-agent >/dev/null 2>&1 || true; rm -rf /tmp/smoke-agent' EXIT
+          trap 'rm -f "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json" "$RUNNER_TEMP/enroll-token" "$RUNNER_TEMP/check.log"; docker rm -f smoke-agent ci-agent >/dev/null 2>&1 || true; rm -rf /tmp/smoke-agent "$RUNNER_TEMP/agent-data"' EXIT
 
           # 1. Nothing of the old identity provider is defined, at all.
           defined="$(docker compose config --services) $(docker compose config --images)"
@@ -4422,10 +5349,14 @@ AGENT_NEW = """\
           #     agent_flow.py presses "Run job" -- a `hello` the server signs
           #     and the agent verifies -- and the script waits for it (11d),
           #     verifies the chain (11e), retires the agent (11f) and takes the
-          #     first backup (12).
+          #     first backup (12). One sign-in mints two one-use tokens: this
+          #     agent's, and 7c-bis's.
           agents() { python3 ci/agent_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" --state-file "$RUNNER_TEMP/ci-owner.json" "$@"; }
-          agents --phase token --token-file "$RUNNER_TEMP/enroll-token" || { docker compose logs api traefik; exit 1; }
+          agent_data="$RUNNER_TEMP/agent-data"
+          mkdir -m 700 "$agent_data"
+          agents --phase token --token-file "$RUNNER_TEMP/enroll-token" --token-file "$agent_data/enroll-token" || { docker compose logs api traefik; exit 1; }
           echo "::add-mask::$(<"$RUNNER_TEMP/enroll-token")"
+          echo "::add-mask::$(<"$agent_data/enroll-token")"
           { cat "$RUNNER_TEMP/enroll-token"; echo; } \\
             | ./scripts/first-boot-check.sh --tls-cafile "$pebble_root" --connect 127.0.0.1 --wait-job 180 \\
               > "$RUNNER_TEMP/check.log" 2>&1 &
@@ -4439,6 +5370,32 @@ AGENT_NEW = """\
           wait "$check" || { cat "$RUNNER_TEMP/check.log"; docker compose logs api gateway; exit 1; }
           cat "$RUNNER_TEMP/check.log"
           grep -qx 'First boot is complete.' "$RUNNER_TEMP/check.log"
+
+          # 7c-bis. Invariant 1, the negative half, end to end (coordinator's
+          #     ruling Q3, 2026-11-27; until then a rehearsal only, plan
+          #     2026-11-23, Task 10). The same binary, enrolled with the second
+          #     token on the stack's network -- its own agent, since
+          #     first-boot-check.sh retired its one at 11f -- is stopped, made
+          #     to pin a job-signing key nobody holds the private half of, and
+          #     started again; the server signs a hello as always, and the agent
+          #     must refuse it with bad_signature and run nothing: no greeting
+          #     comes back, the chain holds jobs.refused and no success, and the
+          #     agent's own log says why.
+          agent_bin="$(cd ../agent && pwd)/dist/novieri-agent"
+          docker run -d --name ci-agent --hostname ci-agent --network it-suite_default \\
+            --add-host rmm.novieri.com:172.19.240.250 --user "$(id -u):$(id -g)" \\
+            -v "$agent_bin:/usr/local/bin/novieri-agent:ro" \\
+            -v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro" \\
+            -v "$agent_data:/var/lib/novieri-agent" \\
+            -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \\
+            busybox:1.36.1 /usr/local/bin/novieri-agent
+          for _ in $(seq 1 60); do
+            docker logs ci-agent 2>&1 | grep -c 'gateway connected' >/dev/null && break
+            sleep 2
+          done
+          test ! -e "$agent_data/enroll-token" || { docker logs ci-agent; echo "::error::the agent kept its enrollment token after enrolling"; exit 1; }
+          agents --phase refused --hostname ci-agent --container ci-agent --pins-file "$agent_data/pins.json" || { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }
+          docker logs ci-agent 2>&1 | grep -E 'msg="job refused".*job_type=hello.*reason=bad_signature'
 
 """
 STOP_FIRST = """\
@@ -4526,25 +5483,80 @@ deploy (compose first boot · app_user privileges)
 - teardown
 ```
 
-`git diff --stat .github/workflows/ci.yml` da `1 file changed, 279 insertions(+), 235 deletions(-)`, todo dentro del trabajo `deploy` (`git diff -U0 .github/workflows/ci.yml | grep '^@@'` no muestra ningún trozo por encima de la línea 369 ni por debajo de la que empieza `  frontend:`).
+`git diff --stat .github/workflows/ci.yml` da `1 file changed, 309 insertions(+), 226 deletions(-)`, todo dentro del trabajo `deploy` (`git diff -U0 .github/workflows/ci.yml | grep '^@@'` no muestra ningún trozo por encima de la línea 369 ni por debajo de la que empieza `  frontend:`).
 
 - [ ] **Step 4: Las pruebas pasan**
 
 Run, desde `backend/`: `ITS_TEST_REDIS_URL=redis://localhost:6379/5 .venv/bin/python -m pytest -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning -p no:cacheprovider -q tests/test_ci_first_boot.py tests/test_ci_mcp_flow.py tests/test_ci_agent_flow.py` y `.venv/bin/ruff check app tests`. Desde la raíz, el paso nuevo de la CI: `shellcheck deploy/scripts/prepare-host.sh deploy/scripts/first-boot.sh deploy/scripts/first-boot-check.sh && echo SHELLCHECK-CLEAN`.
 
-Expected: `87 passed`; `All checks passed!`; `SHELLCHECK-CLEAN`.
+Expected: `95 passed` (15, y 80 de los dos archivos de la CI); `All checks passed!`; `SHELLCHECK-CLEAN`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: El diseño, §5 y §8.2** (resolución Q3)
+
+Con este guion, desde la raíz (no se guarda en el repositorio):
 
 ```bash
-git add .github/workflows/ci.yml deploy/ci/first_boot_answers.py backend/tests/test_ci_first_boot.py backend/tests/test_ci_mcp_flow.py backend/tests/test_ci_agent_flow.py
+S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
+cat > "$S/task5_spec.py" <<'TASK5_SPEC'
+"""Plan 2026-11-27, Task 5: the design's §5 says the bad-signature check is
+added, not kept (coordinator's ruling Q3, 2026-11-27), and §8.2 counts it.
+Each anchor once; nothing is written unless both are there."""
+
+from pathlib import Path
+
+SPEC = Path("docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md")
+EDITS = (
+    (
+        """\
+  por el 443 y conectado por el 8443 con un `hello` firmado, rojo con la firma
+  mala, cadena de auditoría, privilegios de `app_user`, copia y restauración) y
+  añade: OpenBao se desella solo tras `docker compose restart openbao`; y
+  `first-boot.sh` lanzado por segunda vez sale bien sin cambiar nada.
+""",
+        """\
+  por el 443 y conectado por el 8443 con un `hello` firmado, cadena de
+  auditoría, privilegios de `app_user`, copia y restauración) y añade: OpenBao
+  se desella solo tras `docker compose restart openbao`; `first-boot.sh`
+  lanzado por segunda vez sale bien sin cambiar nada; y el rojo con la firma
+  mala, hasta hoy un ensayo: el agente compilado, con una clave de firma fijada
+  que el servidor no tiene, rechaza un `hello` firmado con `bad_signature` y no
+  lo ejecuta (decisión del coordinador del 2026-11-27, pregunta Q3 del plan).
+""",
+    ),
+    (
+        """\
+   comprobaciones de hoy más las dos nuevas.
+""",
+        """\
+   comprobaciones de hoy más las tres nuevas.
+""",
+    ),
+)
+text = SPEC.read_text()
+for old, _ in EDITS:
+    assert text.count(old) == 1, old[:60]
+for old, new in EDITS:
+    text = text.replace(old, new)
+SPEC.write_text(text)
+print("design §5 and §8.2: the bad signature is added, a third new check")
+TASK5_SPEC
+python3 "$S/task5_spec.py"
+grep -c 'rojo con la firma\|tres nuevas' docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
+```
+
+Expected: `design §5 and §8.2: the bad signature is added, a third new check` y `2`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .github/workflows/ci.yml deploy/ci/first_boot_answers.py deploy/ci/agent_flow.py deploy/ci/mcp_flow.py backend/tests/test_ci_first_boot.py backend/tests/test_ci_mcp_flow.py backend/tests/test_ci_agent_flow.py docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
 git commit -m "ci(deploy): the deploy job's first boot is first-boot.sh and first-boot-check.sh
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_013TnTdGAz4rSe1YRXXjEqyr"
 ```
 
-- [ ] **Step 6: El trabajo, en rojo y en verde, aquí**
+- [ ] **Step 7: El trabajo, en rojo y en verde, aquí**
 
 En una rama de ensayo que no se fusiona: `git switch -c t5-rehearsal`. Docker, con el espejo de Docker Hub y las imágenes base de la sesión (Global Constraints, «Docker»):
 
@@ -4652,40 +5664,33 @@ backend/.venv/bin/python "$S/run_ci_job.py" . deploy 2>&1 | tee "$S/t5-red-again
 
 Expected: hasta `===== OpenBao unseals itself after a restart: exit 0`, cada paso `exit 0`; en el siguiente, `  run     ./scripts/build-images.sh, then IT_SUITE_VERSION=… in .env`, `::error::first-boot.sh run again changed something` y `===== first-boot.sh again -- every step done, nothing changed: exit 1`; `teardown` corre igual (`exit 0`).
 
-**Rojo 3, la firma** (el falsador de la invariante 1 sobre el binario, el del plan del 2026-11-23, Task 10, Step 6, sobre el agente de `first-boot-check.sh`): en cuanto el agente conectó, se cambia la clave de firma de trabajos que fijó al inscribirse (`<datos>/pins.json`, `job_signing_public_key_pem`) por una Ed25519 nueva cuya mitad privada no tiene nadie. El servidor firma como siempre, y el `hello` tiene que acabar rechazado:
+**Rojo 3, la firma: el caso negativo nuevo** (resolución Q3; el falsador de la invariante 1 sobre el binario): un agente que no verifica la firma. Se planta en su código, solo en esta rama de ensayo, `if false && ` delante de la comprobación de `agent/internal/jobs/verify.go:180` (M10); el paso de la CI que compila el agente lo compila así. El `hello` bueno del 7c sigue saliendo bien (el servidor lo firmó), y el 7c-bis tiene que ponerse en rojo, porque el agente ejecuta el `hello` que no debía:
 
 ```bash
 python3 - <<'PLANT'
 from pathlib import Path
-ci = Path(".github/workflows/ci.yml"); text = ci.read_text()
-anchor = '          agents --phase job --hostname "$(hostname)" ||'
+verify = Path("agent/internal/jobs/verify.go"); text = verify.read_text()
+anchor = "\tif !ed25519.Verify(v.key, msg, sig) {\n"
 assert text.count(anchor) == 1
-red = (
-    "          docker stop smoke-agent >/dev/null\n"
-    "          python3 -c 'import json,subprocess,sys; p=sys.argv[1]; d=json.load(open(p)); "
-    'k=subprocess.run("openssl genpkey -algorithm ed25519 | openssl pkey -pubout", shell=True, '
-    "check=True, capture_output=True, text=True).stdout; d[\"job_signing_public_key_pem\"]=k; "
-    "json.dump(d, open(p, \"w\"))' /tmp/smoke-agent/pins.json\n"
-    "          docker start smoke-agent >/dev/null\n"
-)
-ci.write_text(text.replace(anchor, red + anchor))
-print("planted: the agent now pins a key the server never signs with")
+verify.write_text(text.replace(anchor, "\tif false && !ed25519.Verify(v.key, msg, sig) {\n"))
+print("planted: an agent that never checks a job's signature")
 PLANT
+(cd agent && go test -run '^TestSignatureIsCheckedBeforeAnythingElseIsBelieved$' ./internal/jobs/ 2>&1 | head -1)
 cd deploy && { docker compose down -v 2>/dev/null || true; } && rm -f .env; cd ..
-backend/.venv/bin/python "$S/run_ci_job.py" . deploy 2>&1 | tee "$S/t5-red-signature.log" | grep -E '^=====|^ok    the device|^FAIL|agent_flow: phase'; grep -m1 'msg="job refused".*job_type=hello' "$S/t5-red-signature.log"; git checkout -- .github/workflows/ci.yml
+backend/.venv/bin/python "$S/run_ci_job.py" . deploy 2>&1 | tee "$S/t5-red-signature.log" | grep -E '^=====|^ok    (the device|the agent pins|hello)|^FAIL|agent_flow: phase'; git checkout -- agent/internal/jobs/verify.go
 ```
 
-Expected: cada paso hasta el del OAuth sale `exit 0`, y después `agent_flow: phase token: every assertion held`, `ok    the device … enrolled and is online`, `FAIL  the hello job ended refused`, `===== the platform's own OAuth server and MCP door, live, through Traefik: exit 1`, `===== teardown: exit 0`; y en el registro del agente, que el paso imprime al fallar, `level=WARN msg="job refused" … job_type=hello reason=bad_signature`.
+Expected: `planted: an agent that never checks a job's signature`; `--- FAIL: TestSignatureIsCheckedBeforeAnythingElseIsBelieved (0.00s)` (la suite del propio agente lo ve también, en su trabajo de la CI, y `TestEveryRefusalIsMadeByItsOwnCheck` con ella; este rojo es el del trabajo `deploy`, que no depende de esa suite; medido el 2026-11-27 con Go 1.24.7: el binario plantado compila con `CGO_ENABLED=0 go build -trimpath`, la orden del paso de la CI); cada paso hasta el del OAuth sale `exit 0`, y en él `agent_flow: phase token: every assertion held`, `agent_flow: phase job: every assertion held`, `ok    the device ci-agent enrolled and is online`, `ok    the agent pins a job-signing key the server does not hold, and is connected again`, `FAIL  the hello it does not trust ended succeeded`, `===== the platform's own OAuth server and MCP door, live, through Traefik: exit 1` y `===== teardown: exit 0`. Y `git status --short agent` no imprime nada.
 
 **Verde:**
 
 ```bash
 cd deploy && { docker compose down -v 2>/dev/null || true; } && rm -f .env; cd ..
-backend/.venv/bin/python "$S/run_ci_job.py" . deploy 2>&1 | tee "$S/t5-green.log" | grep -E '^=====|presents a trusted|First boot: every step is done|First boot is complete|OpenBao restarted and came back|answers 503|^ok    (signed in|the site|an enrollment|the device|hello|the audit)|agent_flow: phase|mcp_flow: phase|  ok      step 1[01]'
+backend/.venv/bin/python "$S/run_ci_job.py" . deploy 2>&1 | tee "$S/t5-green.log" | grep -E '^=====|  skip    step 1:|presents a trusted|First boot: every step is done|First boot is complete|OpenBao restarted and came back|answers 503|^ok    (signed in|the site|an enrollment|the device|the agent pins|hello|the audit)|agent_flow: phase|mcp_flow: phase|  ok      step 1[01]|msg="job refused"'
 grep -c '::add-mask::' "$S/t5-green.log"
 ```
 
-Expected: cada paso `exit 0`; en el primer arranque, `ok      127.0.0.1:443 presents a trusted certificate for rmm.novieri.com`, `  ok      OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed` y `First boot: every step is done.`; `OpenBao restarted and came back unsealed, with no share given`; `mcp_flow: phase closed: every assertion held`, `mcp_flow: phase open: every assertion held`, `with the api stopped, /api/v1/setup/status answers 503`; `agent_flow: phase token: every assertion held`, las líneas `  ok      step 10`, `step 11a`, `step 11c`, `step 11d`, `step 11e`, `step 11f`, `agent_flow: phase job: every assertion held` y `First boot is complete.`. El recuento de `::add-mask::` es al menos 9 (cinco partes, el token raíz, el código dos veces —el del guion y el que lee la CI— y el token de inscripción). **Este ensayo no se corrió al escribir el plan**: las líneas esperadas son las que los guiones imprimen, medidas contra el arnés. Si un paso falla por algo que el plan no previó, se corrige el guion o el paso (nunca la comprobación) **en la rama de la tarea**, no en la de ensayo, con su commit y su prueba, y el informe de la tarea dice qué fue. El informe copia las líneas `=====` y las de `ok` de los cuatro registros.
+Expected: cada paso `exit 0`; en el primer arranque, **`  skip    step 1: .env exists (new-env.sh never overwrites one), for rmm.novieri.com`** (resolución Q1: el paso 1 es el de «Throwaway .env»), `  ok      OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed` (justo después del 3.6), `ok      127.0.0.1:443 presents a trusted certificate for rmm.novieri.com` y `First boot: every step is done.`; `OpenBao restarted and came back unsealed, with no share given`; `mcp_flow: phase closed: every assertion held`, `mcp_flow: phase open: every assertion held`, `with the api stopped, /api/v1/setup/status answers 503`; `agent_flow: phase token: every assertion held`, las líneas `  ok      step 10`, `step 11a`, `step 11c`, `step 11d`, `step 11e`, `step 11f`, `agent_flow: phase job: every assertion held` y `First boot is complete.`; y el 7c-bis: `ok    the device ci-agent enrolled and is online`, `ok    the agent pins a job-signing key the server does not hold, and is connected again`, `ok    hello: server-signed, refused by the agent with bad_signature, never run`, `ok    the audit chain verifies over … events, the refusal included`, `agent_flow: phase refused: every assertion held` y la línea del agente, `… level=WARN msg="job refused" job_id=… job_type=hello reason=bad_signature`. El recuento de `::add-mask::` es al menos 10 (cinco partes, el token raíz, el código dos veces —el del guion y el que lee la CI— y los dos tokens de inscripción). **Los temporizadores del 6b y del 12 no se activan** (`ITS_NO_SYSTEMCTL=1`, resolución Q2): este verde no dice nada de ellos. **Este ensayo no se corrió al escribir el plan**: las líneas esperadas son las que los guiones imprimen, medidas contra el arnés. Si un paso falla por algo que el plan no previó, se corrige el guion o el paso (nunca la comprobación) **en la rama de la tarea**, no en la de ensayo, con su commit y su prueba, y el informe de la tarea dice qué fue. El informe copia las líneas `=====` y las de `ok` de los cuatro registros.
 
 Al terminar: `cd deploy && docker compose down -v; cd .. && git switch - && git branch -D t5-rehearsal`.
 
@@ -4698,9 +5703,10 @@ Al terminar: `cd deploy && docker compose down -v; cd .. && git switch - && git 
 - Modify: `deploy/GO-LIVE.md` (§1, una frase; §4, reescrito hasta «The host must not swap»; §6, un punto)
 - Modify: `docs/07-backup-restore.md` (la fila 5 de §1, §2.3, el paso 5 de §3, §5 «What to back up»)
 - Modify: `backend/tests/test_runbook_first_boot.py` (el docstring, tres ayudas, cuatro pruebas reescritas, dos nuevas), `backend/tests/test_deploy_runbook_secrets.py` (los tres guiones en `RUNBOOKS`)
+- Modify: `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md` (§6, un punto: resolución Q7)
 
 **Interfaces:**
-- Consumes: de las Tasks 1, 3 y 4, las líneas que el runbook cita (Interfaces de cada una): `Docker's versions`, `The host is ready for the first boot` y sus dos `note`; `OpenBao restarts and unseals itself`, `  run     docker compose restart openbao`, la línea `ok` del reinicio, `Step 8 — the install code`, la `note` del navegador, `First boot: every step is done.`; `Step 12 — the first backup, so that there is a way back`, sus dos `note` y `First boot is complete.`. Del código: los `ufw allow` de `prepare-host.sh`, las órdenes de los pasos 1 a 7 en `first-boot.sh`, `sudo systemctl daemon-reload` antes de `enable`, `sudo ./scripts/install-backup-timer.sh </dev/null` en `first-boot-check.sh`.
+- Consumes: de las Tasks 1 a 4, las líneas que el runbook cita (Interfaces de cada una): `Docker's versions`, `The host is ready for the first boot` y sus dos `note` (Task 1); `OpenBao restarts and unseals itself`, `  run     docker compose restart openbao` y la línea `ok` del reinicio (Task 2); `Step 4 — migrations`, `Step 8 — the install code`, la `note` del navegador, `First boot: every step is done.` (Task 3); `Step 12 — the first backup, so that there is a way back`, sus dos `note` y `First boot is complete.` (Task 4). Del código: los `ufw allow` de `prepare-host.sh`, las órdenes de los pasos 1 a 7 en `first-boot.sh` y su bloque `main` (`step_3_6`, `auto_unseal`, `restart_proof`, `step_4`, en ese orden), `sudo systemctl daemon-reload` antes de `enable`, `sudo ./scripts/install-backup-timer.sh </dev/null` en `first-boot-check.sh`.
 - Produces:
   - Las anclas nuevas, que los guiones y el informe citan por su nombre: `#first-boot`, `#prepare-hostsh-p2-to-p5`, `#appendix-what-each-script-does-by-hand`, `#if-bao-status-says-sealed-true`. Las de los pasos no cambian (los encabezados conservan su texto: `#step-6b--renew-the-gateways-certificate-every-month`, que cita GO-LIVE §5, sigue valiendo).
   - La estructura que lee el informe (Task 7): en «Prerequisites», `### The machine, and its name`, `### P1 — …`, `### P6 — The checkout`, `### P2 to P5 — \`prepare-host.sh\``; en «First boot», `### 1. \`first-boot.sh\``, `### 2. In the browser: …`, `### 3. \`first-boot-check.sh\``, `### 4. Custody: …`, un bloque `sh` en la 1 y en la 3 y ninguno en la 2 ni en la 4; «After a reboot or a restart» con cuatro bloques `sh`: `bao status` solo, el de `up -d`, el de `openbao-seal.sh status`, el de devolver el archivo de clave.
@@ -4709,8 +5715,11 @@ Al terminar: `cd deploy && docker compose down -v; cd .. && git switch - && git 
 - **Los bloques no se reescriben: se mueven** al apéndice, con un nivel menos de encabezado, en el orden de siempre, partidos en cuatro partes (`prepare-host.sh`, `first-boot.sh`, el navegador, `first-boot-check.sh`). Donde el guion hace algo distinto, el apéndice lo dice junto al bloque (diseño §3, «donde el guion cambia algo, el runbook lo dice»): 3.3 (las partes las pide el guion), 3.4 y 3.5 (el token raíz, de la memoria), 7 (la espera hasta que nada se reinicia), 8 (el código lo genera el guion), 11d (la consulta por dispositivo). Y en tres bloques el apéndice **cambia la orden** porque la del guion es mejor también a mano: el 2 (`up -d --wait postgres`), el 5 (`set -C`: no sobrescribir la clave HMAC) y el 6b (`daemon-reload` antes de `enable`); el 12 lleva `sudo journalctl`. El texto del *here-document* de las unidades del 6b no cambia en un carácter (la prueba de la Task 3 lo compara con lo que escribe el guion).
 - **P6 va antes de P2 a P5**: `prepare-host.sh` está en la copia que hace P6. La numeración P1 a P6 se queda (el diseño la usa).
 - **«After a reboot or a restart» ya no desella con partes**: `bao status` tiene que decir `Sealed false`; con `Sealed true`, el archivo de clave falta o no es el suyo, y la sección dice cómo devolverlo desde su custodia, sin marcadores (`~/unseal.key`, copiado con `scp`). Las partes solo se nombran, en prosa, para un host que siga en Shamir.
-- **GO-LIVE §4** pasa a decir que el desellado automático es lo de cada primer arranque desde el 2026-11-27, con la fecha y la decisión del operador, que las cinco partes son claves de recuperación, y la custodia del archivo de clave (diseño §4, §6). **`docs/07-backup-restore.md`** se cambia también, aunque el diseño §6 no lo nombra: su paso 5 de §3 desellaba con partes, y tras este proyecto eso ya no funciona en ningún host nuevo (criterio §8.5: «dicen lo mismo que los guiones»; pregunta Q7).
+- **GO-LIVE §4** pasa a decir que el desellado automático es lo de cada primer arranque desde el 2026-11-27, con la fecha y la decisión del operador, que las cinco partes son claves de recuperación, y la custodia del archivo de clave (diseño §4, §6). **`docs/07-backup-restore.md`** se cambia también, aunque el diseño §6 no lo nombra: su paso 5 de §3 desellaba con partes, y tras este proyecto eso ya no funciona en ningún host nuevo (criterio §8.5: «dicen lo mismo que los guiones»; resolución Q7: de acuerdo, y el diseño §6 lo nombra desde el Step 5).
 - **La prueba que ata el runbook a los guiones** (`test_the_lines_the_runbook_quotes_are_lines_the_scripts_print`): cada línea `ok`, `run`, `note` o cabecera que «First boot» y «Prerequisites» citan en un bloque `text` está, con `$host`, `$operator` o `$deploy_dir` en lugar de sus valores, en el código de uno de los tres guiones. Una línea con `…` no se compara.
+- **El desellado, en el apéndice, entre el paso 3.6 y el 4** (resolución Q6), como lo corre el guion: la parte del apéndice se llama `### \`first-boot.sh\`: steps 1 to 7, with the auto-unseal after 3.6`, y su bloque «The auto-unseal, and the restart that proves it» va justo antes de `#### Step 4 — Migrations, then table privileges`. «First boot, 1» dice el orden, que un fallo desde el paso 4 se relanza sin partes, y enseña la prueba del reinicio seguida de `Step 4 — migrations`. `test_the_first_boot_runs_the_scripts_that_check_it` ata ese orden en el apéndice (`up openbao-init`, `openbao-seal.sh enable`, `restart openbao`, `up migrate`) y en el bloque `main` del guion; el Step 4 lo enseña en rojo con el bloque movido tras el paso 7, donde estaba antes de la resolución.
+- **P1 sigue a mano** (resolución Q5): la nota de P1 dice que `prepare-host.sh` no crea ninguna cuenta y que, lanzado como `root` solo, se niega y manda aquí.
+- **`first-boot-check.sh` se puede relanzar** (resolución Q8): «First boot, 3» lo dice en negrita, con lo que dicen sus dos primeras líneas (inscribe un agente de prueba en este VPS y lo retira), y qué pasa al relanzarlo tras un fallo y tras terminar bien.
 - **`test_deploy_runbook_secrets.py` lee también los tres guiones**, enteros (comentarios incluidos), como ya leía `issue-gateway-cert.py`: ninguno asigna un token en una línea de órdenes. Pasa desde el principio (los guiones ya cumplen); el Step 2 lo enseña en rojo con una línea plantada.
 
 - [ ] **Step 0: La worktree, con las Tasks 1 a 4**
@@ -4850,8 +5859,9 @@ def test_the_first_boot_is_three_scripts() -> None:
 
 def test_the_first_boot_runs_the_scripts_that_check_it() -> None:
     """The commands of steps 1 to 7, in the appendix's first-boot.sh part, in
-    their order; and first-boot.sh runs each of them, in that order."""
-    part = _part("### `first-boot.sh`: steps 1 to 7, and the auto-unseal\\n")
+    their order, with the auto-unseal between step 3.6 and step 4; and
+    first-boot.sh runs each of them, in that order."""
+    part = _part("### `first-boot.sh`: steps 1 to 7, with the auto-unseal after 3.6\\n")
     commands = [c for block in _sh_blocks(part) for c in _commands(block)]
     for expected in (
         "./scripts/new-env.sh --host rmm.novieri.com",
@@ -4890,6 +5900,23 @@ def test_the_first_boot_runs_the_scripts_that_check_it() -> None:
         )
     ]
     assert in_script == sorted(in_script), in_script
+    # The auto-unseal right after step 3.6, before step 4 starts anything
+    # (coordinator's ruling Q6, 2026-11-27): a failure from step 4 on is run
+    # again with no share. In the appendix, and in the script's own order.
+    seal = (
+        "sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable "
+        "--key-file /etc/it-suite/openbao-unseal/unseal.key"
+    )
+    around = [
+        commands.index(c)
+        for c in ("docker compose up openbao-init", seal, "docker compose restart openbao",
+                  "docker compose up migrate")
+    ]  # fmt: skip
+    assert around == sorted(around), around
+    calls = [line.strip() for line in code.splitlines()]
+    main = calls[calls.index("check_state_before_anything") :]
+    assert main.index("step_3_6") < main.index("auto_unseal") < main.index("restart_proof")
+    assert main.index("restart_proof") < main.index("step_4")
     check = [c for b in _sh_blocks(_part("### `first-boot-check.sh`: steps 10 to 12\\n"))
              for c in _commands(b)]  # fmt: skip
     assert "sudo ./scripts/install-backup-timer.sh" in check
@@ -5017,7 +6044,7 @@ Expected: `the runbook's tests read the first boot where it is now`. Lo que fija
 |---|---|---|
 | `test_the_first_boot_the_reboot_and_the_upgrade_have_no_placeholders` | ningún marcador en los bloques de los requisitos, el primer arranque, el reinicio, la actualización y la copia fuera del host | lo mismo, y además en todos los bloques del apéndice |
 | `test_after_a_reboot_unseals_starts_and_checks_the_certificate` → `test_after_a_reboot_openbao_unseals_itself_and_the_key_file_is_the_way_back` | tres `bao operator unseal`, `up -d`, `check-public-tls.sh` | ningún `bao operator unseal` en un bloque; `up -d`, `check-public-tls.sh`; `openbao-seal.sh status` y la devolución del archivo de clave, antes del reinicio |
-| `test_the_first_boot_runs_the_scripts_that_check_it` | las órdenes de los pasos 1 a 7 y su orden, en «First boot» | las mismas, en la parte de `first-boot.sh` del apéndice; y `first-boot.sh` las ejecuta en ese orden; `install-backup-timer.sh` en la parte y en `first-boot-check.sh` |
+| `test_the_first_boot_runs_the_scripts_that_check_it` | las órdenes de los pasos 1 a 7 y su orden, en «First boot» | las mismas, en la parte de `first-boot.sh` del apéndice; y `first-boot.sh` las ejecuta en ese orden; el desellado entre el 3.6 y el 4, en el apéndice y en el bloque `main` del guion (Q6); `install-backup-timer.sh` en la parte y en `first-boot-check.sh` |
 | `test_the_first_boot_installs_the_gateway_certificates_renewal` | `enable --now` del temporizador antes del `up -d`, la unidad con el token del archivo | lo mismo en el apéndice, con `daemon-reload` antes de `enable`, en el apéndice y en el guion |
 | `test_the_prerequisites_open_only_ssh_the_console_and_the_gateway` | 22, 443 y 8443 y nada más; Docker de su repositorio; la clave de GitHub | lo mismo en la parte de `prepare-host.sh` del apéndice **y** en el código del guion; la clave de GitHub, en P6, y P6 antes de P2 a P5 |
 | nueva: `test_the_first_boot_is_three_scripts` | — | `sudo ./scripts/prepare-host.sh` en los requisitos; «First boot» son dos bloques, `./scripts/first-boot.sh` y `./scripts/first-boot-check.sh`; los tres guiones, ejecutables |
@@ -5110,10 +6137,9 @@ The list contains `sudo`. Every command from here on runs as this account.
 """
 P1_NOTE_NEW = """\
 The list contains `sudo`. Every command from here on runs as this account.
-(`prepare-host.sh`, below, can do P1 too -- `./scripts/prepare-host.sh
---create-user rmmadmin`, run as root -- but only where root already holds the
-checkout, and P6 makes the checkout as this account: on a VPS with only
-`root`, these lines are the way.)
+`prepare-host.sh`, below, makes no account: it runs with `sudo` from this one,
+and run as `root` alone it refuses and points here. On a VPS that comes with
+only `root`, these lines, by hand, are the way.
 """
 p1 = edit(p1, P1_NOTE, P1_NOTE_NEW, "P1")
 
@@ -5209,9 +6235,10 @@ fetches them into `/tmp/le-staging-roots.pem`): `./scripts/first-boot.sh
 ./scripts/first-boot.sh
 ```
 
-Steps 1 to 7, then OpenBao's auto-unseal -- `openbao-seal.sh enable`, and a
-restart of OpenBao that proves it comes back unsealed on its own -- and step
-8's install code. It stops for you four times:
+Steps 1 to 3.6; then OpenBao's auto-unseal -- `openbao-seal.sh enable`, and a
+restart of OpenBao that proves it comes back unsealed on its own; then steps 4
+to 7, with OpenBao unsealing itself, and step 8's install code. It stops for
+you four times:
 
 1. **The Let's Encrypt contact address** (step 1: `new-env.sh`'s question).
    It is required, but Let's Encrypt no longer mails expiry warnings nor keeps
@@ -5223,18 +6250,22 @@ restart of OpenBao that proves it comes back unsealed on its own -- and step
    than on a terminal, the script refuses before it initialises anything.
 3. **Three of the five shares, hidden** (step 3.3). They unseal OpenBao and
    prove your copies are good: each must be one of the five just printed. The
-   script keeps the same three for the auto-unseal, so you are not asked
-   again. The root token is not asked either: it is kept from step 3.2 and
-   written into `.env` (step 3.5).
+   script keeps the same three for the auto-unseal, right after step 3.6, so
+   you are not asked again. The root token is not asked either: it is kept
+   from step 3.2 and written into `.env` (step 3.5).
 4. **Your password, when `sudo` asks** -- for the gateway-issuer token's file
    (step 3.4), step 6b's timer and the auto-unseal's key file.
 
-A good run ends like this, the code being the one to type in the browser:
+A good run proves the auto-unseal right after step 3.6, before step 4 starts
+anything, and ends with the code to type in the browser:
 
 ```text
 OpenBao restarts and unseals itself
   run     docker compose restart openbao
   ok      OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed
+
+Step 4 — migrations
+…
 
 Step 8 — the install code
 
@@ -5248,9 +6279,11 @@ First boot: every step is done.
 **Run again after `bao operator init`** -- it stopped somewhere after step 3.2
 -- it no longer holds what it printed: if `.env` does not have the two tokens
 yet it asks for the root token, hidden, and checks it is this OpenBao's; if
-OpenBao is sealed and the auto-unseal is not on yet, it asks for three shares.
-**OpenBao unseals itself from here on**: the five shares are recovery keys now
-([GO-LIVE.md §4](GO-LIVE.md#4-openbao-seal)).
+the auto-unseal is not on yet, it asks for three shares, once: they unseal
+OpenBao if it is sealed, and move its seal. **From step 4 on, OpenBao unseals
+itself**: a failure there -- step 7's certificate while DNS does not answer
+with this VPS yet, say -- is run again with no share at all, and the five
+shares are recovery keys now ([GO-LIVE.md §4](GO-LIVE.md#4-openbao-seal)).
 
 ### 2. In the browser: claim, your second factor, an enrollment token
 
@@ -5292,9 +6325,11 @@ Step 12 — the first backup, so that there is a way back
 First boot is complete.
 ```
 
-Run again after it stopped, it finds the throwaway agent still running and goes
-on from 11d; run again after it finished, it enrols a second throwaway agent
-(the first stays in the console as a record, offline).
+**It is safe to run again**, and its first lines say what it does to this VPS:
+it enrols a throwaway agent here (11c) and retires it, with its key (11f). Run
+again after it stopped, it finds that agent still running and goes on from
+11d; run again after it finished, it enrols and retires another, and the first
+stays in the console as a record, offline.
 
 ### 4. Custody: off this VPS, now
 
@@ -5344,17 +6379,18 @@ in the middle of a run.
 p2_to_p5_demoted = demote(p2_to_p5)
 
 FIRST_BOOT_PART = """\
-### `first-boot.sh`: steps 1 to 7, and the auto-unseal
+### `first-boot.sh`: steps 1 to 7, with the auto-unseal after 3.6
 
 """
 
 AUTO_UNSEAL = """\
 #### The auto-unseal, and the restart that proves it
 
-On every first boot since 2026-11-27 (the operator's decision, GO-LIVE.md §4):
-OpenBao's seal moves from the five shares to a static key in a file on this
-host, and OpenBao unseals itself after every restart and reboot. Three shares,
-hidden, at its prompts:
+On every first boot since 2026-11-27 (the operator's decision, GO-LIVE.md §4),
+right after step 3.6 and before step 4 starts anything else: OpenBao's seal
+moves from the five shares to a static key in a file on this host, and OpenBao
+unseals itself after every restart and reboot -- so a step from 4 on that
+fails is run again with no share. Three shares, hidden, at its prompts:
 
 ```sh
 sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file /etc/it-suite/openbao-unseal/unseal.key
@@ -5425,7 +6461,7 @@ appendix_1_to_7 = edit(appendix_1_to_7, """\
 > **This happens again every restart.** OpenBao returns **sealed** after any
 """, """\
 > **Without the auto-unseal, this happens again every restart** -- the
-> auto-unseal at the end of this part turns that off. OpenBao returns
+> auto-unseal, right after step 3.6, turns that off. OpenBao returns
 > **sealed** after any
 """, "the restart note")
 appendix_1_to_7 = edit(appendix_1_to_7, """\
@@ -5476,6 +6512,9 @@ more with no container restarting: a service that restarts for ever is up for
 a moment at a time (row 15 of [What
 was broken](#what-was-broken-and-how-you-would-recognise-it)).
 """, "step 7")
+STEP_4 = "#### Step 4 — Migrations, then table privileges\n"
+appendix_1_to_7 = appendix_1_to_7.replace(STEP_4, AUTO_UNSEAL + STEP_4)
+once(appendix_1_to_7, AUTO_UNSEAL + STEP_4, "the auto-unseal, before step 4")
 appendix_8_9 = demote(steps_8_9)
 appendix_10_12 = demote(steps_10_12)
 appendix_10_12 = edit(appendix_10_12, """\
@@ -5499,7 +6538,6 @@ APPENDIX = (
     + p2_to_p5_demoted.rstrip("\n") + "\n\n"
     + FIRST_BOOT_PART
     + appendix_1_to_7
-    + AUTO_UNSEAL
     + BROWSER_PART
     + appendix_8_9
     + CHECK_PART
@@ -5597,9 +6635,9 @@ STATUS_NEW = """\
 
 **Since 2026-11-27 the first boot is three scripts** (design
 `docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md`):
-`prepare-host.sh` (P2 to P5), `first-boot.sh` (steps 1 to 7, OpenBao's
-auto-unseal and step 8's install code) and `first-boot-check.sh` (steps 10 to
-12), with the moments that need a person in between ([First
+`prepare-host.sh` (P2 to P5), `first-boot.sh` (steps 1 to 3.6, OpenBao's
+auto-unseal, steps 4 to 7 and step 8's install code) and `first-boot-check.sh`
+(steps 10 to 12), with the moments that need a person in between ([First
 boot](#first-boot)). The blocks they run are in [the
 appendix](#appendix-what-each-script-does-by-hand), for a step a script stopped
 at or a first boot without them. CI's `deploy` job runs the last two on every
@@ -5673,9 +6711,10 @@ replace_between(GO_LIVE, "## 4. OpenBao seal\n", "- **The host must not swap", "
 
 **Every first boot turns on the auto-unseal with a static key, since
 2026-11-27.** The operator decided it that day ("Activarlo siempre"), knowing
-the cost in the table below: `first-boot.sh` runs `openbao-seal.sh enable`
-with the three shares of step 3.3, then restarts OpenBao to prove it comes
-back unsealed on its own (`deploy/README.md`, First boot). No invariant of
+the cost in the table below: right after step 3.6, before step 4 starts
+anything else, `first-boot.sh` runs `openbao-seal.sh enable` with the three
+shares of step 3.3, then restarts OpenBao to prove it comes back unsealed on
+its own (`deploy/README.md`, First boot). No invariant of
 `CLAUDE.md` changes: jobs stay signed by the server and verified by the agent
 (1), and stored credentials stay encrypted in the vault (3). What changes is
 how the vault is protected **at rest**, below.
@@ -5806,7 +6845,7 @@ grep -n '^## \(Status of this runbook\|Prerequisites\|First boot\|After a reboot
 grep -c '' deploy/README.md
 ```
 
-Expected: las cinco cabeceras, con `## Appendix: what each script does, by hand` la última del archivo; y `4884` líneas.
+Expected: las cinco cabeceras, con `## Appendix: what each script does, by hand` la última del archivo; y `4893` líneas.
 
 - [ ] **Step 4: Las pruebas pasan**
 
@@ -5814,10 +6853,67 @@ Run, desde `backend/`: `ITS_TEST_REDIS_URL=redis://localhost:6379/6 .venv/bin/py
 
 Expected: `106 passed` (entre ellas `test_every_in_page_link_lands_on_a_heading`: cada ancla nueva lleva a un encabezado; la guarda de los nombres viejos sobre el README nuevo y los tres guiones; y la de las unidades del 6b sobre el apéndice); `All checks passed!`.
 
-- [ ] **Step 5: Commit**
+Y el orden del desellado en rojo (resolución Q6), con el bloque del apéndice movido tras el paso 7, donde estaba antes de la resolución, y el README de vuelta después (desde la raíz; la copia no se guarda):
 
 ```bash
-git add deploy/README.md deploy/GO-LIVE.md docs/07-backup-restore.md backend/tests/test_runbook_first_boot.py backend/tests/test_deploy_runbook_secrets.py
+S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
+cp deploy/README.md "$S/README.good"
+python3 - <<'PLANT'
+from pathlib import Path
+readme = Path("deploy/README.md"); text = readme.read_text()
+start = text.index("#### The auto-unseal, and the restart that proves it\n")
+end = text.index("#### Step 4 — Migrations, then table privileges\n")
+part = text[start:end]
+text = text[:start] + text[end:]
+browser = "### In the browser: steps 8 and 9\n"
+assert text.count(browser) == 1
+readme.write_text(text.replace(browser, part + browser))
+print("planted: the auto-unseal after step 7, where it was before the ruling")
+PLANT
+cd backend && ITS_TEST_REDIS_URL=redis://localhost:6379/6 .venv/bin/python -m pytest -p no:cacheprovider -q tests/test_runbook_first_boot.py 2>&1 | tail -2; cd ..
+cp "$S/README.good" deploy/README.md && rm "$S/README.good"
+cd backend && ITS_TEST_REDIS_URL=redis://localhost:6379/6 .venv/bin/python -m pytest -p no:cacheprovider -q tests/test_runbook_first_boot.py 2>&1 | tail -1; cd ..
+```
+
+Expected: `planted: the auto-unseal after step 7, where it was before the ruling`; `FAILED tests/test_runbook_first_boot.py::test_the_first_boot_runs_the_scripts_that_check_it` y `1 failed, 10 passed`; y, con el README de vuelta, `11 passed`.
+
+- [ ] **Step 5: El diseño, §6** (resolución Q7)
+
+Con este guion, desde la raíz (no se guarda en el repositorio):
+
+```bash
+S=/tmp/claude-0/-home-user-Novieri-RMM/21768af2-984e-5cf8-87b2-4dc8a41a4864/scratchpad
+cat > "$S/task6_spec.py" <<'TASK6_SPEC'
+"""Plan 2026-11-27, Task 6: the design's §6 names docs/07-backup-restore.md
+(coordinator's ruling Q7, 2026-11-27). One anchor."""
+
+from pathlib import Path
+
+SPEC = Path("docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md")
+OLD = """\
+- `deploy/GO-LIVE.md` §4: desellado automático por defecto, con la fecha de la
+  decisión y la custodia del archivo de clave.
+"""
+NEW = OLD + """\
+- `docs/07-backup-restore.md`: la fila 5 de §1, §2.3, el paso 5 de §3 y §5, que
+  desellaban con partes; con el desellado automático las partes ya no desellan
+  (decisión del coordinador del 2026-11-27, pregunta Q7 del plan).
+"""
+text = SPEC.read_text()
+assert text.count(OLD) == 1, "§6's GO-LIVE bullet is not there exactly once"
+SPEC.write_text(text.replace(OLD, NEW))
+print("design §6: docs/07-backup-restore.md too")
+TASK6_SPEC
+python3 "$S/task6_spec.py"
+grep -c '^- `docs/07-backup-restore.md`' docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
+```
+
+Expected: `design §6: docs/07-backup-restore.md too` y `1`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add deploy/README.md deploy/GO-LIVE.md docs/07-backup-restore.md backend/tests/test_runbook_first_boot.py backend/tests/test_deploy_runbook_secrets.py docs/superpowers/specs/2026-11-27-despliegue-automatizado-design.md
 git commit -m "docs(deploy): the first boot is three scripts; their blocks are the appendix
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -5852,7 +6948,7 @@ grep -c '^## Appendix: what each script does, by hand$' deploy/README.md
 cd backend && ITS_TEST_REDIS_URL=redis://localhost:6379/7 .venv/bin/python -m pytest -p no:cacheprovider -q tests/test_runbook_first_boot.py tests/test_ci_first_boot.py tests/test_first_boot_script.py; cd ..
 ```
 
-Expected: esa fusión; `HAS-SPEC`; `1`; `55 passed`.
+Expected: esa fusión; `HAS-SPEC`; `1`; `58 passed` (11, 15 y 32).
 
 - [ ] **Step 2: Las secuencias, del runbook**
 
@@ -5970,19 +7066,19 @@ Al coordinador, en este orden:
    1. El VPS: Ubuntu Server 24.04 LTS, 4 vCPU, 8 GB, 100 GB, una IPv4 pública en su interfaz.
    2. El registro `A`: el operador da la IPv4 al coordinador, que lo crea con el conector de Cloudflare de la cuenta de `novieri.com` (servidores `piers.ns.cloudflare.com` y `zainab.ns.cloudflare.com`): enseña el cambio, lo aplica tras el «sí» del operador, `proxied: false`, **ningún `AAAA`**, y comprueba la respuesta en un DNS público (`nslookup -type=A rmm.novieri.com 1.1.1.1` devuelve la IPv4 y `nslookup -type=AAAA rmm.novieri.com 1.1.1.1` ninguna). Antes de `first-boot.sh`, cuyo paso 1c (`preflight.sh`) se niega sin él. Ninguna credencial de Cloudflare llega al VPS ni al repositorio (diseño, cabecera).
    3. En el cortafuegos del proveedor, si lo tiene: entrada 22, 443 y 8443, nada más.
-   4. Si el VPS solo trae `root`: P1 a mano (las cuatro líneas del runbook).
+   4. Si el VPS solo trae `root`: P1 a mano (las cuatro líneas del runbook). `prepare-host.sh` no crea cuentas (resolución Q5): lanzado como `root` solo, se niega y manda a P1.
    5. P6: la clave de despliegue de solo lectura en GitHub, y la copia.
    6. Las preguntas de `first-boot.sh`: la dirección de contacto de Let's Encrypt (vale un buzón de rol); las cinco partes y el token raíz, que se enseñan una vez, a cinco custodios y al gestor de contraseñas, fuera del VPS, antes de teclear `SAVED`; tres de esas partes, ocultas.
    7. El navegador: el código de instalación, la contraseña, el segundo factor, los diez códigos de recuperación; el token de inscripción (11b); y, cuando `first-boot-check.sh` lo dice, **Run job → Collect inventory**.
    8. Desde un equipo fuera del VPS, tras `first-boot.sh`: que el `:8443` llega desde Internet (`openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer` imprime `issuer=CN = Novieri RMM internal CA`; en Windows, `Test-NetConnection rmm.novieri.com -Port 8443` imprime `TcpTestSucceeded : True`).
    9. La custodia, fuera del VPS (First boot, 4): las partes y el token raíz, **claves de recuperación**; **el archivo de clave del desellado**, `/etc/it-suite/openbao-unseal/unseal.key`, aparte de cualquier copia de `openbao-data` (si se pierde, OpenBao no se puede desellar); la clave HMAC de auditoría, los volúmenes `its-secrets`, `its-ca` y `openbao-data`, y `.env`.
-3. **La secuencia completa del primer arranque**, el contenido de `$S/sequence.md` hasta «Después de un reinicio», copiable, en orden, sin marcadores, con cómo termina cada guion cuando va bien; y lo que `CLAUDE.md` pide que se diga aunque no haga nada: **este proyecto no añade ninguna migración**, y aun así `migrate` corre como dependencia de `api` en cada `up -d` (en un host nuevo, todas desde `0001`, en el paso 4); **las claves de `.env`**: en un host nuevo todas son nuevas (`new-env.sh`), y `openbao-seal.sh` añade `COMPOSE_FILE=docker-compose.yml:openbao/auto-unseal.yml` y `OPENBAO_UNSEAL_KEY_FILE=/etc/it-suite/openbao-unseal/unseal.key`, que no se tocan a mano; **OpenBao**: en un host nuevo no existe hasta el paso 3.1 de `first-boot.sh`, que lo arranca y le pregunta él mismo, y `first-boot-check.sh` le pregunta antes que nada. Y que relanzar un guion tras un `FAILED` es la forma de seguir.
+3. **La secuencia completa del primer arranque**, el contenido de `$S/sequence.md` hasta «Después de un reinicio», copiable, en orden, sin marcadores, con cómo termina cada guion cuando va bien; y lo que `CLAUDE.md` pide que se diga aunque no haga nada: **este proyecto no añade ninguna migración**, y aun así `migrate` corre como dependencia de `api` en cada `up -d` (en un host nuevo, todas desde `0001`, en el paso 4); **las claves de `.env`**: en un host nuevo todas son nuevas (`new-env.sh`), y `openbao-seal.sh` añade `COMPOSE_FILE=docker-compose.yml:openbao/auto-unseal.yml` y `OPENBAO_UNSEAL_KEY_FILE=/etc/it-suite/openbao-unseal/unseal.key`, que no se tocan a mano; **OpenBao**: en un host nuevo no existe hasta el paso 3.1 de `first-boot.sh`, que lo arranca y le pregunta él mismo, y `first-boot-check.sh` le pregunta antes que nada. Y que relanzar un guion tras un `FAILED` es la forma de seguir: el desellado automático va justo después del paso 3.6 (resolución Q6), así que un fallo del 4 en adelante (el más probable, el certificado del paso 7 si el DNS aún no contesta con el VPS) se relanza sin teclear ninguna parte; y `first-boot-check.sh` se puede relanzar siempre (resolución Q8: cada ejecución completa inscribe y retira su propio agente de prueba, y los anteriores quedan en la consola, desconectados).
 4. **Después de un reinicio y una actualización**, las dos de `$S/sequence.md`, las dos empezando por `docker compose exec openbao bao status` en un bloque propio. Con el desellado automático, `Sealed false` es lo esperado; `Sealed true` es el archivo de clave (y las partes ya no desellan). Un OpenBao sellado hace que `up -d` se quede esperando (GO-LIVE §4).
 5. **La vuelta atrás, como es:** en un host nuevo no hay etiqueta anterior: `build-images.sh` lista una sola, la que corre. Hasta el paso 12 de `first-boot-check.sh` no hay vuelta atrás ninguna (empezar de nuevo es `docker compose down -v`, `rm .env` y otro primer arranque, que pide otro certificado: 5 por semana); desde el 12, restaurar esa copia (`docs/07-backup-restore.md` §3), que necesita el archivo de clave del desellado. **Y esa copia está en el mismo VPS**: si se pierde la máquina o su disco, se pierde con ella (parte 8).
 6. **Lo verificado y lo no:**
-   - verificado: las pruebas de cada tarea en rojo y en verde (con sus recuentos); el trabajo `deploy` de la CI entero en esta sesión con Pebble, en verde y en los tres rojos de la Task 5, Step 6 (el reinicio con una clave que no es la suya, una segunda ejecución que cambia algo, la firma); y, en GitHub, el trabajo `deploy` de la PR;
-   - **sin verificar**, y el operador lo verá por primera vez en el VPS: `prepare-host.sh` de verdad (activar ufw, instalar Docker: solo contra órdenes simuladas), los temporizadores de `systemd` del 6b y del 12 (la CI corre con `ITS_NO_SYSTEMCTL=1`), el DNS real y el registro de Cloudflare, Let's Encrypt de producción, y cualquier equipo Windows o macOS;
-   - lo que cambió respecto del diseño y por qué: las preguntas Q1 a Q8 de este plan con lo que el coordinador resolvió.
+   - verificado: las pruebas de cada tarea en rojo y en verde (con sus recuentos); el trabajo `deploy` de la CI entero en esta sesión con Pebble, en verde y en los tres rojos de la Task 5, Step 7 (el reinicio con una clave que no es la suya, una segunda ejecución que cambia algo, un agente que no verifica la firma); y, en GitHub, el trabajo `deploy` de la PR, que desde este proyecto prueba en cada subida las dos mitades de la invariante 1 sobre el binario compilado: el `hello` firmado se ejecuta (7c) y el que no verifica contra la clave fijada se rechaza con `bad_signature` sin ejecutarse (7c-bis, resolución Q3);
+   - **sin verificar**, y el operador lo verá por primera vez en el VPS: `prepare-host.sh` de verdad (activar ufw, instalar Docker: solo contra órdenes simuladas); **los temporizadores de `systemd` del 6b (la renovación del certificado del gateway) y del 12 (la copia nocturna)**: la CI corre con `ITS_NO_SYSTEMCTL=1`, escribe las unidades y no las activa (resolución Q2), así que la primera vez que se activan es en el VPS, y el informe dice cómo mirarlos allí: `sudo systemctl list-timers its-gateway-cert.timer its-platform-backup.timer --no-pager` tras `first-boot-check.sh` lista los dos con su próxima hora; el DNS real y el registro de Cloudflare; Let's Encrypt de producción; y cualquier equipo Windows o macOS;
+   - lo que cambió respecto del diseño y por qué: las resoluciones Q1 a Q8 del coordinador (al final del plan) y las cuatro correcciones del diseño que escriben las Tasks 1 (§3), 2 (§2, §3, §4), 5 (§5, §8.2) y 6 (§6).
 7. **Qué cambia para el operador desde hoy**: OpenBao se desella solo tras cada reinicio; las cinco partes son claves de recuperación (para `openbao-seal.sh disable` y `bao operator generate-root`), no de desellado; el archivo de clave es lo nuevo que custodiar, aparte de `openbao-data`; y la decisión y su coste están en GO-LIVE §4 con fecha.
 8. **Opcional, recomendado antes de inscribir nada real: la copia fuera del host**, los pasos de `$S/sequence.md` bajo «Opcional, recomendado», numerados y aparte de la secuencia, con el riesgo dicho claro: la copia nocturna está en el mismo VPS. ⚠ Sin ensayar en esta sesión (no hay destino).
 
@@ -5992,61 +7088,71 @@ Al coordinador, en este orden:
 
 | Contrato | Lo fija | Lo consumen |
 |---|---|---|
-| `sudo ./scripts/prepare-host.sh [--create-user NOMBRE]`; sus líneas finales (`Docker's versions`, dos `ok`, `The host is ready for the first boot`, dos `note`) | 1 | 6 (las cita), 7 |
+| `sudo ./scripts/prepare-host.sh`, sin opciones (P1 a mano: resolución Q5); sus líneas finales (`Docker's versions`, dos `ok`, `The host is ready for the first boot`, dos `note`) | 1 | 6 (las cita), 7 |
 | `./scripts/first-boot.sh [--host] [--acme-email] [--acme-ca-server] [--tls-cafile]`; sale 0 o 1 | 2 (3 lo completa) | 5, 6, 7 |
 | `  share <n>     <parte>`, `  root token  <token>`, `  install code  <código>` | 2, 3 | 5 (`first_boot_answers.py` las enmascara) |
 | `Type SAVED …`, luego tres partes, por la entrada estándar | 2 | 5 (contesta `SAVED` y las partes 1, 3 y 5) |
 | `  skip    step 1: .env exists (new-env.sh never overwrites one), for rmm.novieri.com` | 2 | 5 (`--require`) |
-| `First boot: every step is done.`; en una segunda ejecución, ninguna `  run     ` y 16 `  skip    ` | 3 | 5, 6 |
+| El desellado justo tras el 3.6 (resolución Q6): `OpenBao restarts and unseals itself`, `  run     docker compose restart openbao`, `  ok      OpenBao restarted and came back unsealed by itself (Seal Type static, Sealed false): no share was typed`; el bloque `main` `step_3_6`, `auto_unseal`, `restart_proof`, `step_4` | 2 (3 pone sus pasos detrás) | 5, 6 (las cita y ata el orden) |
+| `First boot: every step is done.`; en una segunda ejecución, ninguna `  run     ` y 16 `  skip    `, el desellado y su reinicio entre `step 3.6` y `step 4` | 3 | 5, 6 |
 | `ITS_FIRST_BOOT_ALLOW_NONTTY=1` | 2 | 5 (lo pone el conductor, no el trabajo) |
 | `ITS_ETC_DIR`, `ITS_SYSTEMD_DIR`, `ITS_NO_SYSTEMCTL=1` | 2, 3 (y ya `install-backup-timer.sh`) | 4, 5 |
-| `ITS_PREFLIGHT_SKIP_DNS=1` y su línea `note … was not asked of DNS …` | 2 | 5 |
-| `sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file "$ITS_ETC_DIR/openbao-unseal/unseal.key" --yes`, tres partes por la entrada estándar; tras él, un `COMPOSE_FILE` heredado gana `:openbao/auto-unseal.yml` | 3 | 5 (hace lo mismo en `GITHUB_ENV`), 6 (el apéndice lo cuenta) |
+| `ITS_PREFLIGHT_SKIP_DNS=1` y su línea `note … was not asked of DNS …`; su negativa con Let's Encrypt de producción o sin `ITS_ACME_CA_SERVER` (resolución Q4) | 2 | 5 (con Pebble como CA) |
+| `sudo env -u COMPOSE_FILE ./scripts/openbao-seal.sh enable --key-file "$ITS_ETC_DIR/openbao-unseal/unseal.key" --yes`, tres partes por la entrada estándar; tras él, un `COMPOSE_FILE` heredado gana `:openbao/auto-unseal.yml` | 2 | 5 (hace lo mismo en `GITHUB_ENV`), 6 (el apéndice lo cuenta) |
 | `./scripts/first-boot-check.sh [--tls-cafile] [--connect] [--wait-job]`; el token por la entrada estándar | 4 | 5, 6, 7 |
 | `  ok      step 11c: the agent enrolled as device <uuid>, connected over :8443, and its token file is gone`; `First boot is complete.` | 4 | 5 (espera la primera; exige la segunda), 6 |
+| Las dos primeras líneas de `first-boot-check.sh`, `  note    this enrols a throwaway agent on this VPS (step 11c) and retires it, with its key (11f).` y `  note    It is safe to run again: …` (resolución Q8) | 4 | 6 (lo dice en «First boot, 3») |
 | El agente `smoke-agent`: `--network host`, la CA en `/etc/ssl/certs/ca-certificates.crt`, `ITS_AGENT_ENROLL_URL=https://$host`, `--add-host` con `--connect`, el token en `<datos>/enroll-token` 0600 | 4 | 5 (sus pruebas leen `run_args`) |
 | `python3 ci/first_boot_answers.py [--script] [--require]… [--timeout] -- <args>` | 5 | — |
+| `python3 ci/agent_flow.py … --phase token --token-file A --token-file B`, `--phase job --hostname H`, `--phase refused --hostname H --container C --pins-file P`; `mcp_flow.py` guarda tres códigos de recuperación (resolución Q3) | 5 | el paso del OAuth, 7c y 7c-bis |
 | `GITHUB_ENV`: `PEBBLE_ROOT`, y `COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml:openbao/auto-unseal.yml` tras el primer arranque | 5 | los pasos posteriores del trabajo |
 | Los *here-documents* de `its-gateway-cert.service` y `.timer` en el README, sin cambiar un carácter | (ya existen) | 3 (los compara con lo que escribe el guion), 6 (los mueve) |
 | Las anclas `#first-boot`, `#prepare-hostsh-p2-to-p5`, `#appendix-what-each-script-does-by-hand`, `#if-bao-status-says-sealed-true`; la estructura de «Prerequisites», «First boot» y «After a reboot» | 6 | 7 (`report_sequence.py`) |
 
 ## Autorrevisión
 
-Contra el diseño, sección por sección, y contra lo que un revisor llamaría defecto. Lo que se pudo arreglar está arreglado en su tarea; lo que no, está en «Preguntas para el coordinador».
+Contra el diseño, sección por sección, con las correcciones que resolvió el coordinador, y contra lo que un revisor llamaría defecto. Esta es la segunda versión del plan: la primera terminaba con ocho preguntas, y sus resoluciones (al final) están aplicadas en cada tarea, con su prueba en rojo y en verde donde cambian lo que hace el código.
 
 **1. Cobertura del diseño.**
 - §1, el objetivo (tres órdenes y los momentos de una persona, ninguna comprobación perdida, guiones probados por la CI): Tasks 1 a 4, 5 y 6.
-- §2, el recorrido: el paso 0 lo hace el operador (Task 7, Paso 0; el registro `A` lo crea el coordinador, no el código); el 1, Task 1; el 2, Tasks 2 y 3 (las cuatro paradas, el desellado, el reinicio, el código); el 3, el navegador, lo describe la Task 6 y en la CI lo hacen `mcp_flow.py` y `agent_flow.py`; el 4, Task 4; el 5, la custodia, Task 6 («First boot, 4») y Task 7.
-- §3, comunes: repetibles (cada tramo con su `skip`; la prueba de la segunda ejecución en las Tasks 1, 3 y 4, y en la CI, Task 5), los mismos comandos que el runbook (las pruebas de la Task 6 atan las órdenes del apéndice al código de los guiones, y las líneas citadas a las impresas), los secretos (la prueba de la línea de órdenes y de los archivos de la Task 2, la de la Task 4 para el token, el registro enmascarado de la Task 5, la guarda de `test_deploy_runbook_secrets.py` sobre los tres guiones), la negativa sin terminal (Task 2), `set -x` (las dos negativas y las dos pruebas), cada `die` con su orden. `prepare-host.sh`: P1 a P5, `SUDO_USER`, las versiones, el aviso de volver a entrar. `first-boot.sh`: todos los pasos nombrados, la negativa por estado mezclado, la repetición después de `bao operator init`, nunca reinicializar. `first-boot-check.sh`: 10, 11a, 11c a 11f y 12.
-- §4: `openbao-seal.sh enable` con las tres partes que ya tiene (Task 3); el reinicio y `Sealed false` (Task 3, y la CI, Task 5); «después de un reinicio» (Task 6); las partes como claves de recuperación (Tasks 3 y 6, GO-LIVE §4); la decisión con fecha en GO-LIVE §4 (Task 6) y en `.git/sdd/decisiones-p34.md` (ya está); sin cambio en las invariantes (Global Constraints).
-- §5: las pruebas de `prepare-host.sh` con órdenes simuladas, su orden, la repetición, la negativa sin root y shellcheck (Task 1, y el paso de la CI en la 5); el trabajo `deploy` con los dos guiones, `ITS_FIRST_BOOT_ALLOW_NONTTY=1`, todas las comprobaciones de hoy y las dos nuevas (Task 5; «el rojo con la firma mala», como ensayo: Q3); las pruebas de backend de lo que la CI no alcanza (Tasks 2 a 4).
-- §6: el runbook y su apéndice, las pruebas que lo fijan adaptadas sin debilitarse (Task 6, con la tabla de qué fijaba cada una y dónde lo fija ahora); GO-LIVE §4 (Task 6); el informe (Task 7).
+- §2, el recorrido: el paso 0 lo hace el operador (Task 7, Paso 0; el registro `A` lo crea el coordinador, no el código; P1 a mano); el 1, Task 1; el 2, Tasks 2 y 3 (las cuatro paradas; el desellado y su reinicio justo después del 3.6, Task 2; el código, Task 3); el 3, el navegador, lo describe la Task 6 y en la CI lo hacen `mcp_flow.py` y `agent_flow.py`; el 4, Task 4; el 5, la custodia, Task 6 («First boot, 4») y Task 7.
+- §3, comunes: repetibles (cada tramo con su `skip`; la prueba de la segunda ejecución en las Tasks 1, 2, 3 y 4, y en la CI, Task 5), los mismos comandos que el runbook (las pruebas de la Task 6 atan las órdenes del apéndice al código de los guiones, el orden del desellado incluido, y las líneas citadas a las impresas), los secretos (la prueba de la línea de órdenes y de los archivos de la Task 2, la de la Task 4 para el token, el registro enmascarado de la Task 5, la guarda de `test_deploy_runbook_secrets.py` sobre los tres guiones), la negativa sin terminal (Task 2), `set -x` (las dos negativas y las dos pruebas), cada `die` con su orden. `prepare-host.sh`: P2 a P5, `SUDO_USER`, ninguna cuenta (Q5), las versiones, el aviso de volver a entrar. `first-boot.sh`: todos los pasos nombrados en el orden corregido (Q6), la negativa por estado mezclado, la repetición después de `bao operator init`, nunca reinicializar. `first-boot-check.sh`: 10, 11a, 11c a 11f y 12, y lo que dice al empezar (Q8).
+- §4: `openbao-seal.sh enable` justo después del 3.6, con las tres partes que ya tiene (Task 2); el reinicio y `Sealed false` (Task 2, y la CI, Task 5); «después de un reinicio» (Task 6); las partes como claves de recuperación (Tasks 2 y 6, GO-LIVE §4); la decisión con fecha en GO-LIVE §4 (Task 6) y en `.git/sdd/decisiones-p34.md` (ya está); sin cambio en las invariantes (Global Constraints).
+- §5: las pruebas de `prepare-host.sh` con órdenes simuladas, su orden, la repetición, la negativa sin root y shellcheck (Task 1, y el paso de la CI en la 5); el trabajo `deploy` con los dos guiones, `ITS_FIRST_BOOT_ALLOW_NONTTY=1`, todas las comprobaciones de hoy y tres nuevas: el reinicio, la segunda ejecución y el rojo con la firma mala, ahora un paso permanente (Task 5, 7c-bis: Q3); las pruebas de backend de lo que la CI no alcanza (Tasks 2 a 4).
+- §6: el runbook y su apéndice, las pruebas que lo fijan adaptadas sin debilitarse (Task 6, con la tabla de qué fijaba cada una y dónde lo fija ahora); GO-LIVE §4 y `docs/07-backup-restore.md` (Task 6, Q7); el informe (Task 7).
 - §7: nada de lo de fuera de alcance aparece en ninguna tarea.
-- §8: 1 (Tasks 1 a 4, 6); 2 (Task 5); 3 (Tasks 2, 4 y 5); 4 (Tasks 1, 3, 4 y 5); 5 (Task 6, y la Task 7 lee el runbook).
+- §8: 1 (Tasks 1 a 4, 6); 2 (Task 5, con las tres nuevas); 3 (Tasks 2, 4 y 5); 4 (Tasks 1, 2, 3, 4 y 5); 5 (Task 6, y la Task 7 lee el runbook).
 
-**2. Marcadores.** Cada paso de código lleva el código entero; cada orden, su salida esperada; ningún «TBD», ningún «como en la Task N». Los recuentos de los Steps 2 y 4 (`13 failed`, `16 failed, 25 passed`, `13 failed, 16 passed`, `29 passed`, `11 failed, 61 passed`, `87 passed`, `7 failed, 18 passed`, `106 passed`, …) están medidos el 2026-11-27 con este mismo código en dos copias del árbol (una con las tareas en su orden, otra de `git archive` con todas), no calculados. **Y el plan entero se siguió al pie de la letra** sobre un `git archive` limpio de `6f616aa`, por un guion que toma de este documento cada bloque «Crear», cada «al final de» y cada guion de edición, en el orden de las tareas: los 19 archivos que resultan son, byte a byte, los que pasaron sus pruebas (salvo dos líneas en blanco de `test_first_boot_script.py` que el plan pone y la copia de trabajo había perdido), los tres guiones quedan ejecutables, `ruff check app tests` y `shellcheck` no dicen nada, y 457 pruebas de despliegue y de runbook pasan sobre ese árbol (las de los 25 archivos que tocan `deploy/`, la CI o el runbook, `test_public_surface.py` incluido). **Lo único no medido** son las salidas del ensayo del trabajo de la CI (Task 5, Step 6), que construye las imágenes y arranca el stack entero: sus líneas esperadas son las que los guiones imprimen (medidas contra el arnés) y las que la CI de hoy imprime; la tarea lo dice y dice qué hacer si difieren.
+**2. Marcadores.** Cada paso de código lleva el código entero; cada orden, su salida esperada; ningún «TBD», ningún «como en la Task N». Los recuentos de los Steps 2 y 4 (`12 failed`, `22 failed, 25 passed`, `47 passed`, `13 failed, 19 passed`, `32 passed`, `17 failed`, `89 passed`, `19 failed, 61 passed`, `95 passed`, `7 failed, 18 passed`, `106 passed`, `1 failed, 10 passed`, `58 passed`, …) se midieron otra vez el 2026-11-27, tras las resoluciones, tarea a tarea sobre copias nuevas de `git archive` de `6f616aa`, en el orden de las oleadas, con este mismo código: no están calculados. **Y el plan entero se siguió al pie de la letra** sobre otro `git archive` limpio de `6f616aa`, por un guion que toma de este documento cada bloque «Crear» y «Sustituir … entero», cada «al final de» y cada guion de edición (los del diseño incluidos), en el orden de las tareas: los 22 archivos que resultan son, byte a byte, los del árbol construido aparte con los archivos que pasaron sus pruebas; los tres guiones quedan ejecutables; `ruff check app tests` y `shellcheck` no dicen nada; y 752 pruebas pasan sobre ese árbol (las de los 44 archivos que tocan `deploy/`, la CI, el runbook o sus guiones, `test_public_surface.py` incluido). Las ediciones del diseño de las Tasks 1 y 2, y las de las 5 y 6, se fusionaron con `git merge` en el orden de las oleadas sin conflicto. **Lo único no medido** son las salidas del ensayo del trabajo de la CI (Task 5, Step 7), que construye las imágenes y arranca el stack entero: sus líneas esperadas son las que los guiones y `agent_flow.py` imprimen (medidas contra el arnés y contra sus clientes falsos) y las que la CI de hoy imprime; el binario plantado del Rojo 3 sí se compiló y su suite se vio en rojo. La tarea lo dice y dice qué hacer si difieren.
 
-**3. Coherencia de nombres.** Las funciones, variables y líneas que una tarea usa de otra están en su bloque Interfaces y en el Apéndice A, copiadas del código que pasó las pruebas; los textos que las pruebas de la Task 5 buscan en los guiones (`dc exec -T openbao bao operator init -key-shares=5 -key-threshold=3`, `run_args=(-d --name smoke-agent --network host`, `if ! sudo cat "$token_file" | docker compose run --rm --no-deps -T \`) se comprobaron contra ese código.
+**3. Coherencia de nombres.** Las funciones, variables y líneas que una tarea usa de otra están en su bloque Interfaces y en el Apéndice A, copiadas del código que pasó las pruebas; los textos que las pruebas de la Task 5 buscan en los guiones (`dc exec -T openbao bao operator init -key-shares=5 -key-threshold=3`, `run_args=(-d --name smoke-agent --network host`, `if ! sudo cat "$token_file" | docker compose run --rm --no-deps -T \`) y los que la prueba de la Task 6 busca en el bloque `main` (`step_3_6`, `auto_unseal`, `restart_proof`, `step_4`) se comprobaron contra ese código. Las dos tareas que cambiaron de contenido con Q6 cambiaron también de nombre y de mensaje de commit (Task 2, «… steps 1 to 3.6 and the auto-unseal …»; Task 3, «… steps 4 to 8, with OpenBao unsealing itself»), y su última línea de control (`Steps 1 to 3.6 and the auto-unseal: done.`) es la que busca el Step 0 de la Task 3.
 
 **4. Revisión previa de conflictos** (lo que un revisor señalaría):
-- *Dos tareas en un archivo:* `first-boot.sh` y `test_first_boot_script.py` son de la 2 y la 3, que van seguidas; nada más se comparte. Las Tasks 5 y 6 en paralelo no comparten archivo, pero sí leen los guiones: si el ensayo de la 5 corrige un guion, se fusiona primero y la 6 vuelve a pasar sus pruebas (Notas de integración).
+- *Dos tareas en un archivo:* `first-boot.sh` y `test_first_boot_script.py` son de la 2 y la 3, que van seguidas. **El diseño lo tocan cuatro tareas**, en párrafos distintos: la 1 y la 2 en paralelo (oleada 1), la 5 y la 6 en paralelo (oleada 3); las dos fusiones se midieron sin conflicto. Las Tasks 5 y 6 en paralelo no comparten otro archivo, pero sí leen los guiones: si el ensayo de la 5 corrige un guion, se fusiona primero y la 6 vuelve a pasar sus pruebas (Notas de integración).
 - *El arnés de la Task 2 simula pasos que la 2 no tiene* (4 a 8). Es a propósito: es la interfaz del guion entero, y la 3 solo añade pruebas. El arnés de la Task 4 repite la idea de las cuñas en pequeño, para poder ir en paralelo.
-- *Un interruptor que apaga una comprobación* (`ITS_PREFLIGHT_SKIP_DNS`): lo dice en una línea `note`, solo cubre la pregunta al DNS, y su prueba demuestra que el resto sigue negándose (Q4).
-- *La CI escribe `.env` ella misma* (Q1) y *no activa systemd* (Q2): las dos cosas se dicen en la tarea, en el comentario del paso y en el informe.
-- *El orden del desellado* sigue al diseño aunque obliga a teclear otra vez tres partes si el paso 7 falla (Q6).
-- *`--create-user`* está en el diseño y no tiene sitio en su recorrido (Q5).
+- *Un interruptor que apaga una comprobación* (`ITS_PREFLIGHT_SKIP_DNS`): lo dice en una línea `note`, solo cubre la pregunta al DNS, su prueba demuestra que el resto sigue negándose, y **se niega con Let's Encrypt de producción o sin CA puesta** (Q4), con dos casos de prueba.
+- *La CI escribe `.env` ella misma* (Q1: aceptado; el conductor exige la línea `skip` del paso 1) y *no activa systemd* (Q2: se mantiene; el 6b y el 12 quedan sin verificar): las dos cosas se dicen en la tarea, en el comentario del paso y en el informe.
+- *El caso negativo de la invariante 1 en la CI* (Q3) necesita un segundo agente y un segundo token de inscripción: de un uso, emitido en la misma sesión que el primero, enmascarado, en un archivo 0600 que la trampa borra; el agente no publica nada, y el trabajo y su base de datos son efímeros. Su falsador (un agente que no verifica) se planta solo en la rama de ensayo; `agent/` no cambia en ninguna tarea.
+- *El orden del desellado* cambió con Q6 (justo tras el 3.6): el diseño se corrige en la Task 2, y lo fijan `test_a_second_run_skips_every_step_to_the_auto_unseal` (Task 2), `test_the_auto_unseal_comes_before_step_4` y `test_a_failed_step_7_runs_again_with_no_share` (Task 3) y `test_the_first_boot_runs_the_scripts_that_check_it` (Task 6), esta con su rojo plantado.
+- *`--create-user`* ya no existe (Q5): `test_it_has_no_way_to_make_the_account` lo fija, y el diseño §3 lo dice.
+- *`first-boot-check.sh` relanzado inscribe otro agente* (Q8: así está bien): lo dice en sus dos primeras líneas, y el runbook, que es seguro relanzarlo.
 - *Una prueba de hoy afirma algo que la medida desmiente* (`operator init -status`, M1): la Task 5 la rehace y lo dice.
-- *Un archivo que el diseño no nombra* (`docs/07-backup-restore.md`) cambia, porque si no diría lo contrario que los guiones (Q7).
+- *Un archivo que el diseño no nombraba* (`docs/07-backup-restore.md`) cambia, y el diseño §6 lo nombra ya (Q7).
 - *Cambios en bloques del runbook* (`--wait`, `set -C`, `daemon-reload`, `sudo journalctl`): el diseño pide que el runbook diga lo que el guion hace distinto; aquí, además, la orden del apéndice es la del guion, porque es mejor también a mano. La Task 6 los lista.
 - *La salida de `first-boot.sh` en la CI* contiene las partes: el conductor las enmascara antes de imprimir cada línea y ningún paso las guarda en un archivo (`test_the_first_boot_is_answered_and_must_end_as_a_good_one_does` comprueba que no hay `tee`).
+- *La huella de la segunda ejecución* no usa la hora de arranque de los contenedores de una vez, que `up -d` vuelve a arrancar (M9).
 
-## Preguntas para el coordinador
+## Resoluciones del coordinador (2026-11-27)
 
-- **Q1. La CI escribe `.env` con `new-env.sh` antes de `first-boot.sh`.** El diseño §5 dice que el trabajo «llama a los dos guiones». Lo hace, pero el paso 1 dentro de `first-boot.sh` no corre en la CI: Pebble no arranca sin `.env` y el paso 7 del guion necesita su raíz (M5). El paso 1 del guion lo prueban las pruebas de la Task 2. La alternativa sería que `first-boot.sh` aceptara una orden que le diera la raíz más tarde, o un Pebble con una raíz fija (la 2.10.1 no la admite). ¿Se acepta así?
-- **Q2. Los temporizadores de systemd no se activan en la CI** (`ITS_NO_SYSTEMCTL=1`, unidades en `$RUNNER_TEMP/systemd`). Los ejecutores de GitHub tienen systemd y se podría probar de verdad el 6b y el 12, pero el trabajo puede correr en un ejecutor propio (`vars.CI_RUNS_ON`) donde dejaría temporizadores instalados. Siguen sin verificar, como hasta hoy. ¿Se quiere el camino real en los ejecutores de GitHub?
-- **Q3. «Rojo con la firma mala»** (diseño §5) no es un paso de la CI de hoy: fue un ensayo del plan del 2026-11-23. Este plan lo mantiene como ensayo (Task 5, Step 6). Hacerlo un paso permanente es posible (un segundo agente, o el mismo con su clave fijada cambiada, esperando `refused`), a costa de unos minutos por ejecución. ¿Ensayo o paso de la CI?
-- **Q4. `ITS_PREFLIGHT_SKIP_DNS=1`** es un interruptor nuevo en `preflight.sh` que deja sin hacer una comprobación de seguridad (lo dice en una línea `note`). La alternativa, un DNS falso en el ejecutor, no se puede ensayar aquí. ¿Se acepta?
-- **Q5. `prepare-host.sh --create-user`** (diseño §3) solo sirve donde root ya tiene la copia del repositorio, y el recorrido del diseño (§2.0) la hace como el operador en P6, después de P1. Se implementa como dice §3 y el runbook manda hacer P1 a mano. ¿Se quita la opción, o se queda para un VPS en el que root clona?
-- **Q6. El desellado automático va tras el paso 7**, como dicen §2 y §3. Si el paso 7 falla (el registro `A`, el cortafuegos), la siguiente ejecución vuelve a pedir tres partes para `openbao-seal.sh`. Ponerlo tras el 3.6 lo evitaría y el stack arrancaría ya con el sello estático. ¿Se mueve?
-- **Q7. `docs/07-backup-restore.md`** cambia en cuatro sitios aunque el diseño §6 no lo nombra: su §3 desellaba con partes tras una restauración, y en un host con desellado automático eso ya no funciona. ¿De acuerdo?
-- **Q8. `first-boot-check.sh` lanzado por segunda vez, tras terminar bien, inscribe otro agente de prueba** (el primero queda como registro, desconectado). No rompe nada (criterio §8.4), pero no es un «nada cambia». Si se prefiere que lo salte, haría falta un marcador de «ya probado» en algún sitio del host. ¿Así está bien?
+A las ocho preguntas de la primera versión de este plan. Cada una, con dónde está aplicada.
+
+- **Q1. La CI escribe `.env` con `new-env.sh` antes de `first-boot.sh`.** *Aceptado.* `first-boot.sh` salta el paso 1 y lo dice; el conductor exige esa línea (`--require '  skip    step 1: .env exists (new-env.sh never overwrites one), for rmm.novieri.com'`) y el verde del ensayo la enseña (Task 5).
+- **Q2. Los temporizadores de systemd no se activan en la CI.** *Se mantiene `ITS_NO_SYSTEMCTL=1`.* Los del 6b y del 12 quedan sin verificar, y lo dicen la Task 5 (decisiones, comentario del paso, verde del ensayo), «Lo que hace este proyecto, y lo que no» y el informe (Task 7, parte 6).
+- **Q3. El rojo con la firma mala.** *Paso permanente de la CI.* El 7c-bis del paso del OAuth, con su propio agente y la fase `refused` de `agent_flow.py`; su rojo, en las pruebas nuevas de `test_ci_agent_flow.py` y en el Rojo 3 del ensayo; el diseño §5 dice «añade», y §8.2, «las tres nuevas» (Task 5).
+- **Q4. `ITS_PREFLIGHT_SKIP_DNS=1`.** *Aceptado, pero se niega con Let's Encrypt de producción o sin `ITS_ACME_CA_SERVER`.* La rama de `preflight.sh` y sus dos casos de prueba (Task 2).
+- **Q5. `prepare-host.sh --create-user`.** *Se quita; P1 sigue a mano.* El guion, su prueba `test_it_has_no_way_to_make_the_account`, la nota de P1 del runbook (Task 6) y el diseño §3 (Task 1).
+- **Q6. El orden del desellado.** *Justo después del 3.6, con su reinicio; un paso 7 que falla se relanza sin partes.* El desellado pasa de la Task 3 a la 2, con su prueba; la Task 3 prueba el orden y el relanzamiento sin partes; el apéndice del runbook lo pone entre el 3.6 y el 4, con su prueba y su rojo plantado (Task 6); el diseño §2, §3 y §4 (Task 2).
+- **Q7. `docs/07-backup-restore.md`.** *De acuerdo.* Cambia en la Task 6, y el diseño §6 lo nombra (Task 6).
+- **Q8. `first-boot-check.sh` lanzado otra vez.** *Así está bien.* El agente de cada ejecución se retira al final; las dos primeras líneas del guion dicen que inscribe y retira un agente de prueba y que es seguro relanzarlo, y el runbook lo dice (Tasks 4 y 6).
+
+**Lo que queda por decidir: nada que bloquee.** Una sola nota: la corrección de Q3 en el diseño toca también §8.2 («más las dos nuevas» pasa a «más las tres nuevas»), porque si no el criterio contaría dos comprobaciones nuevas donde §5 cuenta tres. Si se prefiere §5 solo, se quita el segundo par de `task5_spec.py` y el `grep` del Step 5 de la Task 5 espera `1`.
