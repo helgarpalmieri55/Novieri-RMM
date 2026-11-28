@@ -1,0 +1,1310 @@
+"""A stand-in host for `deploy/scripts/first-boot.sh` (design
+2026-11-27-despliegue-automatizado §5): a fake `docker` that plays compose,
+OpenBao and Postgres from one JSON state file, stubs for the sibling scripts
+and for `sudo`, `systemctl` and `openssl`, and a shim in front of every other
+command that logs its argv -- the `ps` a test reads to prove no secret was
+ever an argument.
+
+`Host(tmp_path)` builds it: a scratch checkout (`repo/deploy/scripts/` with the
+real first-boot.sh, a git commit, the migration directory), `etc/` and
+`systemd/` for ITS_ETC_DIR and ITS_SYSTEMD_DIR, and a PATH of nothing but the
+shims and the stubs, so a command the script uses without the test knowing
+fails with "command not found" instead of passing unseen. The secrets the
+fake OpenBao hands out are fixed per host and listed in `Host.secrets`.
+
+Fix round 1 (review of 2026-11-27, findings I3, M3, M6 and M9) widened what a
+run leaves for a test to read, all of it under `harness/`, outside the host's
+own files:
+- every child's environment (`environ.log`): each shim, stub and fake writes
+  the environment it was given, so a secret a caller's `export` would carry
+  into a child is seen;
+- what was written, as it was written (`captures/`): `tee`, `rm`, `mv`, `cat >`
+  and `mktemp` are shims that keep a copy of what they write, delete or create,
+  so a temporary file that is gone by the end of the run is still read;
+- the files the fakes themselves write (`writes.log`).
+`Host.leaks()` reads all of it. `Host.run` also checks that a failure prints
+one FAILED block whose command lines can be pasted (`failed_block_problems`),
+and `Host.run_pty` runs the script under a pseudo-terminal.
+"""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import pty
+import re
+import secrets
+import select
+import shlex
+import shutil
+import stat
+import struct
+import subprocess
+import sys
+import termios
+import time
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+REPO = Path(__file__).resolve().parents[2]
+SCRIPT = REPO / "deploy" / "scripts" / "first-boot.sh"
+PY = sys.executable
+BASH = shutil.which("bash") or "/bin/bash"
+
+#: Every external command the script, its stubs and bash reach, each behind a
+#: logging shim. A new one in the script fails a test until it is listed.
+SHIMMED = (
+    "cat", "chmod", "cut", "diff", "dirname", "env", "find", "git", "grep", "head",
+    "install", "mkdir", "mktemp", "mv", "readlink", "rm", "sed", "sort", "stat", "tail",
+    "tee", "test", "tr",
+)  # fmt: skip
+
+#: The shims that also keep a copy of what they write, delete or create (M9).
+CAPTURING = ("cat", "mktemp", "mv", "rm", "tee")
+
+#: What a command line of a FAILED block may start with: the operator pastes
+#: these (CLAUDE.md, "A copy-pasteable command contains no placeholders").
+COMMAND_WORDS = (
+    "[", "cd", "chmod", "docker", "env", "grep", "printf", "read", "rm", "sed", "sudo", "xargs",
+    "./scripts/first-boot.sh", "./scripts/openbao-seal.sh", "./scripts/prepare-host.sh",
+)  # fmt: skip
+
+#: A command line that destroys or undoes something (review I1 of round 3): it
+#: runs only behind a typed guard, `read -r -p '... Type WORD to go on: ' answer
+#: && [ "$answer" = WORD ] && ...`, one `&&` chain, so that no paste runs it.
+DESTRUCTIVE = re.compile(
+    r"\bdown -v\b|\bvolume rm\b|\bdocker rm\b|\bcompose rm\b|\brm (-f )?\.env\b"
+    r"|\bsed -i .*\.env\b|\bup -d --no-deps openbao\b|unseal\.key|\brm \S*audit-hmac\.key"
+)
+_GUARD_WORD = re.compile(r'\[ "\$answer" = ([A-Z]+) \]')
+
+#: The stand-ins a pasted report runs into (`paste_into_a_shell`): they log, and do nothing.
+PASTE_STAND_INS = ("chmod", "docker", "rm", "sed", "sudo", "xargs")
+#: What a logged act that destroys or undoes looks like.
+DESTRUCTIVE_ACT = re.compile(
+    r"^(docker compose down|docker compose rm|docker volume rm|xargs -r docker (rm|volume rm)"
+    r"|rm (-f )?\.env|sudo rm .*unseal\.key|sed -i .*COMPOSE_FILE"
+    r"|docker compose up -d --no-deps openbao|docker compose run .*\brm \S*audit-hmac\.key)"
+)
+
+#: Where each secret may be written: where the runbook writes it.
+ALLOWED = {
+    "root": ["repo/deploy/.env"],
+    "its-app": ["repo/deploy/.env"],
+    "gateway-issuer": ["etc/gateway-issuer.token"],
+}
+
+#: How long `Host.run_pty` lets a run take: 180 s, against about 2 s in practice,
+#: since 60 s was once not enough under a parallel Docker rehearsal (the final
+#: review of 2026-11-27). A passing run ends at its EOF, so this costs it
+#: nothing. A test that uses it marks itself with PTY_TIMEOUT, above it, since
+#: pytest-timeout's 120 s (backend/pyproject.toml) would otherwise end it first.
+PTY_DEADLINE = 180
+PTY_TIMEOUT = PTY_DEADLINE + 60
+
+#: The long-running services `docker compose up -d` starts, and the one-shots.
+LONG = ("api", "backup-replicator", "gateway", "minio", "openbao", "postgres", "redis",
+        "traefik", "web", "worker")  # fmt: skip
+ONESHOTS = ("migrate", "postgres-grants", "openbao-init")
+HEALTHCHECKED = {"api", "gateway", "minio", "openbao", "postgres", "web", "worker"}
+NEWEST_REVISION = "0248"
+
+#: First lines of every Python stand-in: it writes the environment it was given
+#: and, through `wrote()`, each file it writes.
+FAKE_PRELUDE = r'''
+import os as _os, sys as _sys
+_HARNESS = _os.environ["HARNESS_DIR"]
+with open(_os.path.join(_HARNESS, "environ.log"), "a") as _log:
+    _log.write("== " + _os.path.basename(_sys.argv[0]) + "\n")
+    _log.write("".join("%s=%s\n" % kv for kv in _os.environ.items()))
+
+
+def wrote(path):
+    with open(_os.path.join(_HARNESS, "writes.log"), "a") as log:
+        log.write(_os.path.basename(_sys.argv[0]) + " " + _os.path.abspath(path) + "\n")
+'''
+
+FAKE_DOCKER = r'''
+import json, os, re, sys
+
+STATE = os.environ["FAKE_STATE"]
+with open(STATE) as fh:
+    s = json.load(fh)
+argv = sys.argv[1:]
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write("docker " + " ".join(argv) + "\n")
+    log.write("  COMPOSE_FILE=" + os.environ.get("COMPOSE_FILE", "") + "\n")
+# A failure to order: FAKE_DOCKER_FAIL is a piece of the command line.
+if os.environ.get("FAKE_DOCKER_FAIL") and os.environ["FAKE_DOCKER_FAIL"] in " ".join(argv):
+    sys.stderr.write("fake docker: failing on purpose\n")
+    sys.exit(17)
+
+
+def save():
+    with open(STATE, "w") as fh:
+        json.dump(s, fh)
+
+
+# app_user's table privileges, as Postgres holds them (review of Task 3, I1).
+# migrate leaves init-app-user.sh's default privileges -- all four on every
+# table its_admin creates -- less what migrations 0006 and 0009 revoke on the
+# two logs; only postgres-grants (grant-app-privileges.sql) takes the RBAC
+# catalog's INSERT, UPDATE and DELETE away.
+ALL4 = ["SELECT", "INSERT", "UPDATE", "DELETE"]
+TABLES = ("devices", "audit_events", "security_events", "permissions", "role_permissions")
+
+
+def privileges_after_migrate():
+    held = {table: list(ALL4) for table in TABLES}
+    for log in ("audit_events", "security_events"):
+        held[log] = ["SELECT", "INSERT"]
+    return held
+
+
+def privileges_after_grants():
+    held = privileges_after_migrate()
+    for catalog in ("permissions", "role_permissions"):
+        held[catalog] = ["SELECT"]
+    return held
+
+
+_TERM = r"(not )?has_table_privilege\('app_user', '(\w+)', '([A-Z, ]+)'\)"
+
+
+def has_table_privileges(sql):
+    """A conjunction of has_table_privilege(), as Postgres answers it: a list
+    of privileges is true if ANY is held. Anything else is refused."""
+    if not re.fullmatch(r"select %s( and %s)*" % (_TERM, _TERM), sql.strip()):
+        sys.stderr.write("fake psql: not a conjunction of has_table_privilege: %s\n" % sql)
+        return None
+    held = s["pg"]["privs"]
+    value = True
+    for negated, table, wanted in re.findall(_TERM, sql):
+        any_held = any(w.strip() in held[table] for w in wanted.split(","))
+        value = value and (any_held != bool(negated))
+    return "t" if value else "f"
+
+
+def out(text):
+    sys.stdout.write(text)
+
+
+def svc(name):
+    return s["services"].setdefault(name, {"state": "absent", "health": "", "exit": 0,
+                                           "restarts": 0, "id": "c" + str(len(s["services"]))})
+
+
+def run_long(name):
+    service = svc(name)
+    if service["state"] != "running":
+        service["id"] = "c%d-%s" % (s["serial"], name)
+        s["serial"] += 1
+    service["state"] = "running"
+    service["health"] = "healthy" if name in s["healthchecked"] else ""
+
+
+def run_once(name):
+    service = svc(name)
+    service["id"] = "c%d-%s" % (s["serial"], name)
+    s["serial"] += 1
+    service["state"] = "exited"
+    service["exit"] = s["oneshot_exit"].get(name, 0)
+    if name == "migrate" and service["exit"] == 0:
+        s["pg"]["alembic"] = s["newest"]
+        s["pg"]["privs"] = s["pg"]["privs"] or privileges_after_migrate()
+    if name == "postgres-grants" and service["exit"] == 0:
+        if s["pg"]["privs"] is None:  # no tables yet: ON_ERROR_STOP
+            service["exit"] = 3
+        elif not s["pg"].get("grants_leave_catalog_writable"):
+            s["pg"]["privs"] = privileges_after_grants()
+
+
+def bao_json():
+    b = s["bao"]
+    return json.dumps({"type": b["type"], "initialized": b["init"], "sealed": b["sealed"],
+                       "t": 3 if b["init"] else 0, "n": 5 if b["init"] else 0,
+                       "migration": b.get("migrating", False)}, indent=2) + "\n"
+
+
+def bao(args, token):
+    b = s["bao"]
+    if args[:2] == ["token", "lookup"]:
+        # An OpenBao that stops answering at the Nth lookup (review r5).
+        s["lookups"] = s.get("lookups", 0) + 1
+        if s.get("stop_at_lookup") == s["lookups"]:
+            svc("openbao")["state"] = "exited"
+            sys.stderr.write("Error looking up token: connection refused\n")
+            return 2
+        if s.get("seal_at_lookup") == s["lookups"]:
+            b["sealed"] = True
+        if not b["init"] or b["sealed"]:
+            sys.stderr.write("Vault is sealed\n")
+            return 2
+        if token == b["root"]:
+            policies = ["root"]
+        elif token in b["tokens"]:
+            policies = ["default", b["tokens"][token]]
+        else:
+            sys.stderr.write("permission denied\n")
+            return 2
+        out(json.dumps({"data": {"id": token, "policies": policies}, "policies": policies},
+                       indent=2) + "\n")
+        return 0
+    if token != b["root"]:
+        sys.stderr.write("permission denied\n")
+        return 2
+    if args[:2] == ["policy", "write"]:
+        b["policies"].append(args[2])
+        out("Success! Uploaded policy: %s\n" % args[2])
+        return 0
+    if args[:2] == ["auth", "tune"]:
+        out("Success! Tuned the auth method at: token/\n")
+        return 0
+    if args[:2] == ["token", "create"]:
+        policy = next(a.split("=", 1)[1] for a in args if a.startswith("-policy="))
+        value = s["issue"][policy]
+        if policy not in s.get("forget", []):
+            b["tokens"][value] = policy
+        out(value + "\n")
+        return 0
+    if args[:2] == ["operator", "seal"]:
+        b["sealed"] = True
+        b["progress"] = []
+        out("Success! Vault is sealed.\n")
+        return 0
+    return 1
+
+
+def compose(args):
+    sub, rest = args[0], args[1:]
+    if sub == "ps":
+        names = [a for a in rest if not a.startswith("-") and "{{" not in a]
+        fmt = rest[rest.index("--format") + 1] if "--format" in rest else None
+        shown = [(n, v) for n, v in sorted(s["services"].items())
+                 if v["state"] != "absent" and (not names or n in names)]
+        if "--status" in rest:
+            shown = [(n, v) for n, v in shown if v["state"] == "running"]
+        for name, v in shown:
+            if name in s.get("still_running", []):
+                v = dict(v, state="running", health="")
+            if fmt is None:
+                out(v["id"] + "\n")
+            elif fmt.startswith("table"):
+                out("%s\t%s\n" % (name, v["state"]))
+            else:
+                line = (fmt.replace("{{.Service}}", name).replace("{{.State}}", v["state"])
+                        .replace("{{.Health}}", v["health"])
+                        .replace("{{.ExitCode}}", str(v["exit"])))
+                out(line + "\n")
+        return 0
+    if sub == "up":
+        names = [a for a in rest if not a.startswith("-") and not a.isdigit()]
+        if not names:
+            for name in s["long"]:
+                run_long(name)
+            for name in s["oneshots"]:
+                if svc(name)["state"] != "exited" or svc(name)["exit"] != 0:
+                    run_once(name)
+            for name in s.get("crash", []):
+                svc(name).update(state="exited", exit=1)
+            if s.get("up_d_fails"):
+                sys.stderr.write("dependency failed to start: container it-suite-postgres-grants-1"
+                                 " exited (1)\n")
+                return 1
+            return 0
+        for name in names:
+            (run_once if name in s["oneshots"] else run_long)(name)
+            if s.get("up_returns_exit") and name in s["oneshots"] and svc(name)["exit"]:
+                return svc(name)["exit"]
+        return 0
+    if sub == "restart":
+        for name in rest:
+            svc(name)["restarts"] += 1
+            if name == "openbao":
+                s["bao"]["sealed"] = s["bao"]["type"] != "static"
+        return 0
+    if sub == "exec":
+        rest = [a for a in rest if a != "-T"]
+        name, cmd = rest[0], rest[1:]
+        if svc(name)["state"] != "running":
+            sys.stderr.write('service "%s" is not running\n' % name)
+            return 1
+        if name == "openbao":
+            b = s["bao"]
+            if cmd[:2] == ["bao", "status"]:
+                out(bao_json())
+                return 2 if b["sealed"] else 0
+            if cmd[:3] == ["bao", "operator", "init"]:
+                if b["init"]:
+                    return 2
+                b["init"] = True
+                for i, share in enumerate(b["shares"], 1):
+                    out("Unseal Key %d: %s\n" % (i, share))
+                out("\nInitial Root Token: %s\n\nVault initialized with 5 key shares\n" % b["root"])
+                return 0
+            if cmd[:3] == ["bao", "write", "-format=json"] and cmd[3] == "sys/unseal":
+                body = json.loads(sys.stdin.read())
+                if body.get("reset"):
+                    b["progress"] = []
+                    return 0
+                # An OpenBao that stops answering part-way through a round (M5).
+                b["keys_seen"] = b.get("keys_seen", 0) + 1
+                if b.get("stop_after_keys") and b["keys_seen"] >= b["stop_after_keys"]:
+                    svc("openbao")["state"] = "exited"
+                    return 0
+                if b.get("migrating") and not body.get("migrate"):
+                    sys.stderr.write("migrate option not provided and seal migration is pending\n")
+                    return 2
+                key = body["key"]
+                if key not in b["progress"]:
+                    b["progress"].append(key)
+                if len(b["progress"]) >= 3:
+                    good = all(k in b["shares"] for k in b["progress"])
+                    b["progress"] = []
+                    if not good:
+                        return 2
+                    b["sealed"] = False
+                    if b.get("migrating"):
+                        b["migrating"] = False
+                        b["type"] = "static"
+                return 0
+            if cmd[:2] == ["sh", "-c"]:
+                token = sys.stdin.readline().strip()
+                return bao(cmd[5:], token)
+            if cmd[:2] == ["id", "-u"] or cmd[:2] == ["id", "-g"]:
+                out("100\n")
+                return 0
+        if name == "postgres" and cmd[0] == "psql":
+            sql = cmd[-1]
+            if "pg_roles" in sql:
+                out("%d\n" % s["pg"]["roles"])
+            elif "alembic_version" in sql:
+                if not s["pg"]["alembic"]:
+                    sys.stderr.write('relation "alembic_version" does not exist\n')
+                    return 1
+                out(s["pg"]["alembic"] + "\n")
+            elif "has_table_privilege" in sql:
+                if s["pg"]["privs"] is None:
+                    sys.stderr.write('relation "devices" does not exist\n')
+                    return 1
+                value = has_table_privileges(sql)
+                if value is None:
+                    return 1
+                out(value + "\n")
+            return 0
+        if name == "traefik" and cmd[0] == "stat":
+            out(s["acme_mode"] + "\n")
+            return 0
+        if name == "api" and cmd[0] == "python":
+            if "setup/status" in cmd[-1]:
+                if s["setup"]["needed"] is None:
+                    sys.stderr.write("urllib.error.URLError: connection refused\n")
+                    return 1
+                out(("True" if s["setup"]["needed"] else "False") + "\n")
+            else:
+                out("30 30\n")
+            return 0
+        if name == "api" and cmd[0] == "cat":
+            if s["setup"]["code"] is None:
+                sys.stderr.write("cat: /var/lib/its/secrets/setup-code: No such file\n")
+                return 1
+            out(s["setup"]["code"] + "\n")
+            return 0
+        return 0
+    if sub == "run":
+        script = rest[-1]
+        if "--entrypoint" in rest and rest[rest.index("--entrypoint") + 1] == "python":
+            token = sys.stdin.readline().strip()
+            if s["bao"]["tokens"].get(token) != "gateway-issuer":
+                sys.stderr.write("403 from OpenBao\n")
+                return 1
+            s["files"]["gateway"] = True
+            out("gateway.crt  /var/lib/its/tls/gateway.crt  (CN=%s, 365d)\n" % rest[-1])
+            return 0
+        if "audit-hmac.key" in script:
+            # files.audit: True (a key), "empty" (0 bytes), False (none).
+            key = s["files"]["audit"]
+            if script.startswith("test -s"):
+                return 0 if key is True and not s.get("audit_check_fails") else 1
+            if "head -c 32 /dev/urandom >" in script:
+                # As the shell does it: `set -C` refuses a file that exists, and
+                # without it the key is written over.
+                if "set -C" in script and key in (True, "empty"):
+                    sys.stderr.write("sh: 1: cannot create audit-hmac.key: File exists\n")
+                    return 2
+                if key is True:
+                    s["audit_replaced"] = True
+                s["files"]["audit"] = True
+                return 0
+            if script.startswith("test -f") and "rm " in script:  # removed only if empty
+                if key == "empty":
+                    s["files"]["audit"] = False
+                    return 0
+                return 1
+            size = 32 if key is True else 0
+            out("-rw------- 1 its its %d Nov 27 10:00 /var/lib/its/secrets/audit-hmac.key\n" % size)
+            return 0
+        if "gateway.crt" in script:
+            return 0 if s["files"]["gateway"] else 1
+        return 0
+    return 0
+
+
+rc = 0
+if argv[:2] == ["volume", "ls"]:
+    if s.get("volume_ls_error"):
+        sys.stderr.write(s["volume_ls_error"] + "\n")
+        rc = 1
+    else:
+        # `volumes` carry Compose's labels; `unlabelled_volumes` are this stack's
+        # by name only, as `docker volume create "it-suite_$v"` made them (the
+        # rehearsal of 2026-11-27); `other_volumes`, another project's or none.
+        # The label filter sees the first alone, as Docker's does.
+        names = list(s["volumes"])
+        if "label=com.docker.compose.project=it-suite" not in argv:
+            names += s.get("unlabelled_volumes", []) + s.get("other_volumes", [])
+        out("".join(v + "\n" for v in names))
+elif argv[:2] == ["image", "inspect"]:
+    rc = 0 if all(ref in s["images"] for ref in argv[2:]) else 1
+elif argv[0] == "inspect":
+    # The format it is given, field by field; one it does not know is refused,
+    # as a template error (review of Task 3, m3).
+    fmt = argv[argv.index("-f") + 1]
+    by_id = {v["id"]: (n, v) for n, v in s["services"].items()}
+    for ident in [a for a in argv[1:] if a not in ("-f", fmt)]:
+        name, v = by_id[ident]
+        line = (fmt.replace("{{.State.ExitCode}}", str(v["exit"]))
+                .replace("{{.RestartCount}}", str(v["restarts"] + s["restart_drift"]))
+                .replace("{{.Name}}", "/%s-%s-1" % (s.get("project", "it-suite"), name))
+                .replace('{{index .Config.Labels "com.docker.compose.service"}}', name))
+        if "{{" in line:
+            sys.stderr.write("fake docker inspect: a field it does not know: %s\n" % fmt)
+            rc = 1
+            break
+        out(line + "\n")
+    s["restart_drift"] += s["restart_step"]
+elif argv[0] == "compose":
+    rc = compose(argv[1:])
+save()
+sys.exit(rc)
+'''
+
+#: The sibling scripts first-boot.sh runs, stood in for: their own behaviour
+#: is their own tests' (test_new_env_script.py, test_preflight_script.py,
+#: test_check_public_tls.py, test_openbao_seal_script.py).
+FAKE_NEW_ENV = r'''
+import os, shutil, sys
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write("new-env.sh " + " ".join(sys.argv[1:]) + "\n")
+os.umask(0o077)
+shutil.copyfile(os.environ["FAKE_ENV_TEMPLATE"], ".env")
+os.chmod(".env", 0o600)
+wrote(".env")
+print("wrote .env (mode 600)")
+'''
+
+FAKE_BUILD_IMAGES = r'''
+import json, os, subprocess
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write("build-images.sh\n")
+tag = subprocess.run(["git", "-C", "..", "rev-parse", "--short", "HEAD"],
+                     capture_output=True, text=True, check=True).stdout.strip()
+with open(os.environ["FAKE_STATE"]) as fh:
+    s = json.load(fh)
+s["images"] = ["itsuite/backend:" + tag, "itsuite/web:" + tag]
+with open(os.environ["FAKE_STATE"], "w") as fh:
+    json.dump(s, fh)
+print("Recent tags:\n      itsuite/backend:" + tag)
+'''
+
+FAKE_SIMPLE = r'''
+import os, sys
+name = os.path.basename(sys.argv[0])
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write(name + " " + " ".join(sys.argv[1:]) + "\n")
+print("  ok      %s (stub)" % name)
+sys.exit(int(os.environ.get("FAKE_RC_" + name.split(".")[0].replace("-", "_").upper(), "0")))
+'''
+
+#: openbao-seal.sh enable, in the order the real one works (deploy/scripts/
+#: openbao-seal.sh, cmd_enable): the key file, then COMPOSE_FILE and
+#: OPENBAO_UNSEAL_KEY_FILE into .env and OpenBao recreated in seal-migration
+#: mode, and only then the shares, one per stdin line, up to six. Shares that
+#: never make three good ones leave it there, half-way, as the real one does.
+#: FAKE_SEAL_FAIL=1 fails before anything changes; =midway right after .env.
+FAKE_OPENBAO_SEAL = r'''
+import json, os, sys
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write("openbao-seal.sh " + " ".join(sys.argv[1:]) + "\n")
+    log.write("  COMPOSE_FILE=" + os.environ.get("COMPOSE_FILE", "") + "\n")
+with open(os.environ["FAKE_STATE"]) as fh:
+    s = json.load(fh)
+given = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
+
+
+def failed(text):
+    sys.stderr.write("\n\033[31mFAILED\033[0m  %s\n" % text)
+    sys.stderr.write("  WARNING  Stopped part-way. (fake recover_help)\n")
+    with open(os.environ["FAKE_STATE"], "w") as fh:
+        json.dump(s, fh)
+    sys.exit(1)
+
+
+if os.environ.get("FAKE_SEAL_FAIL") == "1":
+    failed("OpenBao did not come back")
+key = sys.argv[sys.argv.index("--key-file") + 1]
+os.makedirs(os.path.dirname(key), exist_ok=True)
+with open(key, "wb") as fh:
+    fh.write(os.urandom(32))
+wrote(key)
+lines = [l for l in open(".env").read().splitlines()
+         if not l.startswith(("COMPOSE_FILE=", "OPENBAO_UNSEAL_KEY_FILE="))]
+lines += ["COMPOSE_FILE=docker-compose.yml:openbao/auto-unseal.yml",
+          "OPENBAO_UNSEAL_KEY_FILE=" + key]
+open(".env", "w").write("\n".join(lines) + "\n")
+wrote(".env")
+b = s["bao"]
+b.update(sealed=True, migrating=True, progress=[])
+if os.environ.get("FAKE_SEAL_FAIL") == "midway":
+    failed("OpenBao did not come back")
+s["seal_stdin"] = len(given)
+progress, tries = [], 0
+for share in given:
+    tries += 1
+    if tries > 6:
+        failed("still sealed after 6 shares -- a share was wrong or from another install.")
+    if share not in progress:
+        progress.append(share)
+    if len(progress) == 3:
+        if all(p in b["shares"] for p in progress):
+            break
+        progress = []
+else:
+    failed("stdin ended before OpenBao unsealed.")
+b.update(type="static", sealed=False, migrating=False)
+with open(os.environ["FAKE_STATE"], "w") as fh:
+    json.dump(s, fh)
+print("Auto-unseal is ON")
+'''
+
+FAKE_SYSTEMCTL = r'''
+import os, sys
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write("systemctl " + " ".join(sys.argv[1:]) + "\n")
+if sys.argv[1:2] == ["is-enabled"]:
+    print("disabled")
+'''
+
+FAKE_OPENSSL = r'''
+import os, sys
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write("openssl " + " ".join(sys.argv[1:]) + "\n")
+sys.stdin.read()
+if sys.argv[1] == "x509":
+    print("issuer=" + os.environ.get("FAKE_GATEWAY_ISSUER", "CN = Novieri RMM internal CA"))
+    print("X509v3 Subject Alternative Name: ")
+    print("    DNS:" + os.environ.get("FAKE_GATEWAY_HOST", "rmm.novieri.com"))
+'''
+
+#: tee, rm, mv, cat > and mktemp: the real command, and a copy of what it
+#: writes, deletes or creates under harness/captures/ (M9). A temporary file is
+#: read there even when nothing of it is left at the end of the run.
+CAPTURE_SHIM = r'''
+import os, stat, subprocess, sys
+NAME, REAL = %(name)r, %(real)r
+args = sys.argv[1:]
+with open(os.environ["ARGV_LOG"], "a") as log:
+    log.write(NAME + " " + " ".join(args) + "\n")
+captures = os.path.join(_HARNESS, "captures")
+os.makedirs(captures, exist_ok=True)
+
+
+def keep(kind, target, data):
+    base = os.path.join(captures, "%%d-%%d" %% (os.getpid(), len(os.listdir(captures))))
+    with open(base + ".data", "wb") as fh:
+        fh.write(data)
+    with open(base + ".what", "w") as fh:
+        fh.write(kind + "\n" + os.path.abspath(target) + "\n")
+
+
+def files_under(path):
+    if os.path.isfile(path):
+        return [path]
+    return [os.path.join(d, f) for d, _, fs in os.walk(path) for f in fs]
+
+
+def read(path):
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return b""
+
+
+paths = [a for a in args if not a.startswith("-")]
+if NAME == "tee":
+    data = sys.stdin.buffer.read()
+    for p in paths:
+        keep("tee", p, data)
+    sys.exit(subprocess.run([REAL, *args], input=data).returncode)
+if NAME == "rm":
+    for p in paths:
+        for f in files_under(p):
+            keep("rm", f, read(f))
+elif NAME == "mv" and len(paths) >= 2:
+    for p in paths[:-1]:
+        for f in files_under(p):
+            keep("mv", paths[-1], read(f))
+elif NAME == "cat" and stat.S_ISREG(os.fstat(1).st_mode):
+    target = os.readlink("/proc/self/fd/1")
+    done = subprocess.run([REAL, *args], stdout=subprocess.PIPE)
+    view = memoryview(done.stdout)
+    while view:
+        view = view[os.write(1, view):]
+    keep("cat >", target, done.stdout)
+    sys.exit(done.returncode)
+elif NAME == "mktemp":
+    done = subprocess.run([REAL, *args], stdout=subprocess.PIPE, text=True)
+    sys.stdout.write(done.stdout)
+    with open(os.path.join(_HARNESS, "writes.log"), "a") as log:
+        log.write("mktemp " + done.stdout.strip() + "\n")
+    sys.exit(done.returncode)
+os.execv(REAL, [REAL, *args])
+'''
+
+
+def real_command(name: str, path: str) -> str | None:
+    """The system's own binary, before anything a session put on PATH: a
+    wrapper that runs `name` again by name would loop through the shim."""
+    for directory in ("/usr/bin", "/bin"):
+        candidate = Path(directory) / name
+        if os.access(candidate, os.X_OK):
+            return str(candidate)
+    return shutil.which(name, path=path)
+
+
+def _exe(path: Path, body: str, python: bool = True) -> None:
+    path.write_text((f"#!{PY}\n" if python else "") + body.lstrip("\n"))
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _fake(path: Path, body: str) -> None:
+    """A Python stand-in that writes its environment and its files (M3, M9)."""
+    _exe(path, FAKE_PRELUDE.lstrip("\n") + body)
+
+
+def _secret() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _wait_echo_off(fd: int, limit: float = 2.0) -> None:
+    """bash prints a `read -s` prompt before it turns the echo off: a reply
+    written in between would be echoed by the terminal, not by the script."""
+    end = time.monotonic() + limit
+    while time.monotonic() < end:
+        if not termios.tcgetattr(fd)[3] & termios.ECHO:
+            return
+        time.sleep(0.01)
+
+
+_PLACEHOLDER = re.compile(r"<[A-Za-z][^<>]*>")
+
+
+def failed_block_problems(stderr: str, deploy: Path) -> list[str]:
+    """What is wrong with the FAILED block of STDERR, if it has one (M4, M6, m3):
+    - more than one FAILED line;
+    - a line after it that is neither a command, at the eight-space indent,
+      nor prose printed as a comment (`  # ...`), nor the blank line between
+      two ways on;
+    - more than one way on without the `# run ONE of the following` line
+      before them, or that line with a single way;
+    - a way on whose first command is not the `cd` to deploy/;
+    - a command line that is not a shell command the operator can paste, from
+      COMMAND_WORDS, with no placeholder;
+    - a way on in which a line that may read the terminal -- sudo, a hidden
+      prompt, first-boot.sh itself -- is not the last line: pasted whole, the
+      lines after it would be read as a password or a share. So a way on runs
+      first-boot.sh once at most, and last."""
+    text = stderr.splitlines()
+    starts = [i for i, line in enumerate(text) if line.startswith("FAILED  ")]
+    if not starts:
+        return []
+    problems = [f"{len(starts)} FAILED lines"] if len(starts) > 1 else []
+    groups: list[list[str]] = [[]]
+    for line in text[starts[0] + 1 :]:
+        if not line.strip():
+            groups.append([])
+        elif (line.startswith("        ") and line[8:9] != " ") or line.startswith("  # "):
+            groups[-1].append(line)
+        else:
+            problems.append(f"neither a command nor prose as a comment: {line!r}")
+    groups = [g for g in groups if g]
+    if not groups:
+        # Design §3: each die says what failed AND the command to go on with.
+        problems.append("no way on: nothing after the FAILED line says how to go on")
+    if groups and groups[0][0].startswith("  # run ONE of the following"):
+        if len(groups[0]) != 1:
+            problems.append("the `run ONE of the following` line is not a block of its own")
+        ways = groups[1:]
+        if len(ways) < 2:
+            problems.append("`run ONE of the following` before a single way on")
+    else:
+        ways = groups
+        if len(ways) > 1:
+            problems.append(f"{len(ways)} ways on, without `# run ONE of the following`")
+    for number, way in enumerate(ways):
+        commands = [line[8:] for line in way if line.startswith("        ")]
+        if not commands:
+            problems.append(f"a way on with no command: {way!r}")
+            continue
+        if _segments(commands[0]) != [["cd", str(deploy)]]:
+            problems.append(f"the first command is not the cd to {deploy}: {commands[0]!r}")
+        # Review I1 (round 3): pasted whole, a report runs its ways on one after
+        # another; so each but the first is one chain behind its own guard.
+        if number > 0 and (len(commands) != 2 or not _guarded(commands[1])):
+            problems.append(f"way on {number + 1} is not one chain behind a typed guard: {way!r}")
+        for command in commands:
+            if DESTRUCTIVE.search(command) and not _guarded(command):
+                problems.append(f"destroys or undoes without a typed guard: {command!r}")
+        for n, line in enumerate(way):
+            if line.startswith("        ") and _reads_the_terminal(line[8:]) and n != len(way) - 1:
+                problems.append(f"a line that may read the terminal is not the last: {line!r}")
+        for command in commands:
+            if subprocess.run([BASH, "-n", "-c", command], capture_output=True).returncode:
+                problems.append(f"not shell: {command!r}")
+                continue
+            if _PLACEHOLDER.search(command.replace("2>/dev/null", "")):
+                problems.append(f"a placeholder: {command!r}")
+            for words in _segments(command):
+                words = _bare(words)
+                if words and words[0] in ("for", "done"):
+                    continue
+                if not words or words[0] not in COMMAND_WORDS:
+                    problems.append(f"not a command the operator runs: {command!r}")
+    return problems
+
+
+def _guarded(command: str) -> bool:
+    """COMMAND is one `&&` chain (pipes inside it allowed) that starts with
+    `read -r -p '... Type WORD to go on: ' answer && [ "$answer" = WORD ]`."""
+    segments = _segments(command)
+    operators = _operators(command)
+    if len(segments) < 3 or set(operators) - {"&&", "|"} or operators[:2] != ["&&", "&&"]:
+        return False
+    read, check = segments[0], segments[1]
+    word = _GUARD_WORD.fullmatch(" ".join(check[:1] + ['"$answer"'] + check[2:]))
+    return (
+        read[:3] == ["read", "-r", "-p"] and len(read) == 5 and read[4] == "answer"
+        and check[:2] == ["[", "$answer"] and word is not None
+        and f"Type {word.group(1)} to go on: " in read[3]
+    )  # fmt: skip
+
+
+def _operators(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        return [token for token in lexer if token in ("&&", "||", "|", ";")]
+    except ValueError:
+        return [";"]
+
+
+def _bare(words: list[str]) -> list[str]:
+    """A simple command without the `do`, `sudo` and `env -u NAME` before it."""
+    while words[:1] in (["do"], ["sudo"]) or words[:2] == ["env", "-u"]:
+        words = words[1:] if words[0] in ("do", "sudo") else words[3:]
+    return words
+
+
+def _reads_the_terminal(command: str) -> bool:
+    """sudo (its password), a `read` (a typed guard), first-boot.sh and the
+    other scripts (their prompts), and an interactive `docker compose exec`
+    (a hidden share)."""
+    for words in _segments(command):
+        if words[:1] == ["do"]:
+            words = words[1:]
+        if words[:1] in (["sudo"], ["read"]):
+            return True
+        words = _bare(words)
+        if words[:1] and words[0].startswith("./scripts/"):
+            return True
+        if words[:3] == ["docker", "compose", "exec"] and "-T" not in words:
+            return True
+    return False
+
+
+def _segments(command: str) -> list[list[str]]:
+    """COMMAND's simple commands, split at `&&`, `||`, `|` and `;` the way the
+    shell splits them (a `;` inside quotes stays where it is); [] if it is not
+    one shell line."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    segments: list[list[str]] = [[]]
+    try:
+        for token in lexer:
+            if token in ("&&", "||", "|", ";"):
+                segments.append([])
+            else:
+                segments[-1].append(token)
+    except ValueError:
+        return []
+    return segments
+
+
+def paste_into_a_shell(
+    host: Host, text: str, *, bracketed: bool, answers: Sequence[str] = (), timeout: float = 30
+) -> list[str]:
+    """TEXT pasted whole into an interactive bash 5 on a pseudo-terminal, from
+    HOST's deploy/, as an operator copying a FAILED report would (review I1,
+    round 3; the reviewer's probe_paste.py). Every command that could change
+    anything is a stand-in that logs and does nothing: PASTE_STAND_INS, and
+    first-boot.sh itself. BRACKETED: one bracketed paste, bash's default since
+    5.1, so a `read` in it waits for the keyboard; each of ANSWERS is typed in
+    turn whenever the shell waits for one. Without it, the lines after a `read`
+    are what it reads. Returns the stand-ins' log, one act a line.
+
+    It proves what it tested (review r1, r2 of round 3): the shell read every
+    byte of the paste; each step waits until the shell waits for the keyboard,
+    not for a silence; and the end is a fixed point -- Ctrl-C, then a sentinel
+    line, which runs only after everything typed before it, and which must
+    run."""
+    fakes = host.tmp / "paste-stand-ins"
+    fakes.mkdir(exist_ok=True)
+    log = host.tmp / "paste.log"
+    log.write_text("")
+    for name in PASTE_STAND_INS:
+        _exe(fakes / name, f"#!/bin/sh\nprintf '%s %s\\n' {name} \"$*\" >> {log}\n", python=False)
+    _exe(host.deploy / "scripts" / "first-boot.sh",
+         f"#!/bin/sh\nprintf 'first-boot.sh %s\\n' \"$*\" >> {log}\n", python=False)  # fmt: skip
+    master, slave = pty.openpty()
+    # Wide enough that readline wraps no pasted line.
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 1000, 0, 0))
+    shell = subprocess.Popen(
+        [BASH, "--norc", "--noprofile", "-i"],
+        stdin=slave, stdout=slave, stderr=slave, cwd=host.deploy, start_new_session=True,
+        env={"PATH": f"{fakes}:/usr/bin:/bin", "TERM": "xterm", "HOME": str(host.home),
+             "PS1": "$ ", "INPUTRC": "/dev/null"},
+    )  # fmt: skip
+    os.set_blocking(master, False)
+    shown = bytearray()
+    sentinel = f"pasted-and-done-{secrets.token_hex(8)}"
+
+    def drain(wait: float) -> None:
+        ready, _, _ = select.select([master], [], [], wait)
+        while ready:
+            try:
+                chunk = os.read(master, 65536)
+            except (BlockingIOError, OSError):
+                return
+            if not chunk:
+                return
+            shown.extend(chunk)
+            ready, _, _ = select.select([master], [], [], 0)
+
+    def feed(data: bytes) -> None:
+        """DATA typed in, a piece at a time, reading the screen meanwhile: a
+        shell that echoes into a full buffer would stop reading."""
+        view = memoryview(data)
+        while view:
+            _, writable, _ = select.select([], [master], [], 0.05)
+            if writable:
+                try:
+                    view = view[os.write(master, view[:256]) :]
+                except BlockingIOError:
+                    pass
+            drain(0)
+
+    def waiting() -> bool:
+        """The shell is asleep with no child, and nothing typed is left
+        unread: it waits for the keyboard -- at its prompt, inside an open
+        string, or at a `read`."""
+        pending = struct.unpack("i", fcntl.ioctl(slave, termios.FIONREAD, b"\0\0\0\0"))[0]
+        proc = Path(f"/proc/{shell.pid}")
+        state = (proc / "stat").read_text().rsplit(")", 1)[1].split()[0]
+        children = (proc / "task" / str(shell.pid) / "children").read_text().split()
+        return pending == 0 and state == "S" and not children
+
+    def settle(deadline: float, what: str) -> None:
+        """Until the shell waits for the keyboard (three looks in a row), not
+        until it has been quiet for a while (review r2)."""
+        streak = 0
+        while streak < 3:
+            assert time.monotonic() < deadline, (what, shown.decode(errors="replace")[-2000:])
+            drain(0.02)
+            streak = streak + 1 if waiting() else 0
+
+    def read_count() -> int:
+        """What the shell has read so far, in bytes (Linux's rchar)."""
+        io = (Path(f"/proc/{shell.pid}") / "io").read_text()
+        return int(re.search(r"^rchar: (\d+)$", io, re.M).group(1))  # type: ignore[union-attr]
+
+    deadline = time.monotonic() + timeout
+    try:
+        settle(deadline, "the shell never showed its first prompt")
+        before = read_count()
+        pasted = text.replace("\n", "\r").encode()
+        feed((b"\x1b[200~" + pasted + b"\x1b[201~\r") if bracketed else pasted + b"\r")
+        settle(deadline, "the paste never finished")
+        # Review r1: the paste was delivered -- the shell read all of it.
+        assert read_count() - before >= len(pasted), "the shell did not read the paste"
+        for answer in answers:
+            feed(answer.encode() + b"\r")
+            settle(deadline, f"the answer {answer!r} never finished")
+        # A fixed end (review r2): Ctrl-C ends an open string or a `read` left
+        # waiting, and the line after it runs only once all of the above did.
+        feed(b"\x03")
+        settle(deadline, "Ctrl-C never came back to the prompt")
+        feed(f"printf '%s\\n' {sentinel} >> {shlex.quote(str(log))}\r".encode())
+        while sentinel not in log.read_text():
+            screen = shown.decode(errors="replace")[-2000:]
+            assert time.monotonic() < deadline, ("the line after the paste never ran", screen)
+            drain(0.02)
+    finally:
+        shell.kill()
+        shell.wait()
+        os.close(master)
+        os.close(slave)
+    acts = log.read_text().splitlines()
+    assert acts[-1] == sentinel, acts
+    return acts[:-1]
+
+
+class Host:
+    """One scratch host. `run()` runs first-boot.sh in it; `state` is the fake's."""
+
+    def __init__(self, tmp: Path) -> None:
+        self.tmp = tmp
+        self.repo = tmp / "repo"
+        self.deploy = self.repo / "deploy"
+        scripts = self.deploy / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "first-boot.sh").write_bytes(SCRIPT.read_bytes())
+        _fake(scripts / "new-env.sh", FAKE_NEW_ENV)
+        _fake(scripts / "build-images.sh", FAKE_BUILD_IMAGES)
+        for name in ("preflight.sh", "check-public-tls.sh"):
+            _fake(scripts / name, FAKE_SIMPLE)
+        _fake(scripts / "openbao-seal.sh", FAKE_OPENBAO_SEAL)
+        (scripts / "issue-gateway-cert.py").write_text("# stand-in\n")
+        versions = self.repo / "backend" / "migrations" / "versions"
+        versions.mkdir(parents=True)
+        for name in ("0001_core_schema.py", f"{NEWEST_REVISION}_newest.py", "__init__.py"):
+            (versions / name).write_text("")
+        (self.repo / ".gitignore").write_text(".env\n")
+        git = ["git", "-C", str(self.repo), "-c", "user.email=t@example.org", "-c", "user.name=t"]
+        subprocess.run([*git[:3], "init", "-q"], check=True)
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "scratch"], check=True)
+        self.tag = subprocess.run(
+            [*git[:3], "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+        self.etc = tmp / "etc"
+        self.units = tmp / "systemd"
+        self.home = tmp / "home"
+        self.tmpdir = tmp / "tmpdir"
+        self.harness = tmp / "harness"
+        for d in (self.home, self.tmpdir, self.harness):
+            d.mkdir()
+        self.log = tmp / "argv.log"
+        self.state_file = tmp / "fake-state.json"
+        self.env_template = tmp / "env.template"
+        self.env_template.write_text(
+            "ITS_PUBLIC_HOST=rmm.novieri.com\n"
+            "ITS_PUBLIC_CONSOLE_URL=https://rmm.novieri.com\n"
+            "ITS_ACME_EMAIL=ops@novieri.example\n"
+            "IT_SUITE_VERSION=dev\n"
+            "POSTGRES_ADMIN_PASSWORD=" + "a" * 48 + "\n"
+            "ITS_OPENBAO_TOKEN=change-me\n"
+            "OPENBAO_TOKEN=change-me\n"
+        )
+
+        self.bin = tmp / "bin"
+        self.bin.mkdir()
+        real_path = os.environ["PATH"]
+        real_env = real_command("env", real_path)
+        assert real_env, "env is not on this machine's PATH"
+        for name in SHIMMED:
+            real = real_command(name, real_path)
+            assert real, f"{name} is not on this machine's PATH"
+            if name in CAPTURING:
+                _exe(self.bin / name, FAKE_PRELUDE.lstrip("\n")
+                     + CAPTURE_SHIM % {"name": name, "real": real})  # fmt: skip
+                continue
+            _exe(
+                self.bin / name,
+                f"#!/bin/sh\nprintf '%s %s\\n' {name} \"$*\" >> \"$ARGV_LOG\"\n"
+                f"{{ printf '== %s\\n' {name}; {real_env}; }} >> \"$HARNESS_DIR/environ.log\"\n"
+                f'exec {real} "$@"\n',
+                python=False,
+            )
+        # No wait, but logged: a test adds up how long a step would have waited.
+        _exe(self.bin / "sleep", "#!/bin/sh\nprintf 'sleep %s\\n' \"$*\" >> \"$ARGV_LOG\"\n",
+             python=False)  # fmt: skip
+        _fake(self.bin / "docker", FAKE_DOCKER)
+        _exe(
+            self.bin / "sudo",
+            "#!/bin/sh\nprintf 'sudo %s\\n' \"$*\" >> \"$ARGV_LOG\"\n"
+            f"{{ printf '== sudo\\n'; {real_env}; }} >> \"$HARNESS_DIR/environ.log\"\n"
+            'exec "$@"\n',
+            python=False,
+        )
+        _fake(self.bin / "systemctl", FAKE_SYSTEMCTL)
+        _fake(self.bin / "openssl", FAKE_OPENSSL)
+
+        self.secrets: dict[str, Any] = {
+            "shares": [_secret() for _ in range(5)],
+            "root": "s." + _secret(),
+            "its-app": "s." + _secret(),
+            "gateway-issuer": "s." + _secret(),
+            "code": "CODE" + secrets.token_hex(8).upper(),
+        }
+        self.state: dict[str, Any] = {
+            "volumes": [],
+            "images": [],
+            "services": {},
+            "serial": 1,
+            "long": list(LONG),
+            "oneshots": list(ONESHOTS),
+            "healthchecked": sorted(HEALTHCHECKED),
+            "oneshot_exit": {},
+            "newest": NEWEST_REVISION,
+            "bao": {
+                "init": False,
+                "sealed": True,
+                "type": "shamir",
+                "migrating": False,
+                "progress": [],
+                "shares": self.secrets["shares"],
+                "root": self.secrets["root"],
+                "tokens": {},
+                "policies": [],
+            },
+            "issue": {
+                "its-app": self.secrets["its-app"],
+                "gateway-issuer": self.secrets["gateway-issuer"],
+            },
+            "pg": {"roles": 2, "alembic": "", "privs": None},
+            "files": {"audit": False, "gateway": False},
+            "acme_mode": "600",
+            "setup": {"needed": True, "code": self.secrets["code"]},
+            "restart_drift": 0,
+            "restart_step": 0,
+        }
+        self.save()
+
+    # ----------------------------------------------------------------- state
+
+    def save(self) -> None:
+        self.state_file.write_text(json.dumps(self.state))
+
+    def load(self) -> dict[str, Any]:
+        self.state = json.loads(self.state_file.read_text())
+        return self.state
+
+    def write_env(self, **values: str) -> None:
+        """`.env` as new-env.sh writes it, with VALUES on top (step 1 done)."""
+        lines = self.env_template.read_text().splitlines()
+        keys = {line.split("=", 1)[0] for line in lines}
+        lines = [f"{k}={values[k]}" if k in values else line
+                 for line in lines for k in [line.split("=", 1)[0]]]  # fmt: skip
+        lines += [f"{k}={v}" for k, v in values.items() if k not in keys]
+        env = self.deploy / ".env"
+        env.write_text("\n".join(lines) + "\n")
+        env.chmod(0o600)
+
+    def env(self) -> dict[str, str]:
+        return dict(
+            line.split("=", 1)
+            for line in (self.deploy / ".env").read_text().splitlines()
+            if "=" in line
+        )
+
+    # ------------------------------------------------------------------ run
+
+    def _environ(self, env: dict[str, str] | None) -> dict[str, str]:
+        return {
+            "PATH": str(self.bin),
+            "HOME": str(self.home),
+            "TMPDIR": str(self.tmpdir),
+            "LANG": "C.UTF-8",
+            "ARGV_LOG": str(self.log),
+            "HARNESS_DIR": str(self.harness),
+            "FAKE_STATE": str(self.state_file),
+            "FAKE_ENV_TEMPLATE": str(self.env_template),
+            "ITS_ETC_DIR": str(self.etc),
+            "ITS_SYSTEMD_DIR": str(self.units),
+            "ITS_NO_SYSTEMCTL": "1",
+            **(env or {}),
+        }
+
+    def _fresh_logs(self) -> None:
+        self.save()
+        self.log.write_text("")
+        shutil.rmtree(self.harness)
+        self.harness.mkdir()
+        (self.harness / "environ.log").write_text("")
+        (self.harness / "writes.log").write_text("")
+
+    def run(
+        self,
+        *args: str,
+        stdin: str = "",
+        env: dict[str, str] | None = None,
+        bash_options: tuple[str, ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        self._fresh_logs()
+        done = subprocess.run(
+            [BASH, *bash_options, str(self.deploy / "scripts" / "first-boot.sh"), *args],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            env=self._environ(env),
+            cwd=self.tmp,
+            timeout=100,
+        )
+        self.load()
+        problems = failed_block_problems(done.stderr, self.deploy)
+        assert not problems, (problems, done.stderr)
+        return done
+
+    def run_pty(
+        self,
+        *args: str,
+        answers: Sequence[tuple[str, str | int]],
+        stdin_tty: bool = True,
+        stdin: str = "",
+        env: dict[str, str] | None = None,
+        timeout: float = PTY_DEADLINE,
+    ) -> tuple[int, str]:
+        """first-boot.sh with its output (and, unless STDIN_TTY is false, its
+        input) on a pseudo-terminal, as an operator runs it. Each answer is
+        written once its prompt is on the screen; one to a `(hidden)` prompt,
+        once the terminal's echo is off. An answer that is a number is a
+        signal, sent to the script instead. Returns the exit code and everything
+        the terminal showed."""
+        self._fresh_logs()
+        master, slave = pty.openpty()
+        proc = subprocess.Popen(
+            [BASH, str(self.deploy / "scripts" / "first-boot.sh"), *args],
+            stdin=slave if stdin_tty else subprocess.PIPE,
+            stdout=slave,
+            stderr=slave,
+            env={"TERM": "xterm", **self._environ(env)},
+            cwd=self.tmp,
+            start_new_session=True,
+        )
+        os.close(slave)
+        if not stdin_tty:
+            assert proc.stdin
+            proc.stdin.write(stdin.encode())
+            proc.stdin.close()
+        shown, seen, answered = b"", 0, 0
+        deadline = time.monotonic() + timeout
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master], [], [], 0.05)
+                if ready:
+                    try:
+                        chunk = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    shown += chunk
+                if answered < len(answers):
+                    prompt, reply = answers[answered]
+                    at = shown.find(prompt.encode(), seen)
+                    if at >= 0:
+                        seen = at + len(prompt.encode())
+                        if isinstance(reply, int):
+                            os.kill(proc.pid, reply)
+                        else:
+                            if "(hidden)" in prompt:
+                                _wait_echo_off(master)
+                            os.write(master, (reply + "\n").encode())
+                        answered += 1
+            else:
+                proc.kill()
+        finally:
+            rc = proc.wait()
+            os.close(master)
+        self.load()
+        return rc, shown.decode(errors="replace")
+
+    # -------------------------------------------------------------- reading
+
+    def argv(self) -> str:
+        return self.log.read_text()
+
+    def environ_log(self) -> str:
+        return (self.harness / "environ.log").read_text()
+
+    def writes(self) -> list[tuple[str, str]]:
+        """(writer, path) of each file a fake wrote, and each `mktemp` made."""
+        return [
+            (line.split(" ", 1)[0], line.split(" ", 1)[1])
+            for line in (self.harness / "writes.log").read_text().splitlines()
+        ]
+
+    def captures(self) -> list[tuple[str, str, str]]:
+        """(how, where, what) of each write, deletion or move the capturing
+        shims saw: WHERE relative to the host when it is inside it."""
+        found = []
+        for what in sorted((self.harness / "captures").glob("*.what")):
+            kind, target = what.read_text().splitlines()[:2]
+            path = Path(target)
+            where = str(path.relative_to(self.tmp)) if path.is_relative_to(self.tmp) else target
+            data = what.with_suffix(".data").read_bytes().decode(errors="replace")
+            found.append((kind, where, data))
+        return found
+
+    def all_secrets(self) -> list[str]:
+        s = self.secrets
+        return [*s["shares"], s["root"], s["its-app"], s["gateway-issuer"], s["code"]]
+
+    def labelled_secrets(self) -> list[tuple[str, str]]:
+        s = self.secrets
+        shares = [(f"share {n}", v) for n, v in enumerate(s["shares"], 1)]
+        return [*shares, *((k, s[k]) for k in ("root", "its-app", "gateway-issuer", "code"))]
+
+    def files_holding(self, value: str) -> list[str]:
+        """Every file under the scratch host that holds VALUE, but the fake's
+        own state (the stand-in OpenBao), the argv log (read on its own) and
+        harness/ (read by `leaks`)."""
+        found = []
+        for path in self.tmp.rglob("*"):
+            if not path.is_file() or path in (self.state_file, self.log):
+                continue
+            if ".git" in path.parts or path.is_relative_to(self.harness):
+                continue
+            if value in path.read_text(errors="replace"):
+                found.append(str(path.relative_to(self.tmp)))
+        return found
+
+    def leaks(self) -> list[str]:
+        """Every place a secret reached that the runbook does not name: a
+        command line, a child's environment, a file left on the host, and a
+        file written, moved or deleted on the way."""
+        argv, environ, captured = self.argv(), self.environ_log(), self.captures()
+        found = []
+        for label, value in self.labelled_secrets():
+            allowed = ALLOWED.get(label, [])
+            if value in argv:
+                found.append(f"{label}: on a command line")
+            if value in environ:
+                found.append(f"{label}: in a child's environment")
+            found += [f"{label}: in {p}" for p in self.files_holding(value) if p not in allowed]
+            found += [
+                f"{label}: {kind} {where}"
+                for kind, where, data in captured
+                if value in data and where not in allowed
+            ]
+        return found
+
+
+def lines(output: str, prefix: str) -> list[str]:
+    """The `  run     ` / `  skip    ` / `  ok      ` lines, prefix removed."""
+    tag = f"  {prefix:<8}"
+    return [line[len(tag):] for line in output.splitlines() if line.startswith(tag)]

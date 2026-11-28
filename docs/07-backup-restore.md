@@ -38,7 +38,7 @@ below, because getting them wrong is unrecoverable rather than inconvenient:
 | 2 | The old identity provider's database (`keycloak`), only on a host upgraded from before own authentication phase 4 | same volume, same cluster | the realm that release used; only a backup taken before an upgrade with `ITS_BACKUP_OLD_IDENTITY_DB=1` holds it (`deploy.sh`, and the manual upgrade's step 1, set it), and nothing reads it after phase 4 (`deploy/README.md`, "Retiring the old identity provider's data") |
 | 3 | Object storage | `minio-data` volume | backup repositories, deploy artifacts, OS images, attachments |
 | 4 | **OpenBao storage** | `openbao-data` volume | the internal CA, the job-signing key, **every vault DEK** — see §5 |
-| 5 | **OpenBao unseal keys + root token** | *operator-held, outside the stack* | the volume in #4 becomes undecryptable ballast |
+| 5 | **OpenBao's auto-unseal key file** (every host since 2026-11-27), **its five shares** (recovery keys with it; unseal keys on a host still on Shamir) **+ root token** | *operator-held, outside the stack*; the key file also at `/etc/it-suite/openbao-unseal/unseal.key` | without the key file, or on Shamir without three shares, the volume in #4 becomes undecryptable ballast |
 | 6 | **Audit HMAC key** (and anything else on that volume — today, an optional AI provider API key) | `its-secrets` volume | the restored audit chain can never be verified — see §4; a lost provider key must be reissued by its vendor |
 | 7 | CA material on disk | `its-ca` volume | the gateway's client-CA trust anchor (and, with `ITS_CA_BACKEND=local`, the CA private key itself) |
 | 8 | `deploy/.env` | the host, gitignored | DB passwords, OpenBao token, MinIO credentials, the console address |
@@ -115,10 +115,13 @@ single-node install.
 cp deploy/.env "$BK/env"          # encrypt this
 ```
 
-And, **once, at install time, not per-backup**: store the OpenBao unseal keys
-and root token from `bao operator init` in a separate secret store (a password
-manager or sealed envelope). They are printed once and never again. A backup
-of `openbao-data` without them restores nothing.
+And, **once, at install time, not per-backup**: store the OpenBao shares and
+root token from `bao operator init` in a separate secret store (a password
+manager or sealed envelope). They are printed once and never again. **And the
+auto-unseal's key file** (`/etc/it-suite/openbao-unseal/unseal.key`, on every
+host since 2026-11-27), apart from any copy of `openbao-data`: with it,
+OpenBao unseals itself and the shares only recover; a backup of
+`openbao-data` without it restores nothing.
 
 ### 2.4 Encrypt and ship
 
@@ -156,11 +159,16 @@ stack, so the roles come from `.env` (via `init-app-user.sh`) rather than from
 ```sh
 cd deploy
 docker compose down -v            # destroys ALL volumes — you are recovering
+# ...and those a restore made before 2026-11-27 without Compose's labels,
+# which `down -v` skips ("Skipped Volume was not created by Docker Compose").
+docker volume ls -q | sed -n '/^it-suite_/p' | xargs -r docker volume rm
 cp "$BK/env" .env                 # or recreate it; passwords must match the dump era
 
-# 1. Key material first — restore before anything reads it.
+# 1. Key material first — restore before anything reads it. With Compose's
+#    two labels, or every later compose command warns about the volume and
+#    `down -v` leaves it behind (rehearsal of 2026-11-27).
 for v in openbao-data its-ca its-secrets its-gateway-tls minio-data; do
-  docker volume create "it-suite_$v" >/dev/null
+  docker volume create --label com.docker.compose.project=it-suite --label com.docker.compose.volume="$v" "it-suite_$v" >/dev/null
   docker run --rm -v "it-suite_$v:/data" -v "$BK:/backup:ro" alpine \
     tar xzf "/backup/$v.tgz" -C /data
 done
@@ -183,9 +191,15 @@ docker compose exec -T postgres pg_restore -U its_admin -d itsuite  --clean --if
 # 4. RE-APPLY THE APP-ROLE PRIVILEGE NARROWING. This is not optional — see below.
 docker compose run --rm postgres-grants
 
-# 5. Unseal OpenBao with the operator-held keys, then bring the stack up.
-docker compose up -d openbao
-docker compose exec openbao bao operator unseal   # repeat to threshold
+# 5. OpenBao: its auto-unseal key file back first, at
+#    /etc/it-suite/openbao-unseal/unseal.key (deploy/README.md, "After a
+#    reboot or a restart"), and it unseals itself -- `bao status` says
+#    Sealed false. A host still on Shamir unseals instead with three shares:
+#    docker compose exec openbao bao operator unseal, three times.
+#    A non-zero exit from the wait: deploy/README.md, "If `bao status` says
+#    `Sealed true`".
+docker compose up -d --wait --wait-timeout 60 openbao
+docker compose exec openbao bao status
 docker compose up -d
 ```
 
@@ -394,18 +408,21 @@ irreplaceable things live inside OpenBao's file storage**
 ### What to back up
 
 - `openbao-data` (the volume — §2.2), **and**
-- the **unseal keys and root token** from `bao operator init`, held outside
-  the stack (§2.3), **and**
+- the **auto-unseal key file** (every host since 2026-11-27), and the
+  **shares and root token** from `bao operator init`, held outside the stack
+  (§2.3), **and**
 - `its-ca` (the exported root certificate the gateway trusts as its client CA;
   with `ITS_CA_BACKEND=local` this volume also holds `root.key`, the CA private
   key itself — back it up as key material, not as config).
 
-The unseal keys are not optional. OpenBao's file storage is encrypted at rest
-by keys derived from them; `openbao-data` without them restores nothing.
+The key file -- on a host still on Shamir, three shares -- is not optional.
+OpenBao's file storage is encrypted at rest by keys it unwraps; `openbao-data`
+without it restores nothing.
 
 ### Recovery path if the CA is lost
 
-There is no partial recovery. If `openbao-data` or the unseal keys are gone:
+There is no partial recovery. If `openbao-data` is gone, or what unseals it
+(the auto-unseal's key file; on a host still on Shamir, three shares):
 
 1. **Every enrolled agent must re-enroll.** Their client certificates were
    issued by a CA that no longer exists, so mTLS admission at the gateway fails

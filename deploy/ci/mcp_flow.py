@@ -58,7 +58,7 @@ all.
 2026-11-23-vps-y-marca-novieri §4) connects to ADDRESS wherever NAME is asked for, as curl's does:
 the URL, the Host header, SNI and the certificate check all keep NAME, which
 is the only name Traefik's routers answer since every one carries Host().
-`--state-file`, in phase open, writes the owner's address, password and two
+`--state-file`, in phase open, writes the owner's address, password and three
 recovery codes to a new file, mode 0600, for `ci/agent_flow.py` to sign in
 with; the step that runs both removes it however it ends.
 """
@@ -693,7 +693,7 @@ class Flow:
         check(finish.status == 200, f"enrolment finish answered {finish.status}")
         codes = finish.json().get("recovery_codes")
         check(codes, "enrolment returned no recovery codes")
-        self.remember_owner(email, password, list(codes)[:2])
+        self.remember_owner(email, password, list(codes)[:3])
         ok("signed in: password, a TOTP enrolled, recovery codes issued")
         self.done("signed in with a fresh factor")
 

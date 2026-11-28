@@ -367,9 +367,19 @@ jobs:
             "$RUNNER_TEMP/backup-e2e.log"
 
   deploy:
-    # Exercises the documented first-boot path (deploy/README.md steps 2 and 4)
-    # against the real compose stack: postgres + init-app-user.sh, `alembic
-    # upgrade head` in the built backend image, then grant-app-privileges.sql.
+    # SINCE 2026-11-27 (design 2026-11-27-despliegue-automatizado §5) THE FIRST
+    # BOOT IS THE OPERATOR'S OWN: deploy/scripts/first-boot.sh, answered by
+    # ci/first_boot_answers.py as a person at its prompts would, then
+    # deploy/scripts/first-boot-check.sh, with the console's clicks made
+    # through its API (ci/mcp_flow.py claims the installation, ci/agent_flow.py
+    # mints the enrollment token and runs the job). Every check this job made
+    # before stays: the certificate by ACME from Pebble, the 503 with the api
+    # stopped, the compiled agent enrolled over :443 and connected over :8443
+    # running a signed `hello`, the audit chain, app_user's privileges, the
+    # backup and the restore. And three are new: OpenBao unseals itself after a
+    # restart, first-boot.sh run again changes nothing, and (7c-bis) the same
+    # agent, pinning a key the server does not hold, refuses a signed hello.
+    #
     # It exists because the test suite provisions app_user's privileges itself
     # (backend/tests/conftest.py::_run_migrations), so the backend job above
     # stays green no matter how broken the deployment scripts are -- exactly
@@ -377,10 +387,8 @@ jobs:
     # Since own authentication phase 4 (plan 2026-11-15, Task 7) it also
     # proves, live: that a pre-upgrade backup keeps the old identity
     # provider's database and a forced restore brings it back (operator
-    # decision K1); and, in its last step, steps 3, 5, 7 and 8 -- OpenBao
-    # with one share, the audit key, the edge, the claim -- with the
-    # platform's own OAuth server and MCP door through them
-    # (deploy/ci/mcp_flow.py).
+    # decision K1); and the platform's own OAuth server and MCP door through
+    # Traefik (deploy/ci/mcp_flow.py).
     #
     # THE NAME STAYS AS IT WAS. A required status check is matched by the
     # job's name, and a renamed job would leave a PR waiting on the old one
@@ -390,6 +398,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: shellcheck the first-boot scripts
+        # Design 2026-11-27 §5. The other deploy scripts predate this step and
+        # are not held to it here.
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          shellcheck deploy/scripts/prepare-host.sh deploy/scripts/first-boot.sh deploy/scripts/first-boot-check.sh
+
       - name: Throwaway .env, written by the script a new host uses
         # scripts/new-env.sh (design 2026-11-23-vps-y-marca-novieri §3), as on
         # a new VPS, with Pebble -- Let's Encrypt's test CA -- as the ACME
@@ -397,7 +412,9 @@ jobs:
         # docker compose call from here on, and which needs the CA Pebble's
         # own HTTPS is signed with, copied out of the image. Nothing here is
         # a real credential and nothing is written back to the repo (.env is
-        # ignored); the last step fills the two OpenBao tokens.
+        # ignored). It is step 1 of first-boot.sh, run here because Pebble
+        # cannot start without .env and first-boot.sh's step 7 needs Pebble's
+        # root: first-boot.sh then finds .env and says `skip`.
         working-directory: deploy
         run: |
           ./scripts/new-env.sh --host rmm.novieri.com --acme-email ci@novieri.example \
@@ -407,19 +424,106 @@ jobs:
           docker rm "$cid" >/dev/null
           echo "PEBBLE_MINICA=$RUNNER_TEMP/pebble-minica.pem" >> "$GITHUB_ENV"
           echo "COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml" >> "$GITHUB_ENV"
+          # The scripts' CI knobs (design 2026-11-27 §5): rmm.novieri.com is in
+          # no public DNS here, so the pre-flight leaves it unasked and says
+          # so; and no systemd is touched -- the units are written to this
+          # run's own directory, and step 12 runs the backup's command itself.
+          echo "ITS_PREFLIGHT_SKIP_DNS=1" >> "$GITHUB_ENV"
+          echo "ITS_NO_SYSTEMCTL=1" >> "$GITHUB_ENV"
+          echo "ITS_SYSTEMD_DIR=$RUNNER_TEMP/systemd" >> "$GITHUB_ENV"
 
-      - name: postgres — first boot (init-app-user.sh)
+      - name: Pebble, and the root it signs this run's certificate with
+        # Pebble makes a new root on every start: the one that will sign this
+        # run's certificate is read from its management port (15000), which is
+        # published nowhere and answers on its address in the network. Every
+        # later step trusts that file, and that file alone, for :443.
         working-directory: deploy
         run: |
-          docker compose up -d --wait postgres
-          docker compose logs postgres
+          set -euo pipefail
+          docker compose up -d pebble
+          for _ in $(seq 1 30); do
+            curl -sf --noproxy '*' --cacert "$PEBBLE_MINICA" --resolve pebble:15000:172.19.240.252 \
+              https://pebble:15000/roots/0 -o "$RUNNER_TEMP/pebble-root.pem" && break
+            sleep 2
+          done
+          test -s "$RUNNER_TEMP/pebble-root.pem" || { docker compose logs pebble; echo "::error::pebble never served its root"; exit 1; }
+          echo "PEBBLE_ROOT=$RUNNER_TEMP/pebble-root.pem" >> "$GITHUB_ENV"
 
-      - name: alembic upgrade head
-        # `run` rather than `up`: it propagates the container's exit code
-        # without `--abort-on-container-exit`'s side effect of stopping the
-        # postgres container the later steps still need.
+      - name: first boot -- scripts/first-boot.sh, answered as an operator would
+        # deploy/README.md, First boot, 1: steps 1 to 3.6, OpenBao's
+        # auto-unseal, steps 4 to 7 and step 8's install code, with FIVE shares
+        # and a threshold of three, as on the VPS. Step 1 is the step above's
+        # (Pebble starts only with a .env, and step 7 needs its root), so the
+        # script must say it skipped it: the second --require. The systemd
+        # timers of steps 6b and 12 are written, never enabled here
+        # (ITS_NO_SYSTEMCTL=1): unverified, as before 2026-11-27.
+        # ITS_FIRST_BOOT_ALLOW_NONTTY=1 lets it print the shares
+        # and the root token with no terminal; first_boot_answers.py masks
+        # each one before its line is printed, types SAVED and three shares
+        # back on the script's stdin, and fails unless the run ends as a good
+        # one does. Nothing it read is written anywhere.
         working-directory: deploy
-        run: docker compose run --rm --build migrate
+        timeout-minutes: 45
+        run: |
+          set -euo pipefail
+          python3 ci/first_boot_answers.py \
+            --require 'First boot: every step is done.' \
+            --require '  skip    step 1: .env exists (new-env.sh never overwrites one), for rmm.novieri.com' \
+            -- --tls-cafile "$PEBBLE_ROOT"
+          # openbao-seal.sh put the auto-unseal overlay into .env, and the
+          # COMPOSE_FILE this job exports wins over .env's: every later step
+          # loads it too, or an `up` would recreate OpenBao without its seal.
+          grep -qx 'COMPOSE_FILE=docker-compose.yml:openbao/auto-unseal.yml' .env
+          echo "COMPOSE_FILE=docker-compose.yml:ci/acme-pebble.yml:openbao/auto-unseal.yml" >> "$GITHUB_ENV"
+
+      - name: OpenBao unseals itself after a restart
+        # New with design 2026-11-27 (§4, §5): what the operator chose. No
+        # share is given: a static-sealed OpenBao that comes back sealed is a
+        # first boot that would need a person after every power cut.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          docker compose restart openbao
+          rc=1
+          for _ in $(seq 1 45); do
+            rc=0; state="$(docker compose exec -T openbao bao status -format=json 2>/dev/null)" || rc=$?
+            [ "$rc" = 0 ] && break
+            sleep 2
+          done
+          [ "$rc" = 0 ] || { docker compose logs --tail 50 openbao; echo "::error::OpenBao did not unseal itself after a restart"; exit 1; }
+          grep -q '"type": "static"' <<<"$state"
+          grep -q '"sealed": false' <<<"$state"
+          echo "OpenBao restarted and came back unsealed, with no share given"
+
+      - name: first-boot.sh again -- every step done, nothing changed
+        # New with design 2026-11-27 (§3, §5): a run again after a failure is
+        # the script's whole recovery story. With no terminal and nothing on
+        # stdin it may print no secret, ask nothing, and change nothing: the
+        # same .env, token and key files, containers and schema before and
+        # after, no `run` line, and every step a `skip`. A container is its id
+        # and, while it runs, its start time; a one-shot (migrate,
+        # postgres-grants, openbao-init) runs again on every `up -d` under the
+        # same id -- measured with Compose 5.7.1 on 2026-11-27 -- so for one
+        # its exit code is what must not change.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          fingerprint() {
+            sha256sum .env
+            sudo sha256sum /etc/it-suite/gateway-issuer.token /etc/it-suite/openbao-unseal/unseal.key
+            docker compose ps -aq | sort | xargs docker inspect -f '{{.Name}} {{.Id}} {{if .State.Running}}{{.State.StartedAt}}{{else}}exit={{.State.ExitCode}}{{end}}'
+            docker compose exec -T postgres psql -U its_admin -d itsuite -tAc 'select version_num from alembic_version'
+          }
+          before="$(fingerprint)"
+          ./scripts/first-boot.sh --tls-cafile "$PEBBLE_ROOT" </dev/null | tee "$RUNNER_TEMP/again.log"
+          after="$(fingerprint)"
+          [ "$before" = "$after" ] || { diff <(echo "$before") <(echo "$after") || true; echo "::error::first-boot.sh run again changed something"; exit 1; }
+          if grep -q '^  run ' "$RUNNER_TEMP/again.log"; then
+            echo "::error::first-boot.sh run again ran a step"; exit 1
+          fi
+          [ "$(grep -c '^  skip ' "$RUNNER_TEMP/again.log")" -ge 16 ] || { echo "::error::first-boot.sh run again skipped too few steps"; exit 1; }
+          grep -qx 'First boot: every step is done.' "$RUNNER_TEMP/again.log"
+          rm -f "$RUNNER_TEMP/again.log"
 
       - name: grant-app-privileges.sql (twice — must be idempotent)
         working-directory: deploy
@@ -478,6 +582,258 @@ jobs:
             psql -U its_admin -d itsuite -v ON_ERROR_STOP=1 -f - \
             < postgres/assert-rls.sql
 
+      - name: IT_SUITE_VERSION selects the image reference (interpolation only)
+        # WHAT THIS DOES AND DOES NOT PROVE -- stated precisely, because an
+        # earlier version of this step was named "rollback retags, it does not
+        # rebuild" and could not possibly have shown that.
+        #
+        # PROVES: all five services resolve their `image:` from
+        # IT_SUITE_VERSION, so a typo or a missed service cannot silently
+        # leave one pinned elsewhere. That is a real regression guard: the
+        # tag is threaded through every service.
+        #
+        # DOES NOT PROVE: that `docker compose up -d` PULLS OR REUSES the
+        # tagged image rather than building it. `docker compose config` is
+        # pure YAML interpolation -- it consults no image store and no build
+        # context -- so it is structurally incapable of distinguishing a
+        # retag from a rebuild. With both `image:` and `build:` present,
+        # compose builds a missing image and tags it with the `image:` name,
+        # which would redeploy current working-tree source under an old SHA.
+        # Guarding THAT needs a test that builds a tag, changes the tree, and
+        # asserts `up` did not rebuild -- see the spec's open items. Do not
+        # let this step's green stand in for that.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          for svc in api gateway worker migrate web; do
+            ref=$(IT_SUITE_VERSION=rollback-probe docker compose config \
+                    --format json 2>/dev/null \
+                  | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['$svc']['image'])")
+            echo "$svc -> $ref"
+            case "$ref" in
+              itsuite/backend:rollback-probe|itsuite/web:rollback-probe) ;;
+              *) echo "::error::$svc did not honour IT_SUITE_VERSION (got $ref)"; exit 1 ;;
+            esac
+          done
+          # Anti-vacuity: the default must NOT also be the probe value, or the
+          # loop above would pass without IT_SUITE_VERSION doing anything.
+          default_ref=$(docker compose config --format json 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['api']['image'])")
+          echo "default (no IT_SUITE_VERSION) -> $default_ref"
+          if [ "$default_ref" = "itsuite/backend:rollback-probe" ]; then
+            echo "::error::default equals the probe tag; this assertion proves nothing"
+            exit 1
+          fi
+          echo "IT_SUITE_VERSION selects the image reference for all five services"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: the Linux agent, built from this checkout
+        # The binary the OAuth step's 7c enrols (design 2026-11-23-vps-y-marca-
+        # novieri §4): static, as release-agent.yml builds it, so it runs in a
+        # bare busybox container.
+        working-directory: agent
+        run: CGO_ENABLED=0 go build -trimpath -o dist/novieri-agent ./cmd/agent
+
+      - name: the platform's own OAuth server and MCP door, live, through Traefik
+        # SINCE 2026-11-23 (design 2026-11-23-vps-y-marca-novieri §4) THE
+        # CERTIFICATE ON :443 IS THE PRODUCTION PATH'S: Traefik's `le`
+        # resolver asks Pebble over ACME, TLS-ALPN-01 on :443, for
+        # rmm.novieri.com, and check-public-tls.sh accepts it only against
+        # Pebble's root -- nothing is copied into deploy/certs/ any more. The
+        # runner reaches the stack as rmm.novieri.com at 127.0.0.1 (curl's
+        # and mcp_flow.py's --resolve); Pebble's validator reaches traefik
+        # through pebble-challtestsrv. And while the api is stopped, its
+        # paths answer 503 rather than the console's page (design §6).
+        # THE HALF NO UNIT TEST CAN REACH (own authentication phase 4, plan
+        # 2026-11-15, Task 7). The backend suite proves what the OAuth server
+        # DECIDES, and test_deploy_mcp_route.py what the Traefik rules SAY.
+        # This proves what the shipped images DO with them: the real `api` on
+        # the stack's real OpenBao -- the token key and the pepper never leave
+        # it, and this is the first run of deploy/README.md step 3.6 that is
+        # not a reader's -- with `web` and `traefik`, reached on :443 with a
+        # certificate the script verifies (no -k anywhere).
+        # deploy/ci/mcp_flow.py lists every assertion; it prints claim NAMES,
+        # never a token, a code, a password or the install code.
+        #
+        # THE STACK IS THE OPERATOR'S SCRIPTS' since 2026-11-27 (design
+        # 2026-11-27-despliegue-automatizado §5): first-boot.sh brought it up,
+        # five shares and the auto-unseal included, and first-boot-check.sh
+        # runs below with the console's two clicks made through its API --
+        # agent_flow.py's token for step 11b, and its `hello` for 11d. Every
+        # secret this step reads is masked before anything could print it,
+        # reaches its reader on stdin or in a 0600 file, and goes however the
+        # step ends (the trap).
+        #
+        # TWO PHASES: the opt-in (ITS_MCP_REGISTRATION) is read when the api
+        # starts, so the closed phase runs first and the api is recreated
+        # with it before the open one.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json" "$RUNNER_TEMP/enroll-token" "$RUNNER_TEMP/check.log"; docker rm -f smoke-agent ci-agent >/dev/null 2>&1 || true; rm -rf /tmp/smoke-agent "$RUNNER_TEMP/agent-data"' EXIT
+
+          # 1. Nothing of the old identity provider is defined, at all.
+          defined="$(docker compose config --services) $(docker compose config --images)"
+          if grep -qi keycloak <<<"$defined"; then
+            echo "::error::the compose stack still defines an identity provider service or image"; exit 1
+          fi
+
+          # 4. The api, the console and the edge, as first-boot.sh left them.
+          #    Both behind Traefik, which routes only a healthy container: the
+          #    api's metadata, and the console's page for `/`. `--noproxy '*'`:
+          #    the runner's proxy, if it has one, is not the way to localhost.
+          pebble_root="$PEBBLE_ROOT"
+          get() { curl -sf --noproxy '*' --cacert "$pebble_root" --resolve rmm.novieri.com:443:127.0.0.1 "$@"; }
+          # The api's OWN answer, not just a 200: Traefik leaves out a
+          # container whose health check has not passed yet, and meanwhile
+          # the console's catch-all router answers the metadata path with
+          # its HTML page and a 200 (the first phase-4 run waited on exactly
+          # that, and its POST /mcp reached nginx: 405).
+          wait_for_api() {
+            local meta page
+            for _ in $(seq 1 60); do
+              meta="$(get -o /dev/null -w '%{content_type}' https://rmm.novieri.com/.well-known/oauth-authorization-server || true)"
+              case "$meta" in
+                application/json*)
+                  page="$(get -o /dev/null -w '%{content_type}' https://rmm.novieri.com/ || true)"
+                  case "$page" in text/html*) return 0 ;; esac
+                  ;;
+              esac
+              sleep 3
+            done
+            docker compose logs api web traefik
+            echo "::error::the api and the console never both answered through Traefik"
+            return 1
+          }
+          # THE CHECK THAT GOES RED WITHOUT ACME: Traefik's own default
+          # certificate, or one not for rmm.novieri.com, is refused.
+          ./scripts/check-public-tls.sh --connect 127.0.0.1 --cafile "$pebble_root" --wait 180 \
+            || { docker compose logs traefik pebble; exit 1; }
+          wait_for_api
+          flow() { python3 ci/mcp_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" "$@"; }
+          # A phase that fails leaves the stack's logs. Every secret this step
+          # read is masked before the first phase that could print one.
+
+          # 5. Unclaimed, registration closed.
+          flow --phase closed || { docker compose logs api web traefik; exit 1; }
+
+          # 6. The opt-in, read at start: recreate the api with it.
+          sed -i '/^ITS_MCP_REGISTRATION=/d' .env
+          echo "ITS_MCP_REGISTRATION=open" >> .env
+          docker compose up -d --no-deps --force-recreate api
+          wait_for_api
+
+          # 7. Claimed with the install code the api writes on the first
+          #    status request (deploy/README.md step 8), then the whole AI
+          #    app's path.
+          get -o /dev/null https://rmm.novieri.com/api/v1/setup/status
+          docker compose exec -T api cat /var/lib/its/secrets/setup-code > "$RUNNER_TEMP/setup-code"
+          # The api logs this code once, when it creates it: masked before
+          # anything could print it, read by the shell itself (`$(<file)`).
+          echo "::add-mask::$(<"$RUNNER_TEMP/setup-code")"
+          flow --phase open --setup-code-file "$RUNNER_TEMP/setup-code" --state-file "$RUNNER_TEMP/ci-owner.json" || { docker compose logs api web traefik; exit 1; }
+
+          # 7b. While no api container is healthy, its paths answer 503 --
+          #     the file provider's api-unavailable -- and never the
+          #     console's index.html with a 200 (design 2026-11-23 §6).
+          docker compose stop api
+          answered=""
+          for _ in $(seq 1 30); do
+            answered="$(curl -s --noproxy '*' --cacert "$pebble_root" --resolve rmm.novieri.com:443:127.0.0.1 \
+              -o /dev/null -w '%{http_code}' https://rmm.novieri.com/api/v1/setup/status || true)"
+            [ "$answered" = 503 ] && break
+            sleep 2
+          done
+          [ "$answered" = 503 ] || { echo "::error::with the api stopped, /api answered $answered, not 503"; exit 1; }
+          echo "with the api stopped, /api/v1/setup/status answers 503"
+          docker compose start api
+          wait_for_api
+
+          # 7c. An endpoint (design 2026-11-23 §4, §5), by the runbook's own
+          #     acceptance test: first-boot-check.sh (deploy/README.md, First
+          #     boot, 3). Its agent is the Linux binary built from this
+          #     checkout, on the runner's network, dialling rmm.novieri.com at
+          #     127.0.0.1 (--connect) and trusting Pebble's root alone
+          #     (--tls-cafile): enrolled over :443 with agent_flow.py's
+          #     one-use token, which reaches the script on stdin, connected
+          #     over :8443 with mutual TLS. Once it says the agent connected,
+          #     agent_flow.py presses "Run job" -- a `hello` the server signs
+          #     and the agent verifies -- and the script waits for it (11d),
+          #     verifies the chain (11e), retires the agent (11f) and takes the
+          #     first backup (12). One sign-in mints two one-use tokens: this
+          #     agent's, and 7c-bis's.
+          agents() { python3 ci/agent_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" --state-file "$RUNNER_TEMP/ci-owner.json" "$@"; }
+          agent_data="$RUNNER_TEMP/agent-data"
+          mkdir -m 700 "$agent_data"
+          agents --phase token --token-file "$RUNNER_TEMP/enroll-token" --token-file "$agent_data/enroll-token" || { docker compose logs api traefik; exit 1; }
+          echo "::add-mask::$(<"$RUNNER_TEMP/enroll-token")"
+          echo "::add-mask::$(<"$agent_data/enroll-token")"
+          { cat "$RUNNER_TEMP/enroll-token"; echo; } \
+            | ./scripts/first-boot-check.sh --tls-cafile "$pebble_root" --connect 127.0.0.1 --wait-job 180 \
+              > "$RUNNER_TEMP/check.log" 2>&1 &
+          check=$!
+          for _ in $(seq 1 120); do
+            grep -q '^  ok      step 11c:' "$RUNNER_TEMP/check.log" && break
+            kill -0 "$check" 2>/dev/null || break
+            sleep 2
+          done
+          # The device it enrolled, by the id its 11c line names: a host that
+          # ran it before keeps the earlier agent's device under this name. A
+          # failed job phase stops the script, which retires its agent and
+          # prints the agent's last lines into its log, and waits for it.
+          device_id="$(sed -n 's/^  ok      step 11c: the agent enrolled as device \([0-9a-f-]*\), .*/\1/p' "$RUNNER_TEMP/check.log")"
+          agents --phase job --hostname "$(hostname)" --device-id "$device_id" || { kill "$check" 2>/dev/null || true; wait "$check" || true; cat "$RUNNER_TEMP/check.log"; docker compose logs api gateway traefik; exit 1; }
+          wait "$check" || { cat "$RUNNER_TEMP/check.log"; docker compose logs api gateway; exit 1; }
+          cat "$RUNNER_TEMP/check.log"
+          grep -qx 'First boot is complete.' "$RUNNER_TEMP/check.log"
+
+          # 7c-bis. Invariant 1, the negative half, end to end (coordinator's
+          #     ruling Q3, 2026-11-27; until then a rehearsal only, plan
+          #     2026-11-23, Task 10). The same binary, enrolled with the second
+          #     token on the stack's network -- its own agent, since
+          #     first-boot-check.sh retired its one at 11f -- is stopped, made
+          #     to pin a job-signing key nobody holds the private half of, and
+          #     started again; the server signs a hello as always, and the agent
+          #     must refuse it with bad_signature and run nothing: no greeting
+          #     comes back, the chain holds jobs.refused and no success, and the
+          #     agent's own log says why.
+          agent_bin="$(cd ../agent && pwd)/dist/novieri-agent"
+          docker run -d --name ci-agent --hostname ci-agent --network it-suite_default \
+            --add-host rmm.novieri.com:172.19.240.250 --user "$(id -u):$(id -g)" \
+            -v "$agent_bin:/usr/local/bin/novieri-agent:ro" \
+            -v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro" \
+            -v "$agent_data:/var/lib/novieri-agent" \
+            -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \
+            busybox:1.36.1 /usr/local/bin/novieri-agent
+          for _ in $(seq 1 60); do
+            docker logs ci-agent 2>&1 | grep -c 'gateway connected' >/dev/null && break
+            sleep 2
+          done
+          test ! -e "$agent_data/enroll-token" || { docker logs ci-agent; echo "::error::the agent kept its enrollment token after enrolling"; exit 1; }
+          agents --phase refused --hostname ci-agent --container ci-agent --pins-file "$agent_data/pins.json" || { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }
+          docker logs ci-agent 2>&1 | grep -E 'msg="job refused".*job_type=hello.*reason=bad_signature'
+
+          # 7d. The Celery worker (beat runs inside it), healthy on the image
+          #     this job built: its health check reads its own heartbeat in
+          #     Redis. Until 2026-11-24 nothing here started it, and an image
+          #     without kombu's Redis transport's `packaging` (celery without
+          #     its `redis` extra) restart-looped it on a first boot while
+          #     every check above stayed green (rehearsal of plan 2026-11-23,
+          #     Task 12, finding F7).
+          docker compose up -d --wait --wait-timeout 180 worker || { docker compose logs worker; exit 1; }
+
+          # 8. And nothing of the old identity provider ever ran in this
+          #    project (not the host's: a shared runner may run anything).
+          running="$(docker compose ps -a --format '{{.Image}} {{.Name}}')"
+          if grep -qi keycloak <<<"$running"; then
+            echo "::error::a container of the old identity provider ran in this job"; exit 1
+          fi
+
       - name: backup.sh -> restore.sh round trip, invoked AS DOCUMENTED
         # THIS EXISTS BECAUSE ITS ABSENCE ALREADY COST US ONE. The scripts
         # were verified by hand from `deploy/scripts/`, while every document
@@ -490,9 +846,16 @@ jobs:
         # So: run them exactly as the runbook does, from `deploy/`, with no
         # environment overrides beyond the force flag. A standing claim with
         # no gate is the shape CLAUDE.md calls out for health.check.
+        #
+        # SINCE 2026-11-27 it runs last, on the stack first-boot.sh built and
+        # first-boot-check.sh used: the application tier stops first, as
+        # deploy/README.md "Rolling back a deployment" stops it -- a restore
+        # under a running app is how half-written state happens -- and
+        # nothing after this needs it.
         working-directory: deploy
         run: |
           set -euo pipefail
+          docker compose stop api gateway worker backup-replicator web traefik
           ./scripts/backup.sh /tmp/ci-backup
           test -s /tmp/ci-backup/globals.sql
           test -s /tmp/ci-backup/itsuite.dump
@@ -590,289 +953,15 @@ jobs:
             echo "::error::the restored keycloak database lost the row this run wrote"; exit 1; }
           psql_admin -d postgres -c "DROP DATABASE keycloak WITH (FORCE)"
 
-      - name: IT_SUITE_VERSION selects the image reference (interpolation only)
-        # WHAT THIS DOES AND DOES NOT PROVE -- stated precisely, because an
-        # earlier version of this step was named "rollback retags, it does not
-        # rebuild" and could not possibly have shown that.
-        #
-        # PROVES: all five services resolve their `image:` from
-        # IT_SUITE_VERSION, so a typo or a missed service cannot silently
-        # leave one pinned elsewhere. That is a real regression guard: the
-        # tag is threaded through every service.
-        #
-        # DOES NOT PROVE: that `docker compose up -d` PULLS OR REUSES the
-        # tagged image rather than building it. `docker compose config` is
-        # pure YAML interpolation -- it consults no image store and no build
-        # context -- so it is structurally incapable of distinguishing a
-        # retag from a rebuild. With both `image:` and `build:` present,
-        # compose builds a missing image and tags it with the `image:` name,
-        # which would redeploy current working-tree source under an old SHA.
-        # Guarding THAT needs a test that builds a tag, changes the tree, and
-        # asserts `up` did not rebuild -- see the spec's open items. Do not
-        # let this step's green stand in for that.
-        working-directory: deploy
-        run: |
-          set -euo pipefail
-          for svc in api gateway worker migrate web; do
-            ref=$(IT_SUITE_VERSION=rollback-probe docker compose config \
-                    --format json 2>/dev/null \
-                  | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['$svc']['image'])")
-            echo "$svc -> $ref"
-            case "$ref" in
-              itsuite/backend:rollback-probe|itsuite/web:rollback-probe) ;;
-              *) echo "::error::$svc did not honour IT_SUITE_VERSION (got $ref)"; exit 1 ;;
-            esac
-          done
-          # Anti-vacuity: the default must NOT also be the probe value, or the
-          # loop above would pass without IT_SUITE_VERSION doing anything.
-          default_ref=$(docker compose config --format json 2>/dev/null \
-            | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['api']['image'])")
-          echo "default (no IT_SUITE_VERSION) -> $default_ref"
-          if [ "$default_ref" = "itsuite/backend:rollback-probe" ]; then
-            echo "::error::default equals the probe tag; this assertion proves nothing"
-            exit 1
-          fi
-          echo "IT_SUITE_VERSION selects the image reference for all five services"
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-          cache-dependency-path: agent/go.sum
-
-      - name: the Linux agent, built from this checkout
-        # The binary the OAuth step's 7c enrols (design 2026-11-23-vps-y-marca-
-        # novieri §4): static, as release-agent.yml builds it, so it runs in a
-        # bare busybox container.
-        working-directory: agent
-        run: CGO_ENABLED=0 go build -trimpath -o dist/novieri-agent ./cmd/agent
-
-      - name: the platform's own OAuth server and MCP door, live, through Traefik
-        # SINCE 2026-11-23 (design 2026-11-23-vps-y-marca-novieri §4) THE
-        # CERTIFICATE ON :443 IS THE PRODUCTION PATH'S: Traefik's `le`
-        # resolver asks Pebble over ACME, TLS-ALPN-01 on :443, for
-        # rmm.novieri.com, and check-public-tls.sh accepts it only against
-        # Pebble's root -- nothing is copied into deploy/certs/ any more. The
-        # runner reaches the stack as rmm.novieri.com at 127.0.0.1 (curl's
-        # and mcp_flow.py's --resolve); Pebble's validator reaches traefik
-        # through pebble-challtestsrv. And while the api is stopped, its
-        # paths answer 503 rather than the console's page (design §6).
-        # THE HALF NO UNIT TEST CAN REACH (own authentication phase 4, plan
-        # 2026-11-15, Task 7). The backend suite proves what the OAuth server
-        # DECIDES, and test_deploy_mcp_route.py what the Traefik rules SAY.
-        # This proves what the shipped images DO with them: the real `api` on
-        # the stack's real OpenBao -- the token key and the pepper never leave
-        # it, and this is the first run of deploy/README.md step 3.6 that is
-        # not a reader's -- with `web` and `traefik`, reached on :443 with a
-        # certificate the script verifies (no -k anywhere).
-        # deploy/ci/mcp_flow.py lists every assertion; it prints claim NAMES,
-        # never a token, a code, a password or the install code.
-        #
-        # OPENBAO WITH ONE SHARE, because CI has nobody to hand five to. Its
-        # unseal key, root token and the its-app token live in this step's
-        # shell and the throwaway .env (0600 before the first is written to
-        # it), are masked in the log, and reach `bao` on stdin, never in an
-        # argv a process listing on a shared runner would show. The install
-        # code is masked as soon as it is read. The two files that held a
-        # secret are removed however the step ends (the trap); `teardown`
-        # takes the vault itself with `down -v`. On a self-hosted runner the
-        # throwaway .env stays in the checkout until the next job's checkout
-        # cleans it. Production keeps five shares and never runs on root.
-        #
-        # TWO PHASES: the opt-in (ITS_MCP_REGISTRATION) is read when the api
-        # starts, so the closed phase runs first and the api is recreated
-        # with it before the open one.
-        working-directory: deploy
-        run: |
-          set -euo pipefail
-          umask 077
-          init_json="$RUNNER_TEMP/bao-init.json"
-          trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; docker rm -f ci-agent >/dev/null 2>&1 || true; rm -rf "$RUNNER_TEMP/agent-data"' EXIT
-
-          # 1. Nothing of the old identity provider is defined, at all.
-          defined="$(docker compose config --services) $(docker compose config --images)"
-          if grep -qi keycloak <<<"$defined"; then
-            echo "::error::the compose stack still defines an identity provider service or image"; exit 1
-          fi
-
-          # 2. OpenBao: initialise, unseal, the its-app policy and its token
-          #    (deploy/README.md 3.1-3.4), then provision (3.6).
-          docker compose up -d openbao
-          # `operator init -status` exits 0 initialised, 1 on an error (not
-          # answering yet), 2 answering and NOT initialised -- the one fact
-          # `operator init` needs. (`bao status` exits 2 for any sealed vault,
-          # initialised or not.)
-          rc=1
-          for _ in $(seq 1 30); do
-            rc=0; docker compose exec -T openbao bao operator init -status >/dev/null 2>&1 || rc=$?
-            [ "$rc" = 2 ] && break
-            sleep 2
-          done
-          [ "$rc" = 2 ] || { docker compose logs openbao; echo "::error::openbao never answered as a vault to initialise"; exit 1; }
-          docker compose exec -T openbao \
-            bao operator init -key-shares=1 -key-threshold=1 -format=json > "$init_json"
-          unseal=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["unseal_keys_b64"][0])' "$init_json")
-          root=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["root_token"])' "$init_json")
-          rm -f "$init_json"
-          echo "::add-mask::$unseal"
-          echo "::add-mask::$root"
-          # `key=-` reads the value from stdin, as it is: no trailing newline.
-          printf '%s' "$unseal" | docker compose exec -T openbao bao write sys/unseal key=- >/dev/null
-          app_token=$(docker compose exec -T openbao sh -c 'read -r BAO_TOKEN && export BAO_TOKEN &&
-            bao policy write its-app /bao/its-app.hcl >/dev/null &&
-            bao token create -orphan -policy=its-app -ttl=24h -field=token' <<<"$root")
-          echo "::add-mask::$app_token"
-          # The vault's tokens go into .env: 0600 first, as deploy/README.md
-          # step 1 makes it (`sed -i` keeps the mode it finds).
-          chmod 600 .env
-          sed -i -e '/^ITS_OPENBAO_TOKEN=/d' -e '/^OPENBAO_TOKEN=/d' \
-            -e '/^ITS_MCP_REGISTRATION=/d' .env
-          {
-            echo "ITS_OPENBAO_TOKEN=$app_token"
-            echo "OPENBAO_TOKEN=$root"
-          } >> .env
-          docker compose run --rm openbao-init
-
-          # 3. The audit HMAC key (step 5). The certificate for :443 is
-          #    Traefik's to obtain (step 7).
-          docker compose run --rm --no-deps --entrypoint sh api -c \
-            'head -c 32 /dev/urandom > /var/lib/its/secrets/audit-hmac.key && chmod 600 /var/lib/its/secrets/audit-hmac.key'
-
-          # 4. The api, the console and the edge. Both behind Traefik, which
-          #    routes only a healthy container: the api's metadata, and the
-          #    console's page for `/`. `--noproxy '*'`: the runner's proxy, if
-          #    it has one, is not the way to localhost (the flow sets no proxy
-          #    either).
-          pebble_root="$RUNNER_TEMP/pebble-root.pem"
-          get() { curl -sf --noproxy '*' --cacert "$pebble_root" --resolve rmm.novieri.com:443:127.0.0.1 "$@"; }
-          # The api's OWN answer, not just a 200: Traefik leaves out a
-          # container whose health check has not passed yet, and meanwhile
-          # the console's catch-all router answers the metadata path with
-          # its HTML page and a 200 (the first phase-4 run waited on exactly
-          # that, and its POST /mcp reached nginx: 405).
-          wait_for_api() {
-            local meta page
-            for _ in $(seq 1 60); do
-              meta="$(get -o /dev/null -w '%{content_type}' https://rmm.novieri.com/.well-known/oauth-authorization-server || true)"
-              case "$meta" in
-                application/json*)
-                  page="$(get -o /dev/null -w '%{content_type}' https://rmm.novieri.com/ || true)"
-                  case "$page" in text/html*) return 0 ;; esac
-                  ;;
-              esac
-              sleep 3
-            done
-            docker compose logs api web traefik
-            echo "::error::the api and the console never both answered through Traefik"
-            return 1
-          }
-          docker compose up -d --build api web traefik
-          # Pebble makes a new root on every start: the one that signed this
-          # run's certificate is read from its management port (15000), which
-          # is published nowhere and answers on its address in the network.
-          for _ in $(seq 1 30); do
-            curl -sf --noproxy '*' --cacert "$PEBBLE_MINICA" --resolve pebble:15000:172.19.240.252 \
-              https://pebble:15000/roots/0 -o "$pebble_root" && break
-            sleep 2
-          done
-          test -s "$pebble_root" || { docker compose logs pebble; echo "::error::pebble never served its root"; exit 1; }
-          # THE CHECK THAT GOES RED WITHOUT ACME: Traefik's own default
-          # certificate, or one not for rmm.novieri.com, is refused.
-          ./scripts/check-public-tls.sh --connect 127.0.0.1 --cafile "$pebble_root" --wait 180 \
-            || { docker compose logs traefik pebble; exit 1; }
-          wait_for_api
-          flow() { python3 ci/mcp_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" "$@"; }
-          # A phase that fails leaves the stack's logs. Every secret this step
-          # read is masked before the first phase that could print one.
-
-          # 5. Unclaimed, registration closed.
-          flow --phase closed || { docker compose logs api web traefik; exit 1; }
-
-          # 6. The opt-in, read at start: recreate the api with it.
-          echo "ITS_MCP_REGISTRATION=open" >> .env
-          docker compose up -d --no-deps --force-recreate api
-          wait_for_api
-
-          # 7. Claimed with the install code the api writes on the first
-          #    status request (deploy/README.md step 8), then the whole AI
-          #    app's path.
-          get -o /dev/null https://rmm.novieri.com/api/v1/setup/status
-          docker compose exec -T api cat /var/lib/its/secrets/setup-code > "$RUNNER_TEMP/setup-code"
-          # The api logs this code once, when it creates it: masked before
-          # anything could print it, read by the shell itself (`$(<file)`).
-          echo "::add-mask::$(<"$RUNNER_TEMP/setup-code")"
-          flow --phase open --setup-code-file "$RUNNER_TEMP/setup-code" --state-file "$RUNNER_TEMP/ci-owner.json" || { docker compose logs api web traefik; exit 1; }
-
-          # 7b. While no api container is healthy, its paths answer 503 --
-          #     the file provider's api-unavailable -- and never the
-          #     console's index.html with a 200 (design 2026-11-23 §6).
-          docker compose stop api
-          answered=""
-          for _ in $(seq 1 30); do
-            answered="$(curl -s --noproxy '*' --cacert "$pebble_root" --resolve rmm.novieri.com:443:127.0.0.1 \
-              -o /dev/null -w '%{http_code}' https://rmm.novieri.com/api/v1/setup/status || true)"
-            [ "$answered" = 503 ] && break
-            sleep 2
-          done
-          [ "$answered" = 503 ] || { echo "::error::with the api stopped, /api answered $answered, not 503"; exit 1; }
-          echo "with the api stopped, /api/v1/setup/status answers 503"
-          docker compose start api
-          wait_for_api
-
-          # 7c. An endpoint (design 2026-11-23 §4, §5): the gateway's
-          #     certificate from the internal CA (deploy/README.md step 6,
-          #     its gateway-issuer token on stdin), the gateway, and the
-          #     Linux agent built from this checkout -- enrolled over :443
-          #     with a one-use token, connected over :8443 with mutual TLS,
-          #     running a hello the server signed and the agent verified.
-          #     The agent dials rmm.novieri.com as an endpoint does: the name
-          #     is traefik's address on the stack's network (--add-host), and
-          #     the root it trusts for :443 is Pebble's.
-          gw_token=$(docker compose exec -T openbao sh -c 'read -r BAO_TOKEN && export BAO_TOKEN &&
-            bao policy write gateway-issuer /bao/gateway-issuer.hcl >/dev/null &&
-            bao token create -orphan -policy=gateway-issuer -ttl=1h -field=token' <<<"$root")
-          echo "::add-mask::$gw_token"
-          docker compose run --rm --no-deps -T \
-            -v "$PWD/scripts/issue-gateway-cert.py:/tmp/issue-gateway-cert.py:ro" \
-            --entrypoint python gateway /tmp/issue-gateway-cert.py rmm.novieri.com <<<"$gw_token"
-          # --wait: healthy before the agent dials, so a slow start cannot push
-          # its reconnect backoff past agent_flow's window.
-          docker compose up -d --wait --wait-timeout 180 gateway
-          agent_data="$RUNNER_TEMP/agent-data"
-          mkdir -m 700 "$agent_data"
-          agent_bin="$(cd ../agent && pwd)/dist/novieri-agent"
-          agents() { python3 ci/agent_flow.py --base https://rmm.novieri.com --resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" --state-file "$RUNNER_TEMP/ci-owner.json" "$@"; }
-          agents --phase token --token-file "$agent_data/enroll-token" || { docker compose logs api traefik; exit 1; }
-          docker run -d --name ci-agent --hostname ci-agent --network it-suite_default \
-            --add-host rmm.novieri.com:172.19.240.250 --user "$(id -u):$(id -g)" \
-            -v "$agent_bin:/usr/local/bin/novieri-agent:ro" \
-            -v "$pebble_root:/etc/ssl/certs/ca-certificates.crt:ro" \
-            -v "$agent_data:/var/lib/novieri-agent" \
-            -e ITS_AGENT_ENROLL_URL=https://rmm.novieri.com -e ITS_AGENT_DATA_DIR=/var/lib/novieri-agent \
-            busybox:1.36.1 /usr/local/bin/novieri-agent
-          agents --phase job --hostname ci-agent || { docker logs ci-agent; docker compose logs api gateway traefik; exit 1; }
-          test ! -e "$agent_data/enroll-token" || { echo "::error::the agent kept its enrollment token after enrolling"; exit 1; }
-          docker logs ci-agent 2>&1 | grep -E 'msg=enrolled|gateway connected'
-
-          # 7d. The Celery worker (beat runs inside it), healthy on the image
-          #     this job built: its health check reads its own heartbeat in
-          #     Redis. Until 2026-11-24 nothing here started it, and an image
-          #     without kombu's Redis transport's `packaging` (celery without
-          #     its `redis` extra) restart-looped it on a first boot while
-          #     every check above stayed green (rehearsal of plan 2026-11-23,
-          #     Task 12, finding F7).
-          docker compose up -d --wait --wait-timeout 180 worker || { docker compose logs worker; exit 1; }
-
-          # 8. And nothing of the old identity provider ever ran in this
-          #    project (not the host's: a shared runner may run anything).
-          running="$(docker compose ps -a --format '{{.Image}} {{.Name}}')"
-          if grep -qi keycloak <<<"$running"; then
-            echo "::error::a container of the old identity provider ran in this job"; exit 1
-          fi
-
       - name: teardown
         if: always()
         working-directory: deploy
-        run: docker compose down -v
+        run: |
+          docker compose down -v
+          # What the scripts wrote as root outside the checkout. This runner is
+          # no deployment host -- the `down -v` above assumes as much.
+          sudo rm -rf /etc/it-suite/gateway-issuer.token /etc/it-suite/openbao-unseal /etc/it-suite/backup.conf \
+            /var/backups/it-suite /var/lib/it-suite "$RUNNER_TEMP/systemd" /tmp/smoke-agent
 
   frontend:
     name: frontend (vitest · tsc · build)

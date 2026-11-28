@@ -280,49 +280,52 @@ def _deploy_step(name: str) -> str:
 OAUTH_STEP = "the platform's own OAuth server and MCP door"
 
 
+def _first_boot_code() -> str:
+    """deploy/scripts/first-boot.sh without its comment lines."""
+    text = (REPO / "deploy/scripts/first-boot.sh").read_text()
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
 def test_ci_runs_both_phases_through_traefik_on_a_real_openbao() -> None:
     """The deploy job runs the closed phase before the claim and the open
-    phase after the api restarted with the opt-in, against the stack's own
-    OpenBao; and it names Keycloak only to assert that nothing of it is
-    defined or ran (design §10, falsifier 11)."""
+    phase after the api restarted with the opt-in, against the OpenBao
+    first-boot.sh initialised: five shares and a threshold of three, as on the
+    VPS (design 2026-11-27-despliegue-automatizado §5; until then the job made
+    its own, with one share). And it names Keycloak only to assert that
+    nothing of it is defined or ran (design §10, falsifier 11)."""
     run = _deploy_step(OAUTH_STEP)
     assert "python3 ci/mcp_flow.py" in run
     closed = run.index("flow --phase closed")
     opened = run.index("flow --phase open")
     restart = run.index('echo "ITS_MCP_REGISTRATION=open" >> .env')
     assert closed < restart < opened, "closed, then the opt-in and a restart, then open"
-    assert "bao operator init -key-shares=1 -key-threshold=1 -format=json" in run
-    assert "docker compose run --rm openbao-init" in run
+    first_boot = _deploy_step("first boot -- scripts/first-boot.sh")
+    assert "python3 ci/first_boot_answers.py" in first_boot
+    code = _first_boot_code()
+    assert "dc exec -T openbao bao operator init -key-shares=5 -key-threshold=3" in code
+    assert "dc up openbao-init" in code
+    assert "operator init" not in run and "openbao-init" not in run, "OpenBao is first-boot.sh's"
     named = [line.strip() for line in run.splitlines() if re.search("keycloak", line, re.I)]
     assert len(named) == 2, named
     assert all(line.startswith("if grep -qi keycloak <<<") for line in named), named
 
 
-#: Lines that hold a vault secret without an argv: an assignment, and bash's
-#: own printf and echo, which run in the shell and start no process.
-SHELL_BUILTINS = ("unseal=", "root=", "printf '%s' ", 'echo "OPENBAO_TOKEN=')
-
-
-def test_no_secret_of_the_vault_travels_in_an_argv() -> None:
-    """The unseal key and the root token reach `bao` on stdin, never as an
-    argument a process listing on a shared runner would show; the files that
-    held them go however the step ends."""
-    run = _deploy_step(OAUTH_STEP)
-    for secret in ('"$unseal"', '"$root"', "$root"):
-        argv = [
-            line.strip()
-            for line in run.splitlines()
-            if secret in line
-            and "<<<" not in line
-            and "::add-mask::" not in line
-            and not line.strip().startswith(SHELL_BUILTINS)
-        ]
-        assert argv == [], argv
+def test_no_secret_of_the_vault_is_in_the_job_any_more() -> None:
+    """Since 2026-11-27 the shares, the root token and the runtime tokens are
+    first-boot.sh's alone: no step of the job holds one in a variable, so none
+    can reach an argv here. That none reaches an argv inside the script is
+    `test_first_boot_script.py`'s, over every command it runs; that the job's
+    log masks each one first_boot_answers.py sees is `test_ci_first_boot.py`'s.
+    The files that held a secret here go however the step ends."""
+    steps = yaml.safe_load(CI.read_text())["jobs"]["deploy"]["steps"]
+    whole = "\n".join(str(step.get("run", "")) for step in steps)
+    for name in ("$unseal", "$root", "$app_token", "$gw_token", "init_json", "BAO_TOKEN"):
+        assert name not in whole, name
     # The rest of the trap (the agent's container and data directory) is
     # asserted whole in test_ci_agent_flow.py, its owner.
     assert (
-        """trap 'rm -f "$init_json" "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json"; """
-        in run
+        """trap 'rm -f "$RUNNER_TEMP/setup-code" "$RUNNER_TEMP/ci-owner.json" """
+        in _deploy_step(OAUTH_STEP)
     )
 
 
@@ -367,14 +370,18 @@ def test_the_deploy_job_keeps_the_name_branch_protection_may_require() -> None:
     assert job["name"] == "deploy (compose first boot · app_user privileges)"
 
 
-def test_openbao_is_waited_for_until_it_answers_not_initialised() -> None:
-    """Fix round 1 (review minor 4): `bao status` exits 2 for any sealed
-    vault, initialised or not; `operator init -status` exits 2 only for one
-    that is not initialised, which is the fact `operator init` needs."""
-    run = _deploy_step(OAUTH_STEP)
-    waited = run.index("docker compose exec -T openbao bao operator init -status")
-    assert waited < run.index("bao operator init -key-shares=1")
-    assert "bao status" not in run
+def test_openbao_is_asked_whether_it_is_initialised_by_bao_status() -> None:
+    """Fix round 1 (review minor 4) had the job wait with `operator init
+    -status`, held to exit 2 only for a vault not initialised. Measured with
+    OpenBao 2.6.1 on 2026-11-27 (plan 2026-11-27): it exits 2 for a refused
+    connection too. first-boot.sh reads `initialized` out of `bao status
+    -format=json`, which exits 1 when it cannot reach the server, and never
+    asks `operator init -status`; the job asks OpenBao nothing of the kind."""
+    code = _first_boot_code()
+    assert "init -status" not in code
+    assert "dc exec -T openbao bao status -format=json" in code
+    assert '"initialized"' in code
+    assert "bao " not in _deploy_step(OAUTH_STEP)
 
 
 def test_the_api_is_waited_for_until_it_answers_itself() -> None:
@@ -410,16 +417,21 @@ def test_a_failed_phase_leaves_the_stacks_logs() -> None:
 
 
 def test_the_files_that_hold_a_secret_are_the_runners_alone() -> None:
-    """The throwaway .env holds the vault's root token and the its-app token
-    from the moment they are written: it is 0600 first, as the runbook's step 1
-    makes it. And the install code is masked before anything can print it --
-    the api logs it once when it is created (`app/core/setup_code.py`)."""
+    """The install code is masked before anything can print it -- the api
+    logs it once when it is created (`app/core/setup_code.py`) -- and so is
+    the enrollment token, before first-boot-check.sh is handed it. The
+    vault's tokens go into .env from first-boot.sh's step 3.5, which checks
+    .env is 0600 first, as step 1 makes it."""
     run = _deploy_step(OAUTH_STEP)
     assert "umask 077" in run
-    assert run.index("chmod 600 .env") < run.index('echo "OPENBAO_TOKEN=$root"')
     masked = run.index('echo "::add-mask::$(<"$RUNNER_TEMP/setup-code")"')
     copied = run.index('cat /var/lib/its/secrets/setup-code > "$RUNNER_TEMP/setup-code"')
     assert copied < masked < run.index("flow --phase open")
+    token = run.index('echo "::add-mask::$(<"$RUNNER_TEMP/enroll-token")"')
+    assert run.index("agents --phase token") < token < run.index("./scripts/first-boot-check.sh")
+    code = _first_boot_code()
+    mode = code.index('[ "$(stat -c %a .env)" = 600 ]')
+    assert mode < code.index('env_put ITS_OPENBAO_TOKEN "$app"')
 
 
 # --------------------------------------------------------------------------- #
@@ -754,11 +766,18 @@ def test_the_deploy_job_copies_no_certificate_and_checks_the_one_acme_gave() -> 
     assert "deploy/certs" not in whole and "certs/fullchain.pem" not in whole
     assert "openssl req" not in whole
     assert "https://localhost" not in whole
+    names = [str(step.get("name", "")) for step in steps]
+    pebble = names.index("Pebble, and the root it signs this run's certificate with")
+    first_boot = next(i for i, n in enumerate(names) if n.startswith("first boot -- scripts"))
+    oauth = next(i for i, n in enumerate(names) if n.startswith(OAUTH_STEP))
+    assert pebble < first_boot < oauth
+    assert "https://pebble:15000/roots/0" in _deploy_step("Pebble, and the root")
+    assert '-- --tls-cafile "$PEBBLE_ROOT"' in _deploy_step("first boot -- scripts/first-boot.sh")
     run = _deploy_step(OAUTH_STEP)
     check = run.index(
         './scripts/check-public-tls.sh --connect 127.0.0.1 --cafile "$pebble_root" --wait 180'
     )
-    assert run.index("https://pebble:15000/roots/0") < check < run.index("flow --phase closed")
+    assert run.index('pebble_root="$PEBBLE_ROOT"') < check < run.index("flow --phase closed")
     assert (
         "flow() { python3 ci/mcp_flow.py --base https://rmm.novieri.com "
         '--resolve rmm.novieri.com:127.0.0.1 --cafile "$pebble_root" "$@"; }'
@@ -877,7 +896,7 @@ def test_the_pebble_image_built_in_certificate_is_not_about_to_expire() -> None:
 def test_the_address_the_job_asks_pebble_at_is_the_one_the_override_gives_it() -> None:
     services = yaml.safe_load(PEBBLE.read_text())["services"]
     pinned = services["pebble"]["networks"]["default"]["ipv4_address"]
-    run = _deploy_step(OAUTH_STEP)
+    run = _deploy_step("Pebble, and the root")
     assert f"--resolve pebble:15000:{pinned}" in run
     traefik = services["traefik"]["networks"]["default"]["ipv4_address"]
     assert services["challtestsrv"]["command"][1] == traefik, "every name answers traefik's address"

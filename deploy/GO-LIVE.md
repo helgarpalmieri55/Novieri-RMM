@@ -11,9 +11,10 @@ Work top to bottom. Each item names the exact file or variable.
 
 ## 1. Secrets in `deploy/.env`
 
-`./scripts/new-env.sh --host rmm.novieri.com` (`deploy/README.md` step 1)
-writes `.env` from `.env.example`, mode 600, and replaces four of the **six**
-values that must change — **all six are literally `change-me`** in
+`./scripts/new-env.sh --host rmm.novieri.com` (`deploy/README.md`, appendix,
+step 1, which `first-boot.sh` runs) writes `.env` from `.env.example`, mode
+600, and replaces four of the **six** values that must change — **all six are
+literally `change-me`** in
 `.env.example`. The distinction that matters is not which ones say
 `change-me`; it is *when* you can replace them: four are generated before you
 start anything, and the two OpenBao tokens do not exist until first boot has
@@ -191,53 +192,82 @@ scoped to the one bucket instead of an account root key.
 
 ## 4. OpenBao seal
 
-- **Store the 5 unseal key shares and the root token OFF this host**, split
-  across different custodians. `bao operator init` prints them **exactly
-  once** — losing threshold-many shares means the job-signing key, the agent
-  CA and every sealed credential are unrecoverable.
-- **OpenBao comes back SEALED after every restart and every host reboot**, and
-  nothing starts until it is unsealed by hand:
+**Every first boot turns on the auto-unseal with a static key, since
+2026-11-27.** The operator decided it that day ("Activarlo siempre"), knowing
+the cost in the table below: right after step 3.6, before step 4 starts
+anything else, `first-boot.sh` runs `openbao-seal.sh enable` with the three
+shares of step 3.3, then restarts OpenBao to prove it comes back unsealed on
+its own (`deploy/README.md`, First boot). No invariant of `CLAUDE.md` changes:
+jobs stay signed by the server and verified by the agent (1), and stored
+credentials stay encrypted in the vault (3). What changes is how the vault is
+protected **at rest**, below.
 
-  ```sh
-  docker compose exec openbao bao operator unseal   # ×3, one share each
-  ```
+- **The 5 shares and the root token, OFF this host**, split across different
+  custodians. `bao operator init` prints them **exactly once**. With the
+  auto-unseal the shares are **recovery keys**: they authorize `openbao-seal.sh
+  disable`, and, with the root token, `bao operator generate-root`: they are no
+  way back from a lost root token; they **cannot unseal** OpenBao. **The root
+  token's off-host copy is the only way back to root**: measured on OpenBao
+  2.6.1 (2026-11-27), `bao operator generate-root` with no token is refused
+  (`403`, `permission denied`), the old unauthenticated endpoint answers
+  `405`, and with the root token it asks for three shares. Whether that
+  unauthenticated endpoint is open is OpenBao's
+  `disable_unauthed_generate_root_endpoints` setting, which
+  `openbao/config.hcl` does not set: changing it is a security decision the
+  operator has not taken.
+- **The key file, `/etc/it-suite/openbao-unseal/unseal.key`** (mode `0400`,
+  owned by uid:gid `100:1000`, OpenBao's user in its image; `ls -l` shows
+  whatever names this host has for those numbers, or the numbers): off this
+  host, **apart from any copy of `openbao-data`**. Whoever has both has the
+  job-signing key and the CA. **If it is lost, OpenBao cannot be unsealed at
+  all**, by anyone: the shares do not unseal it, and no copy of `openbao-data`
+  taken since the auto-unseal went on opens without it
+  (`docs/07-backup-restore.md` §5).
+- **After a reboot OpenBao unseals itself.** `docker compose exec openbao bao
+  status` says `Sealed false` and `Seal Type static`; `Sealed true`, or an
+  `openbao` that does not start, means the key file is missing or not its own,
+  and `deploy/README.md`, "After a reboot or a restart", says how to put it
+  back. `./scripts/deploy.sh` checks first, and stops on a sealed OpenBao
+  naming `openbao-seal.sh status` and OpenBao's log.
+- **What the static key costs**, against the Shamir seal a host had before
+  2026-11-27:
 
-  The `openbao` healthcheck reports unhealthy while sealed and `openbao-init`
-  waits on it, so a bare `docker compose up -d` blocks. `./scripts/deploy.sh`
-  checks first and stops with these instructions instead.
-
-- **Optional: auto-unseal with a static key** (`./scripts/openbao-seal.sh`,
-  OFF by default). Decide it deliberately; the trade is real:
-
-  | | Shamir (default) | Static key (auto-unseal) |
+  | | Shamir (before 2026-11-27) | Static key (every first boot since) |
   |---|---|---|
   | After a reboot or power cut | job signing, the CA and the vault are **dead** until a person enters 3 of 5 shares | back on its own in seconds |
   | Someone copies the disk or an `openbao-data` backup | useless without the shares | useless **unless they also get the key file** |
   | Someone gets the key file **and** `openbao-data` | — | every vault key, the job-signing key and the CA: domain-admin over the fleet |
   | The key file is lost | — | **OpenBao cannot be unsealed at all.** The shares become recovery keys and cannot unseal |
 
-  So, with auto-unseal: the key file lives on a separate path or mount,
-  outside the repository, outside Docker's data root and outside the backup
-  root (the script refuses those), mode `0400`; it is backed up **off-host,
-  apart from any copy of `openbao-data`**; and the 5 shares are still kept —
-  they authorize `disable` and `bao operator generate-root`. For one operator
-  on one host, a platform that comes back after a power cut is usually worth
-  more than protection against someone who already has root on the host,
-  which is who can read that file. A TPM- or KMS-backed seal would remove the
-  file; neither is wired up here.
+  So the key file lives outside the repository, outside Docker's data root
+  and outside the backup root (`openbao-seal.sh` refuses those), and is backed
+  up off-host apart from any copy of `openbao-data`. For one operator on one
+  host, a platform that comes back after a power cut is worth more than
+  protection against someone who already has root on the host, which is who
+  can read that file. A TPM- or KMS-backed seal would remove the file; neither
+  is wired up here (there is no KMS on this VPS).
+
+  What the seal is now, and where its key file is:
 
   ```sh
   cd /opt/it-suite/deploy
   sudo ./scripts/openbao-seal.sh status
-  sudo ./scripts/openbao-seal.sh enable    # asks for 3 shares (hidden), restarts OpenBao, proves it
-  sudo ./scripts/openbao-seal.sh disable   # back to Shamir, with the same shares
   ```
 
+  `sudo ./scripts/openbao-seal.sh disable` goes back to Shamir: it asks for 3
+  of the 5 recovery keys twice, once to migrate and once to unseal after its
+  last restart. `sudo ./scripts/openbao-seal.sh enable` is for a host from
+  before 2026-11-27, or one that ran `disable`: it asks for 3 shares, hidden.
   `enable` refuses unless OpenBao is running, unsealed and Shamir-sealed,
   snapshots `openbao-data` to `/var/backups/it-suite/openbao-seal/` first,
   writes the key to `/etc/it-suite/openbao-unseal/unseal.key` (or
   `--key-file`), adds `COMPOSE_FILE` and `OPENBAO_UNSEAL_KEY_FILE` to `.env`,
   and finishes by restarting OpenBao and checking it unsealed with no shares.
+  That snapshot is Shamir-sealed, and three shares should open it (not
+  rehearsed): keep it until the
+  off-host copy of the key file has been compared with this host's
+  (`sha256sum`, on both), since until then it may be the one copy of this
+  vault that does not need the key file; then delete it.
 - **The host must not swap, or must swap to an encrypted device.** OpenBao 2.x
   dropped `mlock` entirely, so the process cannot pin its own memory.
 - **Rotate `ITS_OPENBAO_TOKEN` on a schedule.** It is created with a 10-year
@@ -303,10 +333,10 @@ go somewhere other than the database backups.
   (`deploy/README.md`, "Retiring the old identity provider's data"). Back it
   up **off this host, immediately** after first boot.
 - **`its-ca` volume — the client CA root** the gateway admits agents against.
-- **The OpenBao unseal shares and root token** (§4). These are not on the host
-  and must not be. **With auto-unseal, also the key file**
-  (`/etc/it-suite/openbao-unseal/unseal.key`): off-host, and never beside a
-  copy of `openbao-data`.
+- **The OpenBao shares and root token** (§4), recovery keys since the
+  auto-unseal: not on the host, and must not be. **And the auto-unseal's key
+  file** (`/etc/it-suite/openbao-unseal/unseal.key`), on every host since
+  2026-11-27: off-host, and never beside a copy of `openbao-data`.
 - **`openbao-data` volume** — the sealed vault: job-signing key, agent CA
   private key, every per-org envelope key.
 - **`postgres-data`** — take logical dumps, not only volume snapshots:
