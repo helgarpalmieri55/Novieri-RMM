@@ -1620,9 +1620,10 @@ def test_an_openbao_sealed_at_a_lookup_says_it_is_sealed(tmp_path: Path) -> None
 
 # --------------------------------------------------------------------------- #
 # Step 7's :8443 check reads `openssl x509 -issuer`, whose format changed:
-# OpenSSL 3.0 (Ubuntu 24.04, the VPS) prints `issuer=CN = Novieri RMM internal
-# CA`; the CI runner's (ubuntu-26.04) prints `issuer=CN=Novieri RMM internal CA`
-# (CI run 46068835756, 2026-11-27, where step 7 refused the right certificate).
+# OpenSSL 3.5 (3.5.5, Ubuntu 26.04: the VPS since the operator's decision of
+# 2026-11-28, and CI's runner) prints `issuer=CN=Novieri RMM internal CA`
+# (CI run 46068835756, 2026-11-27, where step 7 refused the right certificate);
+# OpenSSL 3.0 (3.0.13, Ubuntu 24.04) prints `issuer=CN = Novieri RMM internal CA`.
 
 
 @pytest.mark.parametrize(
