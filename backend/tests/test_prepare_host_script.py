@@ -96,9 +96,11 @@ case "$*" in
   "show -p NTP --value") [ -e "$STUB_STATE/ntp-on" ] && echo yes || echo no ;;
   "show -p NTPSynchronized --value")
     if [ -e "$STUB_STATE/sync-pending" ]; then rm "$STUB_STATE/sync-pending"; echo no; exit 0; fi
+    [ -n "$FAKE_NO_NTP_SERVICE" ] && { echo yes; exit 0; }
     [ -e "$STUB_STATE/ntp-on" ] && [ -z "$FAKE_NEVER_SYNC" ] && echo yes || echo no ;;
-  "set-ntp true") touch "$STUB_STATE/ntp-on" ;;
+  "set-ntp true") [ -n "$FAKE_NO_NTP_SERVICE" ] || touch "$STUB_STATE/ntp-on" ;;
   status) [ -e "$STUB_STATE/ntp-on" ] && s=yes n=active || s=no n=inactive
+          [ -z "$FAKE_NO_NTP_SERVICE" ] || s=yes
           printf 'System clock synchronized: %s\n              NTP service: %s\n' "$s" "$n" ;;
 esac
 """,
@@ -142,7 +144,10 @@ FIRST_RUN = [
 CHANGING = ("usermod", "ufw allow", "ufw --force", "apt-get ",
             "tee ", "timedatectl set-ntp", "curl ", "install ", "chmod ")  # fmt: skip
 
-UBUNTU = 'ID=ubuntu\nVERSION_ID="24.04"\nUBUNTU_CODENAME=noble\nVERSION_CODENAME=noble\n'
+#: The operator's decision of 2026-11-28: Ubuntu Server 26.04 LTS. These four lines are
+#: what ubuntu:26.04's /etc/os-release says (26.04.1, measured 2026-11-28).
+UBUNTU = 'ID=ubuntu\nVERSION_ID="26.04"\nUBUNTU_CODENAME=resolute\nVERSION_CODENAME=resolute\n'
+NOBLE = 'ID=ubuntu\nVERSION_ID="24.04"\nUBUNTU_CODENAME=noble\nVERSION_CODENAME=noble\n'
 
 
 class Box:
@@ -206,7 +211,7 @@ def test_a_bare_host_gets_the_runbooks_p2_to_p5_in_order(tmp_path: Path) -> None
     assert f"cd {tmp_path}/repo/deploy && ./scripts/first-boot.sh" in done.stdout
     sources = (box.state / "tee-docker.sources").read_text()
     assert sources == (
-        "Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: noble\n"
+        "Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: resolute\n"
         "Components: stable\nArchitectures: amd64\nSigned-By: /etc/apt/keyrings/docker.asc\n"
     )
     assert (box.state / "tee-20auto-upgrades").read_text() == (
@@ -244,6 +249,38 @@ def test_a_clock_that_never_synchronises_stops_the_run(tmp_path: Path) -> None:
     assert done.returncode == 1
     assert "the clock is not synchronised after 120 s" in done.stderr
     assert not any(c.startswith(LOCK + "install -y docker-ce ") for c in box.calls())
+
+
+def test_a_clock_that_never_synchronises_names_nts_and_its_port(tmp_path: Path) -> None:
+    """26.04's NTP service is chrony, whose Ubuntu sources all use NTS (its
+    /etc/chrony/sources.d/ubuntu-ntp-pools.sources): the key exchange is TCP
+    4460, and a provider that blocks it leaves the clock unsynchronised with
+    UDP 123 open (chrony's debian/NEWS, 4.5-3ubuntu4; measured 2026-11-28,
+    where 4460 is refused: every source `^?`, Reach 0)."""
+    box = Box(tmp_path)
+    done = box.run(FAKE_NEVER_SYNC="1")
+    assert done.returncode == 1
+    assert done.stderr.count("FAILED") == 1
+    report = done.stderr[done.stderr.index("FAILED") :].splitlines()
+    assert report[1:3] == ["        timedatectl status", "        chronyc -N sources"]
+    assert "TCP 4460" in report[3] and "UDP 123" in report[3] and report[3].startswith("        # ")
+    assert report[4] == f"        sudo {box.script}"
+
+
+def test_a_clock_synchronised_with_no_ntp_service_here_is_not_called_ntp_on(
+    tmp_path: Path,
+) -> None:
+    """In a container chrony.service does not start (ConditionVirtualization=
+    |!container), so `timedatectl set-ntp true` exits 0 and NTP stays no, while
+    NTPSynchronized is the host kernel's (measured 2026-11-28 in a 26.04
+    systemd container). P4 says what it checked, not that NTP is on."""
+    box = Box(tmp_path)
+    done = box.run(FAKE_NO_NTP_SERVICE="1")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "timedatectl set-ntp true" in box.changes()
+    assert "  ok      P4: the clock is synchronised\n" in done.stdout
+    assert "NTP is on" not in done.stdout
+    assert "  note    P4: timedatectl reports no NTP service running on this machine" in done.stdout
 
 
 def test_it_refuses_to_run_as_anyone_but_root(tmp_path: Path) -> None:
@@ -290,7 +327,31 @@ def test_a_host_that_is_not_ubuntu_is_refused_before_anything(tmp_path: Path) ->
     box.os_release.write_text('ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n')
     done = box.run()
     assert done.returncode == 1 and "this is not Ubuntu" in done.stderr
+    assert "# deploy/README.md, Prerequisites: Ubuntu Server 26.04 LTS" in done.stderr
     assert box.changes() == []
+
+
+def test_ubuntu_26_04_is_the_release_it_targets_and_is_not_warned_about(
+    tmp_path: Path,
+) -> None:
+    done = Box(tmp_path).run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "WARNING Ubuntu" not in done.stderr
+
+
+def test_ubuntu_24_04_is_warned_about_and_goes_on(tmp_path: Path) -> None:
+    """A warning, not a refusal (operator, 2026-11-28): 24.04 still gets Docker's
+    repository for its own codename, and every step."""
+    box = Box(tmp_path)
+    box.os_release.write_text(NOBLE)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        "  WARNING Ubuntu 24.04, not 26.04: deploy/README.md's Prerequisites ask for"
+        " Ubuntu Server 26.04 LTS, the release this runbook targets\n"
+    ) in done.stderr
+    assert box.changes() == FIRST_RUN
+    assert "Suites: noble\n" in (box.state / "tee-docker.sources").read_text()
 
 
 def test_an_engine_too_old_after_the_install_stops_the_run(tmp_path: Path) -> None:

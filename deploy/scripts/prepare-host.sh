@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Prepare a new Ubuntu Server 24.04 VPS for Novieri RMM: deploy/README.md,
-# Prerequisites, P2 to P5 (design 2026-11-27-despliegue-automatizado §3).
+# Prepare a new Ubuntu Server 26.04 LTS VPS for Novieri RMM: deploy/README.md,
+# Prerequisites, P2 to P5 (design 2026-11-27-despliegue-automatizado §3; the
+# release, the operator's decision of 2026-11-28).
 #
 #   sudo ./scripts/prepare-host.sh        # from the operator account
 #
@@ -84,8 +85,9 @@ ID="" VERSION_ID="" UBUNTU_CODENAME="" VERSION_CODENAME=""
 . "$os_release"
 [ -z "${ITS_OS_RELEASE:-}" ] || note "ITS_OS_RELEASE is set: the Ubuntu check read $os_release instead of /etc/os-release (tests only)"
 [ "$ID" = ubuntu ] || die "this is not Ubuntu ($os_release says ID=$ID): P5 installs Docker from its Ubuntu repository" \
-  "deploy/README.md, Prerequisites: Ubuntu Server 24.04 LTS"
-[ "$VERSION_ID" = 24.04 ] || warn "Ubuntu $VERSION_ID, not 24.04: the runbook was written and rehearsed for 24.04"
+  "# deploy/README.md, Prerequisites: Ubuntu Server 26.04 LTS"
+# Another Ubuntu is warned about, not refused: P5 asks Docker's repository for its own codename.
+[ "$VERSION_ID" = 26.04 ] || warn "Ubuntu $VERSION_ID, not 26.04: deploy/README.md's Prerequisites ask for Ubuntu Server 26.04 LTS, the release this runbook targets"
 
 # No `| grep -q` under pipefail: grep leaving early is a SIGPIPE upstream, and a false "no".
 in_group() { [[ " $(id -nG "$1") " == *" $2 "* ]]; }
@@ -146,24 +148,40 @@ fi
 
 # --------------------------------------------------------------- P4
 
+# systemd 259's timedated: NTP is "an NTP unit of ntp-units.d is running" (on 26.04,
+# chrony.service, its 50-chrony.list), and NTPSynchronized is the kernel's maximum
+# error under 16 s, which chrony sets once it is synchronised (measured 2026-11-28).
+ntp_on() { [ "$(timedatectl show -p NTP --value 2>/dev/null || true)" = yes ]; }
+clock_synced() { [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" = yes ]; }
+
 say "P4 — the clock"
-if [ "$(timedatectl show -p NTP --value 2>/dev/null || true)" = yes ] \
-   && [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" = yes ]; then
+if ntp_on && clock_synced; then
   skip "P4: NTP is on and the clock is synchronised"
 else
-  if [ "$(timedatectl show -p NTP --value 2>/dev/null || true)" != yes ]; then
+  if ! ntp_on; then
     act "timedatectl set-ntp true"
     timedatectl set-ntp true
   fi
   for _ in $(seq 1 24); do
-    [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" = yes ] && break
+    clock_synced && break
     sleep 5
   done
-  [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" = yes ] \
+  # Ubuntu's chrony sources all use NTS (/etc/chrony/sources.d/ubuntu-ntp-pools.sources),
+  # whose key exchange is TCP 4460: with it blocked, UDP 123 alone never synchronises.
+  clock_synced \
     || die "the clock is not synchronised after 120 s: certificates, second-factor codes and the audit log depend on it" \
            "timedatectl status" \
-           "check that the provider lets this VPS out to NTP (UDP 123), then: $rerun"
-  ok "P4: NTP is on and the clock is synchronised"
+           "chronyc -N sources" \
+           "# Ubuntu 26.04's NTP service is chrony, with NTS: the provider has to let this VPS out to TCP 4460 (NTS's key exchange) as well as UDP 123 (NTP). Every source marked ^? with Reach 0 above, or \"Could not connect to ...:4460\" in sudo journalctl -u chrony, means it does not; once it does:" \
+           "$rerun"
+  if ntp_on; then
+    ok "P4: NTP is on and the clock is synchronised"
+  else
+    # A container: set-ntp exits 0, chrony.service is skipped
+    # (ConditionVirtualization=|!container), and the clock is the host kernel's.
+    ok "P4: the clock is synchronised"
+    note "P4: timedatectl reports no NTP service running on this machine: chrony does not start in a container (chrony.service, ConditionVirtualization=|!container), whose clock is its host's"
+  fi
 fi
 timedatectl status | grep -E 'System clock synchronized|NTP service'
 
