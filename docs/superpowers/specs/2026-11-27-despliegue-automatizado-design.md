@@ -16,6 +16,7 @@ mismo día:
   conector de la sesión del 2026-11-27 no ve; el operador conecta esa cuenta y
   el coordinador crea el registro `A` el día del despliegue. **No es código**:
   ninguna credencial de Cloudflare llega al VPS ni al repositorio.
+- **2026-11-28, el sistema del VPS**: el operador decide **Ubuntu Server 26.04 LTS** (Resolute Raccoon), no 24.04.
 
 ## 1. Qué problema resuelve
 
