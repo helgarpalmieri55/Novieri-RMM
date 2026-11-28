@@ -335,7 +335,8 @@ def test_outside_a_container_no_ntp_service_fails_even_with_a_synchronised_clock
     tmp_path: Path,
 ) -> None:
     """Review I1 (2026-11-28): on a VPS where chrony stopped or failed to
-    start, set-ntp exits 0 (timedated replies before the start job's result)
+    start, set-ntp exits 0 (timedated replies once the start job is gone,
+    without reading its result)
     and the kernel still says synchronised for hours on the last maxerror.
     The runbook's P4 asks for `NTP service: active` too: not a container, no
     NTP service running, is P4's FAILED, and nothing after it runs."""
