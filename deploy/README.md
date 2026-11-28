@@ -216,7 +216,7 @@ upgraded from a release before phase 1 crosses all four at once:
 
 ---
 
-## Prerequisites: a new VPS (Ubuntu Server 24.04 LTS)
+## Prerequisites: a new VPS (Ubuntu Server 26.04 LTS)
 
 This runbook builds one deployment: **`rmm.novieri.com`**, on a VPS that starts
 empty (operator decisions B1 and B2, 2026-11-23). The deployment model is:
@@ -228,7 +228,7 @@ command.
 
 ### The machine, and its name
 
-- **Ubuntu Server 24.04 LTS**, 4 vCPU, 8 GB of RAM, 100 GB of SSD, and one
+- **Ubuntu Server 26.04 LTS**, 4 vCPU, 8 GB of RAM, 100 GB of SSD, and one
   public IPv4 address **on its network interface**.
 - **An `A` record `rmm.novieri.com` → that address, created before the first
   boot.** Traefik asks Let's Encrypt for the certificate the moment it starts,
@@ -268,6 +268,8 @@ install -m 600 -o rmmadmin -g rmmadmin /root/.ssh/authorized_keys /home/rmmadmin
 ```
 
 `adduser` asks for the new account's password twice; `sudo` will ask for it.
+On 26.04 `sudo` is sudo-rs: its prompt reads `[sudo: authenticate] Password:`,
+and it shows a `*` for each character you type.
 Then log out, log in again as `rmmadmin` with the same key, and check:
 
 ```sh
@@ -282,8 +284,11 @@ only `root`, these lines, by hand, are the way.
 ### P6 — The checkout
 
 **Before P2 to P5** since 2026-11-27: `prepare-host.sh`, which does them, is in
-this checkout. Ubuntu Server 24.04 ships `git` and `ssh-keygen`; if `git
---version` says the command is not found, `sudo apt-get install -y git` first.
+this checkout. Ubuntu Server 26.04's default install ships `git`, `ssh-keygen`
+and `ufw`, which `prepare-host.sh` uses; the minimized one ships `ssh-keygen`
+but neither `git` nor `ufw` (the 26.04.1 server ISO's package lists). If `git
+--version` or `ufw --version` says the command is not found,
+`sudo apt-get update && sudo apt-get install -y git ufw` first.
 
 Over SSH with a **deploy key** — a read-only key scoped to this repository:
 
@@ -425,7 +430,8 @@ machine -- uses Let's Encrypt's staging directory, whose certificates no
 browser trusts and whose limits are far higher. Fetch staging's roots first,
 with the `curl` of [step 7 in the
 appendix](#step-7--start-everything-traefik-obtains-the-certificate-for-443)
-(into `/tmp/le-staging-roots.pem`), and give both scripts that file:
+(into `/tmp/le-staging-roots.pem`; on 26.04 `/tmp` is a tmpfs, which a reboot
+empties, so fetch it again after one), and give both scripts that file:
 `./scripts/first-boot.sh --acme-ca-server https://acme-staging-v02.api.letsencrypt.org/directory --tls-cafile /tmp/le-staging-roots.pem`,
 and later `./scripts/first-boot-check.sh --tls-cafile /tmp/le-staging-roots.pem`.
 
@@ -516,9 +522,9 @@ this machine itself, which never crosses your provider's firewall, and Let's
 Encrypt's validation proves `:443` from the Internet but not `:8443`: no
 script on this VPS can make this check. On a Linux or macOS computer
 elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
-prints `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu
-24.04; newer OpenSSL prints it without the spaces,
-`issuer=CN=Novieri RMM internal CA`, which is the same issuer); on Windows,
+prints `issuer=CN=Novieri RMM internal CA` (OpenSSL 3.5, as on Ubuntu 26.04)
+or `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu 24.04),
+whichever OpenSSL that computer has: the same issuer; on Windows,
 `Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
 Anything else: open `8443/tcp` at the provider's firewall.
 
@@ -3990,6 +3996,9 @@ System clock synchronized: yes
 
 If either says otherwise: `sudo timedatectl set-ntp true`, and check again.
 Certificates, second-factor codes and the audit log's times all depend on it.
+On 26.04 the NTP service is chrony, and its Ubuntu sources use NTS: it needs
+TCP 4460 out (NTS's key exchange) as well as UDP 123, and while 4460 is
+blocked `chronyc -N sources` lists every source as `^?` with a Reach of 0.
 
 #### P5 — Docker CE, from Docker's repository
 
@@ -4863,13 +4872,13 @@ echo | openssl s_client -connect 127.0.0.1:8443 -servername rmm.novieri.com 2>/d
 ```
 
 ```
-issuer=CN = Novieri RMM internal CA
+issuer=CN=Novieri RMM internal CA
 X509v3 Subject Alternative Name:
     DNS:rmm.novieri.com
 ```
 
-That is OpenSSL 3.0's format, the one on Ubuntu 24.04; a newer OpenSSL
-prints `issuer=CN=Novieri RMM internal CA`, without the spaces, and step 7
+That is OpenSSL 3.5's format, the one on Ubuntu 26.04; OpenSSL 3.0, Ubuntu
+24.04's, prints `issuer=CN = Novieri RMM internal CA`, with spaces, and step 7
 accepts either. It compares that name, not the chain: what it tells apart is
 the gateway answering `:8443` from Traefik answering for it, and its `ok`
 says so. Agents check the chain themselves, against the CA they pin.
@@ -4885,9 +4894,9 @@ first.
 machine from itself and never crosses your provider's firewall, and Let's
 Encrypt's validation proves `:443` from the Internet but not `:8443`. On a
 Linux or macOS computer elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
-prints `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu
-24.04; newer OpenSSL prints it without the spaces,
-`issuer=CN=Novieri RMM internal CA`, which is the same issuer); on Windows,
+prints `issuer=CN=Novieri RMM internal CA` (OpenSSL 3.5, as on Ubuntu 26.04)
+or `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu 24.04),
+whichever OpenSSL that computer has: the same issuer; on Windows,
 `Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
 Anything else: open `8443/tcp` at the provider's firewall.
 

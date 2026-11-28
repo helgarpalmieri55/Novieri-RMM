@@ -67,7 +67,8 @@ def _commands(block: str) -> list[str]:
     return found
 
 
-PREREQUISITES = "## Prerequisites: a new VPS (Ubuntu Server 24.04 LTS)\n"
+#: The release, the operator's decision of 2026-11-28.
+PREREQUISITES = "## Prerequisites: a new VPS (Ubuntu Server 26.04 LTS)\n"
 
 #: GitHub's published Ed25519 host key (docs.github.com, "GitHub's SSH key
 #: fingerprints": SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU).
@@ -695,3 +696,31 @@ def test_the_walkthrough_says_what_the_final_review_found_it_left_out() -> None:
     assert "tmux" in walk and "an SSH client's own log" in walk
     prereq = _flat(_section(README.read_text(), PREREQUISITES))
     assert "`-o DPkg::Lock::Timeout=300`" in prereq
+
+
+def test_the_prerequisites_say_what_ubuntu_26_04_does_as_measured() -> None:
+    """The operator's decision of 2026-11-28, Ubuntu Server 26.04 LTS, and what
+    was measured on it that same day: the default server install ships git,
+    ssh-keygen and ufw, the minimized one neither git nor ufw (the 26.04.1
+    ISO's casper/*.manifest.full); sudo is sudo-rs, whose prompt is not
+    sudo's; chrony's Ubuntu sources use NTS, which needs TCP 4460 out, and
+    prepare-host.sh's P4 says so too; /tmp is a tmpfs, which a reboot empties;
+    and OpenSSL 3.5 prints the issuer without the spaces OpenSSL 3.0 puts in."""
+    readme = README.read_text()
+    prereq = _flat(_section(readme, PREREQUISITES))
+    assert "Ubuntu Server 24.04" not in readme
+    assert "**Ubuntu Server 26.04 LTS**, 4 vCPU" in prereq
+    assert "the minimized one ships `ssh-keygen` but neither `git` nor `ufw`" in prereq
+    assert "`sudo apt-get update && sudo apt-get install -y git ufw`" in prereq
+    assert "`[sudo: authenticate] Password:`" in prereq
+    appendix = _appendix()
+    p4 = _flat(appendix[appendix.index("#### P4 — The clock\n") : appendix.index("#### P5 ")])
+    assert "TCP 4460" in p4 and "UDP 123" in p4 and "`chronyc -N sources`" in p4
+    prepare = _code("prepare-host.sh")
+    assert "TCP 4460" in prepare and "chronyc -N sources" in prepare
+    assert "`/tmp` is a tmpfs, which a reboot empties" in _flat(_first_boot())
+    flat = _flat(readme)
+    forms = (("CN=", "3.5, as on Ubuntu 26.04"), ("CN = ", "3.0, as on Ubuntu 24.04"))
+    for issuer, openssl in forms:
+        assert flat.count(f"`issuer={issuer}Novieri RMM internal CA` (OpenSSL {openssl})") == 2
+    assert "```\nissuer=CN=Novieri RMM internal CA\nX509v3 Subject Alternative Name:" in readme
