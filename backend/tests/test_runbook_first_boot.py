@@ -710,17 +710,30 @@ def test_the_prerequisites_say_what_ubuntu_26_04_does_as_measured() -> None:
     prereq = _flat(_section(readme, PREREQUISITES))
     assert "Ubuntu Server 24.04" not in readme
     assert "**Ubuntu Server 26.04 LTS**, 4 vCPU" in prereq
-    assert "the minimized one ships `ssh-keygen` but neither `git` nor `ufw`" in prereq
-    assert "`sudo apt-get update && sudo apt-get install -y git ufw`" in prereq
+    # Review M5: what each is for, and every one the minimized install lacks that a
+    # host-side step runs (rsync: scheduled-backup.sh, OFFSITE=rsync).
+    assert "what P6 needs, `git` and `ssh-keygen`" in prereq
+    assert "`ufw`, which `prepare-host.sh` uses" in prereq
+    assert "`rsync`, which the off-host copy over SSH uses" in prereq
+    assert "The minimized install ships `ssh-keygen` and none of the other three" in prereq
+    assert "`sudo apt-get update && sudo apt-get install -y git ufw rsync`" in prereq
+    assert "`git`, `ssh-keygen` and `ufw`, which `prepare-host.sh` uses" not in prereq
     assert "`[sudo: authenticate] Password:`" in prereq
     appendix = _appendix()
+    # Review I1: what prepare-host.sh's P4 accepts, and in a container.
+    walk_p4 = _flat(_part("### `prepare-host.sh`: P2 to P5\n"))
+    assert "it refuses unless both say so" in walk_p4
+    assert "In a container (`systemd-detect-virt --container`)" in walk_p4
     p4 = _flat(appendix[appendix.index("#### P4 — The clock\n") : appendix.index("#### P5 ")])
     assert "TCP 4460" in p4 and "UDP 123" in p4 and "`chronyc -N sources`" in p4
     prepare = _code("prepare-host.sh")
     assert "TCP 4460" in prepare and "chronyc -N sources" in prepare
     assert "`/tmp` is a tmpfs, which a reboot empties" in _flat(_first_boot())
     flat = _flat(readme)
-    forms = (("CN=", "3.5, as on Ubuntu 26.04"), ("CN = ", "3.0, as on Ubuntu 24.04"))
+    forms = (("CN=", "3.5 (as on Ubuntu 26.04)"), ("CN = ", "3.0 (as on Ubuntu 24.04)"))
     for issuer, openssl in forms:
-        assert flat.count(f"`issuer={issuer}Novieri RMM internal CA` (OpenSSL {openssl})") == 2
+        assert flat.count(f"`issuer={issuer}Novieri RMM internal CA` from OpenSSL {openssl}") == 2
+    # Review M4: macOS's openssl is LibreSSL, and its format was not measured.
+    assert flat.count("macOS's `openssl` is LibreSSL, whose format was not measured") == 2
+    assert "whichever OpenSSL that computer has" not in flat
     assert "```\nissuer=CN=Novieri RMM internal CA\nX509v3 Subject Alternative Name:" in readme

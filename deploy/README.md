@@ -284,11 +284,13 @@ only `root`, these lines, by hand, are the way.
 ### P6 — The checkout
 
 **Before P2 to P5** since 2026-11-27: `prepare-host.sh`, which does them, is in
-this checkout. Ubuntu Server 26.04's default install ships `git`, `ssh-keygen`
-and `ufw`, which `prepare-host.sh` uses; the minimized one ships `ssh-keygen`
-but neither `git` nor `ufw` (the 26.04.1 server ISO's package lists). If `git
---version` or `ufw --version` says the command is not found,
-`sudo apt-get update && sudo apt-get install -y git ufw` first.
+this checkout. Ubuntu Server 26.04's default install ships what P6 needs, `git`
+and `ssh-keygen`, and two commands used later: `ufw`, which `prepare-host.sh`
+uses, and `rsync`, which the off-host copy over SSH uses. The minimized install
+ships `ssh-keygen` and none of the other three (the 26.04.1 server ISO's package
+lists). If `git --version`, `ufw --version` or `rsync --version` says the
+command is not found, `sudo apt-get update && sudo apt-get install -y git ufw rsync`
+first.
 
 Over SSH with a **deploy key** — a read-only key scoped to this repository:
 
@@ -522,9 +524,10 @@ this machine itself, which never crosses your provider's firewall, and Let's
 Encrypt's validation proves `:443` from the Internet but not `:8443`: no
 script on this VPS can make this check. On a Linux or macOS computer
 elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
-prints `issuer=CN=Novieri RMM internal CA` (OpenSSL 3.5, as on Ubuntu 26.04)
-or `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu 24.04),
-whichever OpenSSL that computer has: the same issuer; on Windows,
+prints the issuer, `CN=Novieri RMM internal CA`, on a line that starts
+`issuer=`: `issuer=CN=Novieri RMM internal CA` from OpenSSL 3.5 (as on Ubuntu
+26.04), `issuer=CN = Novieri RMM internal CA` from OpenSSL 3.0 (as on Ubuntu
+24.04); macOS's `openssl` is LibreSSL, whose format was not measured; on Windows,
 `Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
 Anything else: open `8443/tcp` at the provider's firewall.
 
@@ -3941,9 +3944,12 @@ it finds done. Where it does something besides, or otherwise:
 - **P3:** skipped when `unattended-upgrades` is installed, its two lines are
   on and its service is active; otherwise it runs these four lines, and
   refuses if the last one says anything but `active`.
-- **P4:** `timedatectl set-ntp true` only when NTP is off, then up to 120 s
-  for the clock to say it is synchronised; then the block's line, which
-  prints the two lines below.
+- **P4:** skipped when the block's two lines below say `yes` and `active`;
+  otherwise `timedatectl set-ntp true` when NTP is off, then up to 120 s for
+  the clock to say it is synchronised, and it refuses unless both say so. In
+  a container (`systemd-detect-virt --container`), whose clock is its host's
+  and where chrony does not start, a synchronised clock is enough. Then the
+  block's line, which prints the two lines below.
 - **P5:** skipped when `docker-ce` is installed with Engine 26 and Compose 2.24
   or newer. It writes `docker.sources` with `printf | tee`, its codename read
   from `/etc/os-release`, instead of the here-document; and it adds to the
@@ -4894,9 +4900,10 @@ first.
 machine from itself and never crosses your provider's firewall, and Let's
 Encrypt's validation proves `:443` from the Internet but not `:8443`. On a
 Linux or macOS computer elsewhere, `openssl s_client -connect rmm.novieri.com:8443 -servername rmm.novieri.com </dev/null 2>/dev/null | openssl x509 -noout -issuer`
-prints `issuer=CN=Novieri RMM internal CA` (OpenSSL 3.5, as on Ubuntu 26.04)
-or `issuer=CN = Novieri RMM internal CA` (OpenSSL 3.0, as on Ubuntu 24.04),
-whichever OpenSSL that computer has: the same issuer; on Windows,
+prints the issuer, `CN=Novieri RMM internal CA`, on a line that starts
+`issuer=`: `issuer=CN=Novieri RMM internal CA` from OpenSSL 3.5 (as on Ubuntu
+26.04), `issuer=CN = Novieri RMM internal CA` from OpenSSL 3.0 (as on Ubuntu
+24.04); macOS's `openssl` is LibreSSL, whose format was not measured; on Windows,
 `Test-NetConnection rmm.novieri.com -Port 8443` prints `TcpTestSucceeded : True`.
 Anything else: open `8443/tcp` at the provider's firewall.
 
