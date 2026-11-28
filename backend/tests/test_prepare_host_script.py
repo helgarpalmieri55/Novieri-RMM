@@ -19,6 +19,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "deploy" / "scripts" / "prepare-host.sh"
 
@@ -88,6 +90,8 @@ case "$*" in
   "is-active unattended-upgrades")
     if [ -e "$STUB_STATE/pkg-unattended-upgrades" ] || [ -e "$STUB_STATE/svc-active" ]
     then echo active; else echo inactive; fi ;;
+  "show -p LoadState --value chrony.service")
+    if [ -n "$FAKE_NO_CHRONY" ]; then echo not-found; else echo loaded; fi ;;
 esac
 """,
     "timedatectl": r"""#!/bin/sh
@@ -96,11 +100,11 @@ case "$*" in
   "show -p NTP --value") [ -e "$STUB_STATE/ntp-on" ] && echo yes || echo no ;;
   "show -p NTPSynchronized --value")
     if [ -e "$STUB_STATE/sync-pending" ]; then rm "$STUB_STATE/sync-pending"; echo no; exit 0; fi
-    [ -n "$FAKE_NO_NTP_SERVICE" ] && { echo yes; exit 0; }
+    [ -n "$FAKE_NO_NTP_SERVICE" ] && [ -z "$FAKE_NEVER_SYNC" ] && { echo yes; exit 0; }
     [ -e "$STUB_STATE/ntp-on" ] && [ -z "$FAKE_NEVER_SYNC" ] && echo yes || echo no ;;
   "set-ntp true") [ -n "$FAKE_NO_NTP_SERVICE" ] || touch "$STUB_STATE/ntp-on" ;;
   status) [ -e "$STUB_STATE/ntp-on" ] && s=yes n=active || s=no n=inactive
-          [ -z "$FAKE_NO_NTP_SERVICE" ] || s=yes
+          [ -z "$FAKE_NO_NTP_SERVICE" ] || [ -n "$FAKE_NEVER_SYNC" ] || s=yes
           printf 'System clock synchronized: %s\n              NTP service: %s\n' "$s" "$n" ;;
 esac
 """,
@@ -113,6 +117,12 @@ case "$*" in
 esac
 """,
     "sleep": "#!/bin/sh\nexit 0\n",
+    "systemd-detect-virt": r"""#!/bin/sh
+echo "systemd-detect-virt $*" >> "$STUB_LOG"
+case "$*" in
+  *--container*) [ -n "$FAKE_CONTAINER" ] || exit 1 ;;
+esac
+""",
 }
 for _name in ("curl", "install", "chmod"):
     STUBS[_name] = f'#!/bin/sh\necho "{_name} $*" >> "$STUB_LOG"\n'
@@ -251,36 +261,159 @@ def test_a_clock_that_never_synchronises_stops_the_run(tmp_path: Path) -> None:
     assert not any(c.startswith(LOCK + "install -y docker-ce ") for c in box.calls())
 
 
+def _p4_report(stderr: str) -> list[str]:
+    """P4's FAILED block, the line that says what failed first."""
+    assert stderr.count("FAILED") == 1, stderr
+    return stderr[stderr.index("FAILED") :].splitlines()
+
+
 def test_a_clock_that_never_synchronises_names_nts_and_its_port(tmp_path: Path) -> None:
-    """26.04's NTP service is chrony, whose Ubuntu sources all use NTS (its
-    /etc/chrony/sources.d/ubuntu-ntp-pools.sources): the key exchange is TCP
-    4460, and a provider that blocks it leaves the clock unsynchronised with
-    UDP 123 open (chrony's debian/NEWS, 4.5-3ubuntu4; measured 2026-11-28,
-    where 4460 is refused: every source `^?`, Reach 0)."""
+    """chrony is running and the clock does not synchronise. 26.04's chrony
+    takes its Ubuntu sources over NTS (/etc/chrony/sources.d/ubuntu-ntp-pools
+    .sources), whose key exchange is TCP 4460: chrony's debian/NEWS
+    (4.5-3ubuntu4) says the clock is not adjusted without it. That 4460 alone
+    is enough is that source's. What was measured on 2026-11-28 is a sandbox
+    where TCP 4460 was refused and UDP 123 got no answer either: every source
+    `^?`, Reach 0. The block ends at the line that reads the terminal."""
     box = Box(tmp_path)
     done = box.run(FAKE_NEVER_SYNC="1")
     assert done.returncode == 1
-    assert done.stderr.count("FAILED") == 1
-    report = done.stderr[done.stderr.index("FAILED") :].splitlines()
+    report = _p4_report(done.stderr)
     assert report[1:3] == ["        timedatectl status", "        chronyc -N sources"]
     assert "TCP 4460" in report[3] and "UDP 123" in report[3] and report[3].startswith("        # ")
     assert report[4] == f"        sudo {box.script}"
+    assert len(report) == 5
 
 
-def test_a_clock_synchronised_with_no_ntp_service_here_is_not_called_ntp_on(
+CONTAINER_NOTE = (
+    "  note    P4: timedatectl reports no NTP service running here, and systemd-detect-virt"
+    " says this is a container, whose clock is its host's: chrony does not start in one"
+    " (chrony.service, ConditionVirtualization=|!container)\n"
+)
+
+
+def test_a_container_whose_clock_is_synchronised_is_skipped_and_says_why(
     tmp_path: Path,
 ) -> None:
     """In a container chrony.service does not start (ConditionVirtualization=
-    |!container), so `timedatectl set-ntp true` exits 0 and NTP stays no, while
+    |!container), `timedatectl set-ntp true` exits 0 with NTP still no, and
     NTPSynchronized is the host kernel's (measured 2026-11-28 in a 26.04
-    systemd container). P4 says what it checked, not that NTP is on."""
+    systemd container). There, and only there (systemd-detect-virt), a
+    synchronised clock is P4 done: a skip, no set-ntp, and never "NTP is on"."""
     box = Box(tmp_path)
-    done = box.run(FAKE_NO_NTP_SERVICE="1")
+    done = box.run(FAKE_NO_NTP_SERVICE="1", FAKE_CONTAINER="1")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "timedatectl set-ntp true" not in box.changes()
+    assert "systemd-detect-virt --quiet --container" in box.calls()
+    assert "  skip    P4: the clock is synchronised, and this is a container\n" in done.stdout
+    assert CONTAINER_NOTE in done.stdout
+    assert "NTP is on" not in done.stdout
+
+
+def test_a_second_run_in_a_container_changes_nothing(tmp_path: Path) -> None:
+    box = Box(tmp_path)
+    assert box.run(FAKE_NO_NTP_SERVICE="1", FAKE_CONTAINER="1").returncode == 0
+    again = box.run(FAKE_NO_NTP_SERVICE="1", FAKE_CONTAINER="1")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert box.changes() == []
+
+
+def test_a_container_whose_clock_synchronises_during_the_wait_gets_ok_and_the_note(
+    tmp_path: Path,
+) -> None:
+    box = Box(tmp_path)
+    (box.state / "sync-pending").touch()
+    done = box.run(FAKE_NO_NTP_SERVICE="1", FAKE_CONTAINER="1")
     assert done.returncode == 0, done.stdout + done.stderr
     assert "timedatectl set-ntp true" in box.changes()
     assert "  ok      P4: the clock is synchronised\n" in done.stdout
+    assert CONTAINER_NOTE in done.stdout
     assert "NTP is on" not in done.stdout
-    assert "  note    P4: timedatectl reports no NTP service running on this machine" in done.stdout
+
+
+def test_outside_a_container_no_ntp_service_fails_even_with_a_synchronised_clock(
+    tmp_path: Path,
+) -> None:
+    """Review I1 (2026-11-28): on a VPS where chrony stopped or failed to
+    start, set-ntp exits 0 (timedated replies before the start job's result)
+    and the kernel still says synchronised for hours on the last maxerror.
+    The runbook's P4 asks for `NTP service: active` too: not a container, no
+    NTP service running, is P4's FAILED, and nothing after it runs."""
+    box = Box(tmp_path)
+    done = box.run(FAKE_NO_NTP_SERVICE="1")
+    assert done.returncode == 1
+    assert "ok      P4" not in done.stdout and "skip    P4" not in done.stdout
+    report = _p4_report(done.stderr)
+    assert report[0].startswith("FAILED  no NTP service is running")
+    assert report[1:3] == [
+        "        timedatectl status", "        systemctl status chrony --no-pager"
+    ]  # fmt: skip
+    assert report[3].startswith("        # ") and "sudo journalctl -u chrony" in report[3]
+    assert report[4] == f"        sudo {box.script}"
+    assert len(report) == 5
+    assert "4460" not in done.stderr
+    assert not any(c.startswith(LOCK + "install -y docker-ce ") for c in box.calls())
+
+
+def test_no_ntp_service_and_no_synchronised_clock_points_at_the_service_not_a_port(
+    tmp_path: Path,
+) -> None:
+    """Review M1: with no NTP service running there is nothing for a port to
+    reach; the block points at the service, as the case above."""
+    box = Box(tmp_path)
+    done = box.run(FAKE_NO_NTP_SERVICE="1", FAKE_NEVER_SYNC="1")
+    assert done.returncode == 1
+    report = _p4_report(done.stderr)
+    assert report[0].startswith("FAILED  no NTP service is running")
+    assert report[2] == "        systemctl status chrony --no-pager"
+    assert report[-1] == f"        sudo {box.script}" and len(report) == 5
+    assert "4460" not in done.stderr and "UDP 123" not in done.stderr
+
+
+def test_a_container_whose_clock_never_synchronises_says_its_host_keeps_it(
+    tmp_path: Path,
+) -> None:
+    box = Box(tmp_path)
+    done = box.run(FAKE_NO_NTP_SERVICE="1", FAKE_NEVER_SYNC="1", FAKE_CONTAINER="1")
+    assert done.returncode == 1
+    report = _p4_report(done.stderr)
+    assert report[0].startswith("FAILED  the clock is not synchronised after 120 s, and this is"
+                                " a container")  # fmt: skip
+    assert report[1] == "        timedatectl status"
+    assert report[2].startswith("        # ") and "its host" in report[2]
+    assert report[3] == f"        sudo {box.script}" and len(report) == 4
+    assert "4460" not in done.stderr
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        {"FAKE_NEVER_SYNC": "1"},
+        {"FAKE_NO_NTP_SERVICE": "1"},
+        {"FAKE_NO_NTP_SERVICE": "1", "FAKE_NEVER_SYNC": "1", "FAKE_CONTAINER": "1"},
+        {"FAKE_NO_NTP_SERVICE": "1", "FAKE_CONTAINER": "1"},
+    ],
+    ids=["service-running-unsynced", "no-service", "container-unsynced", "container-synced"],
+)
+def test_without_chrony_p4_names_no_chrony(tmp_path: Path, case: dict[str, str]) -> None:
+    """Review M6: 24.04, which this warns about and goes on with, keeps time
+    with systemd-timesyncd, and has no chronyc. Whatever P4 prints there names
+    no chrony, and a FAILED block still ends at the line that reads the
+    terminal."""
+    box = Box(tmp_path)
+    box.os_release.write_text(NOBLE)
+    done = box.run(FAKE_NO_CHRONY="1", **case)
+    p4 = done.stdout[done.stdout.index("P4 — the clock") :]
+    p4 = p4[: p4.find("P5 — ")] if "P5 — " in p4 else p4
+    # The temporary directory is named after this test, which names chrony.
+    assert "chrony" not in (p4 + done.stderr).replace(str(tmp_path), "")
+    if done.returncode == 1:
+        report = _p4_report(done.stderr)
+        assert report[-1] == f"        sudo {box.script}"
+        assert all(line.startswith(("        # ", "        timedatectl ", "        sudo "))
+                   for line in report[1:]), report  # fmt: skip
+    else:
+        assert "P4: the clock is synchronised" in done.stdout
 
 
 def test_it_refuses_to_run_as_anyone_but_root(tmp_path: Path) -> None:

@@ -151,12 +151,30 @@ fi
 # systemd 259's timedated: NTP is "an NTP unit of ntp-units.d is running" (on 26.04,
 # chrony.service, its 50-chrony.list), and NTPSynchronized is the kernel's maximum
 # error under 16 s, which chrony sets once it is synchronised (measured 2026-11-28).
+# The kernel keeps a maxerror under 16 s for hours after its NTP service stops, so
+# P4 holds only with both, as the runbook's P4 does by hand.
 ntp_on() { [ "$(timedatectl show -p NTP --value 2>/dev/null || true)" = yes ]; }
 clock_synced() { [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" = yes ]; }
+# Except in a container, which keeps its host's clock, and where chrony.service does not
+# start (ConditionVirtualization=|!container): there a synchronised clock is all P4 can
+# ask for. systemd-detect-virt answers it as Ubuntu's chronyd-starter.sh asks it.
+if systemd-detect-virt --quiet --container 2>/dev/null; then container=yes; else container=no; fi
+# chrony is 26.04's NTP service; another release (24.04: systemd-timesyncd) gets no
+# chrony advice.
+if [ "$(systemctl show -p LoadState --value chrony.service 2>/dev/null || true)" = loaded ]; then
+  chrony=yes
+else
+  chrony=no
+fi
+container_note="P4: timedatectl reports no NTP service running here, and systemd-detect-virt says this is a container, whose clock is its host's"
+[ "$chrony" = no ] || container_note+=": chrony does not start in one (chrony.service, ConditionVirtualization=|!container)"
 
 say "P4 — the clock"
 if ntp_on && clock_synced; then
   skip "P4: NTP is on and the clock is synchronised"
+elif [ "$container" = yes ] && clock_synced; then
+  skip "P4: the clock is synchronised, and this is a container"
+  note "$container_note"
 else
   if ! ntp_on; then
     act "timedatectl set-ntp true"
@@ -166,21 +184,41 @@ else
     clock_synced && break
     sleep 5
   done
-  # Ubuntu's chrony sources all use NTS (/etc/chrony/sources.d/ubuntu-ntp-pools.sources),
-  # whose key exchange is TCP 4460: with it blocked, UDP 123 alone never synchronises.
-  clock_synced \
-    || die "the clock is not synchronised after 120 s: certificates, second-factor codes and the audit log depend on it" \
-           "timedatectl status" \
-           "chronyc -N sources" \
-           "# Ubuntu 26.04's NTP service is chrony, with NTS: the provider has to let this VPS out to TCP 4460 (NTS's key exchange) as well as UDP 123 (NTP). Every source marked ^? with Reach 0 above, or \"Could not connect to ...:4460\" in sudo journalctl -u chrony, means it does not; once it does:" \
-           "$rerun"
-  if ntp_on; then
+  why="certificates, second-factor codes and the audit log depend on it"
+  if ntp_on && clock_synced; then
     ok "P4: NTP is on and the clock is synchronised"
-  else
-    # A container: set-ntp exits 0, chrony.service is skipped
-    # (ConditionVirtualization=|!container), and the clock is the host kernel's.
+  elif [ "$container" = yes ] && clock_synced; then
     ok "P4: the clock is synchronised"
-    note "P4: timedatectl reports no NTP service running on this machine: chrony does not start in a container (chrony.service, ConditionVirtualization=|!container), whose clock is its host's"
+    note "$container_note"
+  elif ntp_on && [ "$chrony" = yes ]; then
+    # Ubuntu's chrony sources all use NTS (/etc/chrony/sources.d/ubuntu-ntp-pools.sources),
+    # whose key exchange is TCP 4460 (chrony's debian/NEWS, 4.5-3ubuntu4).
+    die "the clock is not synchronised after 120 s: $why" \
+        "timedatectl status" \
+        "chronyc -N sources" \
+        "# Ubuntu 26.04's NTP service is chrony, with NTS: the provider has to let this VPS out to TCP 4460 (NTS's key exchange) as well as UDP 123 (NTP). Every source marked ^? with Reach 0 above, or \"Could not connect to ...:4460\" in sudo journalctl -u chrony, means it does not; once it does:" \
+        "$rerun"
+  elif ntp_on; then
+    die "the clock is not synchronised after 120 s: $why" \
+        "timedatectl status" \
+        "# the NTP service is running and has not synchronised the clock: the provider has to let this VPS out to NTP (UDP 123); once it does:" \
+        "$rerun"
+  elif [ "$container" = yes ]; then
+    die "the clock is not synchronised after 120 s, and this is a container (systemd-detect-virt), whose clock is its host's: $why" \
+        "timedatectl status" \
+        "# nothing on this machine can synchronise it: whoever runs its host has to; once they have:" \
+        "$rerun"
+  elif [ "$chrony" = yes ]; then
+    die "no NTP service is running (timedatectl: NTP no, NTP service inactive), so nothing keeps this clock synchronised: $why" \
+        "timedatectl status" \
+        "systemctl status chrony --no-pager" \
+        "# timedatectl set-ntp true enables chrony, and chrony is not running: why is in its log, sudo journalctl -u chrony; once it runs:" \
+        "$rerun"
+  else
+    die "no NTP service is running (timedatectl: NTP no, NTP service inactive), so nothing keeps this clock synchronised: $why" \
+        "timedatectl status" \
+        "# timedatectl set-ntp true starts the first NTP service /usr/lib/systemd/ntp-units.d lists, and none is running; once one runs:" \
+        "$rerun"
   fi
 fi
 timedatectl status | grep -E 'System clock synchronized|NTP service'
